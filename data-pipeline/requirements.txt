@@ -1,0 +1,6 @@
+earthengine-api>=0.1.400
+numpy>=1.26
+pandas>=2.2
+
+# dev / test only
+pytest>=8.0
