@@ -1,0 +1,52 @@
+/* Design tokens — docs/FRONTEND_PLAN.md §4. Do not improvise colours:
+   the five ramp colours (+ deep/shelf base) mean chlorophyll concentration
+   and nothing else — never used decoratively (buttons, accents, non-data
+   chrome). */
+
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600&family=Inter:wght@400;500&family=IBM+Plex+Mono:wght@400&display=swap');
+
+:root {
+  /* ocean-colour ramp */
+  --deep: #0a1929; /* deep water — page background */
+  --shelf: #123a5a; /* shallow shelf — panels, cards */
+  --clear: #2e86ab; /* low chlorophyll — safe / normal */
+  --elevated: #48c9a9; /* elevated — watch tier one */
+  --bloom: #e8c547; /* bloom likely — watch tier two */
+  --severe: #d64545; /* severe bloom — warning */
+  --ink: #e8f1f8; /* primary text */
+  --ink-dim: #7a9ab5; /* secondary text, labels */
+
+  /* neutral, deliberately OUTSIDE the ramp — no_imagery / no_climatology /
+     stale / error states must never borrow a ramp colour, that would
+     imply a risk reading that doesn't exist */
+  --no-data: #3a4557;
+  --no-data-line: #5a6a80;
+
+  --font-display: 'Space Grotesk', system-ui, -apple-system, sans-serif;
+  --font-body: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+
+  --fs-12: 12px;
+  --fs-14: 14px;
+  --fs-16: 16px;
+  --fs-20: 20px;
+  --fs-28: 28px;
+  --fs-40: 40px;
+
+  --hairline: 1px solid rgba(122, 154, 181, 0.2);
+  --radius: 2px;
+
+  --focus-ring: 2px solid var(--elevated);
+
+  --motion-fast: 150ms ease-out;
+  --motion-panel: 200ms ease-out;
+
+  color-scheme: dark;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast: 0ms;
+    --motion-panel: 0ms;
+  }
+}

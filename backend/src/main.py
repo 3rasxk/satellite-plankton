@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from . import _detection as bridge
@@ -31,6 +32,22 @@ app = FastAPI(
         "`disclaimer` field -- see CLAUDE.md's truth boundary."
     ),
     version="0.1.0",
+)
+
+# Local dev only: the frontend (frontend-dashboard agent) runs on Vite's
+# dev server (default http://localhost:5173), a different origin than
+# this API (http://localhost:8000) -- without CORS the browser blocks
+# every request. Not a security-hardening decision (no auth/cookies on
+# this API to begin with, CLAUDE.md: no accounts), just what's needed for
+# the web dashboard to reach the API at all in local development.
+app.add_middleware(
+    CORSMiddleware,
+    # regex (not a fixed port list) because `vite --port 5173` falls back
+    # to the next free port whenever something else on the machine is
+    # already holding 5173.
+    allow_origin_regex=r"http://(localhost|127\.0\.0\.1):\d+",
+    allow_methods=["GET"],
+    allow_headers=["*"],
 )
 
 app.include_router(risk_map.router)
