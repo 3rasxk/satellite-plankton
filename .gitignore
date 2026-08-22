@@ -21,3 +21,8 @@ __pycache__/
 *.tif
 *.nc
 data/cache/
+
+# Local SQLite stand-in DB (backend-api agent; see backend/.env.example)
+*.db
+*.sqlite3
+backend/data/

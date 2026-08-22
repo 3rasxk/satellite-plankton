@@ -1,0 +1,269 @@
+"""
+Pydantic response models -- every model that reaches an HTTP response
+carries `disclaimer`, enforced by the schema (visible in /docs and
+openapi.json), not left to convention.
+
+Detection (`detect()`) and prediction (`risk_level()`) fields are kept in
+separate nested objects everywhere (`DetectionBlock` vs. the prediction-
+specific fields around it) -- mirrors detection/src/prediction.py's own
+separation (CLAUDE.md truth boundary / .claude/agents/backend-api.md
+"Non-negotiable rules": never merge them into one score).
+"""
+
+from __future__ import annotations
+
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+
+DISCLAIMER_TEXT = (
+    "Detection is at satellite-pixel resolution. Small or scattered blooms "
+    "may not be visible. Presence and absence are the reliable signal — "
+    "concentration estimates are approximate."
+)
+
+# `/validation` needs an additional, separate caveat -- calibration status
+# is not the same claim as the pixel-resolution disclaimer above, and
+# CLAUDE.md is explicit that the two must not be blurred together.
+CALIBRATION_CAVEAT_TEXT = (
+    "Escalation thresholds in config.yaml are literature/convention defaults, "
+    "not empirically calibrated against Thai events: 0 of the 14 documented "
+    "events in data/validation/events.csv currently have a coordinate precise "
+    "enough to match a satellite reading (all are named-place or "
+    "province-level locations; CLAUDE.md/docs/DETECTION_PLAN.md §3 forbid "
+    "inventing a coordinate for a place name). One regional-proxy attempt "
+    "(th_001) was tried at the same spatial scale the source describes and "
+    "returned no usable Sentinel-2 scene. Results below are reported "
+    "per-event, never as a percentage — n=14 cannot support one."
+)
+
+
+class DisclaimerMixin(BaseModel):
+    disclaimer: str = Field(
+        default=DISCLAIMER_TEXT,
+        description="Truth-boundary caveat. Present on every response — satellite-pixel "
+        "resolution, small/scattered blooms may be missed, presence/absence is the "
+        "reliable signal.",
+    )
+
+
+# --------------------------------------------------------------------------
+# /detect
+# --------------------------------------------------------------------------
+
+
+class DetectResponse(DisclaimerMixin):
+    """Thin wrapper over detect() -- high-confidence, standard remote
+    sensing. Never call this a 'prediction'; see /risk-map, /timeseries's
+    `level`/`confidence_label` fields for the separate, lower-confidence
+    rule-based layer."""
+
+    model_config = ConfigDict(json_schema_extra={"example": {
+        "lat": 13.45, "lng": 100.65, "date": "2024-03-15",
+        "status": "ok", "detected": False, "anomaly_z": -1.49,
+        "index_used": "ndci",
+        "index_values": {"ndci": 0.01, "2bda": 0.02, "3bda": 0.03, "b2_b3_ratio": 0.9},
+        "cloud_fraction": 0.05, "actual_date": "2024-03-14",
+        "disclaimer": DISCLAIMER_TEXT,
+    }})
+
+    lat: float
+    lng: float
+    date: str = Field(description="Date requested, YYYY-MM-DD.")
+
+    status: Literal["ok", "no_imagery", "no_water_pixels", "no_climatology"]
+    detected: bool = Field(
+        description="False whenever status != 'ok' — absence of data is never "
+        "reported as absence of a bloom."
+    )
+    anomaly_z: float | None
+    index_used: str
+    index_values: dict[str, float] | None
+    reason: str | None = Field(
+        default=None, description="Why status != 'ok', when applicable."
+    )
+
+    cloud_fraction: float | None = Field(
+        default=None, description="Sentinel-2 cloud fraction in the sample buffer, "
+        "when a satellite pull actually happened."
+    )
+    actual_date: str | None = Field(
+        default=None, description="Actual satellite scene date used, which may differ "
+        "from the requested `date` (nearest cloud-free image within the search window)."
+    )
+
+
+# --------------------------------------------------------------------------
+# /risk-map (GeoJSON FeatureCollection)
+# --------------------------------------------------------------------------
+
+
+class RiskMapProperties(DisclaimerMixin):
+    site_id: str
+    name: str
+
+    # -- prediction (risk_level(), rule-based, indicative) --
+    risk_level: Literal["normal", "elevated", "watch", "warning"]
+    triggered_rules: list[str]
+    confidence_label: str = Field(
+        description="Always attached per config.yaml's prediction_confidence_label — "
+        "this word never travels without its caveat."
+    )
+
+    # -- detection (detect(), high confidence) -- nested, never merged into risk_level --
+    status: Literal["ok", "no_imagery", "no_water_pixels", "no_climatology", "error", "no_data_yet"]
+    detected: bool | None
+    anomaly_z: float | None
+    index_used: str | None
+
+    cloud_fraction: float | None = None
+    actual_date: str | None = None
+
+    fetched_at: str | None = Field(
+        default=None, description="When this cached reading was computed (ISO 8601). "
+        "/risk-map serves the scheduler's cache, not a live GEE pull per request."
+    )
+    stale: bool = Field(
+        default=False,
+        description="True if the most recent scheduled refresh for this site failed — "
+        "this is carried-over data from an earlier successful run, not a fresh one.",
+    )
+    error: str | None = None
+
+
+class RiskMapFeature(BaseModel):
+    type: Literal["Feature"] = "Feature"
+    geometry: dict = Field(description="GeoJSON Point geometry: {type: 'Point', coordinates: [lng, lat]}")
+    properties: RiskMapProperties
+
+
+class RiskMapResponse(DisclaimerMixin):
+    type: Literal["FeatureCollection"] = "FeatureCollection"
+    features: list[RiskMapFeature]
+
+
+# --------------------------------------------------------------------------
+# /timeseries
+# --------------------------------------------------------------------------
+
+
+class TimeseriesPoint(BaseModel):
+    date: str
+    chlor_a: float = Field(description="MODIS-Aqua chlor_a reading for this date (mg/m^3).")
+    anomaly_z: float | None = Field(
+        description="z-score of chlor_a against this date's day-of-year climatology, "
+        "or null if the climatology window had no other observations (see `reason`)."
+    )
+    reason: str | None = Field(
+        default=None, description="Why anomaly_z is null, when applicable."
+    )
+    # MODIS chlor_a is a bulk multi-year archive series (get_modis_chlorophyll_history),
+    # not a per-date Sentinel-2 pull -- cloud_fraction/actual_date are Sentinel-2-specific
+    # concepts (see detect()'s use of get_sentinel2_bands) and genuinely don't apply to
+    # this series, so they're explicitly null rather than omitted or faked.
+    cloud_fraction: None = Field(
+        default=None, description="Not applicable — MODIS chlor_a series, not a "
+        "Sentinel-2 pull. Always null here; see /detect for a Sentinel-2 reading."
+    )
+    actual_date: None = Field(
+        default=None, description="Not applicable — see `cloud_fraction`."
+    )
+
+
+class TimeseriesResponse(DisclaimerMixin):
+    lat: float
+    lng: float
+    source: str = "MODIS-Aqua chlor_a, 2002-present (data-pipeline get_modis_chlorophyll_history)"
+    points: list[TimeseriesPoint]
+
+
+# --------------------------------------------------------------------------
+# /summary
+# --------------------------------------------------------------------------
+
+
+class RiskLevelCounts(BaseModel):
+    normal: int = 0
+    elevated: int = 0
+    watch: int = 0
+    warning: int = 0
+    no_data: int = Field(default=0, description="Sites with no successful cache entry yet.")
+
+
+class MostRecentDetection(BaseModel):
+    site_id: str
+    name: str
+    anomaly_z: float | None
+    detected: bool
+    actual_date: str | None
+    fetched_at: str | None
+
+
+class SummaryResponse(DisclaimerMixin):
+    total_sites: int
+    risk_level_counts: RiskLevelCounts
+    most_recent_detected_signal: MostRecentDetection | None = Field(
+        description="The most recent site with detected=true in the cache, or null if "
+        "none currently are."
+    )
+    stale_site_count: int = Field(
+        description="Sites whose cached reading is marked stale (last scheduler refresh "
+        "failed for them)."
+    )
+    oldest_fetched_at: str | None
+    newest_fetched_at: str | None
+    prediction_confidence_label: str
+
+
+# --------------------------------------------------------------------------
+# /validation
+# --------------------------------------------------------------------------
+
+
+class ValidationEventRow(BaseModel):
+    """One row of the 14-event validation table. Never a percentage
+    anywhere in this model or its aggregation — reported per-event."""
+
+    event_id: str
+    date_display: str
+    location_name: str
+    location_precision: str
+    species: str
+    cell_count_raw: str | None
+    cell_count_representative: float | None
+    matchable: bool = Field(description="True only if events.csv itself carries a lat/lng.")
+    match_method: str | None
+    match_reason: str | None
+    low_evidentiary_weight: bool = Field(
+        description="th_012/th_013/th_014 — pre-monitoring-era, no cell count in any "
+        "source; shown for completeness, never averaged into a headline number with "
+        "the cell-count-bearing events."
+    )
+    index_used: str
+    anomaly_z: float | None = Field(
+        description="Real satellite anomaly_z if a match was possible, else null."
+    )
+    flagged: bool | None = Field(
+        description="Whether the (uncalibrated) threshold would have flagged this event, "
+        "only when a real anomaly_z exists; else null."
+    )
+    notes: str
+
+
+class LeaveOneOutRow(BaseModel):
+    iteration_label: str
+    held_out_event_ids: list[str]
+    caught: bool | None = Field(description="null means the iteration could not run "
+        "(no real satellite reading for any held-out member).")
+    reason: str
+
+
+class ValidationResponse(DisclaimerMixin):
+    calibration_status: Literal["uncalibrated"] = "uncalibrated"
+    calibration_caveat: str = Field(default=CALIBRATION_CAVEAT_TEXT)
+    n_events: int
+    n_matchable: int = Field(description="Events with a usable lat/lng in events.csv.")
+    n_with_real_satellite_reading: int
+    events: list[ValidationEventRow]
+    leave_one_out: list[LeaveOneOutRow]
+    computed_at: str = Field(description="When this (cached) calibration attempt was computed.")

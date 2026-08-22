@@ -5,3 +5,21 @@ sqlalchemy>=2.0
 supabase>=2.9
 apscheduler>=3.10
 python-dotenv>=1.0
+
+# Transitive runtime deps of the detection/data-pipeline import chain
+# (see src/_detection.py) -- backend/ has its own venv (CLAUDE.md §5), so
+# it needs these installed directly, the same way detection/venv needed
+# earthengine-api even though detection/requirements.txt doesn't list it
+# (data-pipeline/src/auth.py, modis.py, sentinel2.py, rainfall.py all
+# `import ee` directly; detection/src/prediction.py, thresholds.py,
+# climatology.py `import yaml`). Kept in sync with
+# data-pipeline/requirements.txt and detection/requirements.txt by hand
+# since the three projects intentionally don't share one requirements
+# file.
+earthengine-api>=0.1.400
+numpy>=1.26
+PyYAML>=6.0
+
+# dev / test only
+pytest>=8.0
+httpx>=0.27
