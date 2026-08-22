@@ -2,3 +2,6 @@ numpy>=1.26
 pandas>=2.2
 PyYAML>=6.0
 matplotlib>=3.8
+
+# dev / test only
+pytest>=8.0

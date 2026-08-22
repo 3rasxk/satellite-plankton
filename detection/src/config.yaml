@@ -1,0 +1,154 @@
+# detection/src/config.yaml
+#
+# Every threshold and rule the detection/prediction engine uses, in one
+# human-readable place (CLAUDE.md §5, .claude/agents/bloom-detection.md
+# "Non-negotiable rules": "Every threshold and rule lives in config.yaml").
+# src/thresholds.py and src/prediction.py read this file; nothing tunable
+# is hard-coded in either module.
+#
+# ---------------------------------------------------------------------
+# CALIBRATION STATUS -- read this before trusting any number below.
+# ---------------------------------------------------------------------
+# docs/DETECTION_PLAN.md §4 calls for thresholds calibrated by sweeping
+# against the 14 documented Thai events (leave-one-out). That could not
+# be done: every one of the 14 rows in data/validation/events.csv has a
+# blank lat/lng (location_precision = named_site or province_level), and
+# per CLAUDE.md/DETECTION_PLAN.md, coordinates are never invented for a
+# place name. One regional-proxy attempt was made for th_001 (the single
+# row whose location is described at the scale of "upper Gulf of
+# Thailand" rather than a named beach) using a generic open-water point
+# inside the study area -- it hit a genuine ~2-month MODIS chlor_a data
+# gap and zero Sentinel-2 scenes for that date window (see
+# detection/reports/event_table.md and climatology.py's docstring). So
+# the sweep in thresholds.py ran with ZERO real matched (index_value,
+# flagged_by_source) pairs from the validation set.
+#
+# The z-score cutoffs below are therefore LITERATURE/CONVENTION DEFAULTS
+# (the same illustrative shape docs/DETECTION_PLAN.md §3 and
+# .claude/agents/bloom-detection.md §5 give as an example), not values
+# empirically calibrated against the 14 events. This is a limitation to
+# state plainly, not to paper over -- see detection/reports/event_table.md
+# and index_comparison.md.
+
+indices:
+  primary: ndci            # docs/DETECTION_PLAN.md §2: NDCI is the primary chlorophyll proxy
+  compare: [ndci, 2bda, 3bda]   # all three swept/compared in reports/index_comparison.md
+  secondary_discrimination: b2_b3_ratio  # Noctiluca-only, lower confidence -- see indices.py docstring
+
+climatology:
+  window_days: 7            # +/- days around target day-of-year pooled across all MODIS archive years
+  min_reliable_n: 5         # below this many pooled observations, climatology.py flags reliable=false
+
+# Anomaly z-score cutoffs per compared index. UNCALIBRATED (see status
+# note above) -- carried over from the illustrative shape in
+# docs/DETECTION_PLAN.md §3 / .claude/agents/bloom-detection.md §5.
+# Sensitivity is biased up-front (lower cutoff, i.e. more sensitive) per
+# the stated early-warning principle "a missed bloom costs more than a
+# false alarm" (docs/DETECTION_PLAN.md §4) -- since there was no real
+# false-alarm-rate data to trade this off against, erring toward
+# sensitivity was the only defensible default.
+thresholds:
+  ndci:
+    elevated_z: 1.5
+    warning_z: 2.0
+  2bda:
+    elevated_z: 1.5
+    warning_z: 2.0
+  3bda:
+    elevated_z: 1.5
+    warning_z: 2.0
+    note: >
+      Carried the same default cutoffs as ndci/2bda pending real
+      calibration data -- docs/DETECTION_PLAN.md §2 expects 3BDA to
+      perform differently (better) near river mouths specifically
+      because it corrects for sediment backscatter, so this index most
+      needs recalibration once real event coordinates exist.
+
+# cell_count handling (data/validation/CALIBRATION_NOTES.md §5): stored in
+# events.csv as a blank, a single number, or a literal range string like
+# "684-8700". thresholds.py's parser makes this explicit choice rather
+# than silently taking one number out of a range string:
+cell_count_range_policy: midpoint
+  # midpoint of [lower, upper] used as the single representative value
+  # for any severity-ordering display in event_table.md; lower and upper
+  # bounds are both still shown verbatim in the table itself so a reader
+  # is never shown a single number the source did not report. "midpoint"
+  # was chosen over "lower" or "upper" because neither bound alone has
+  # any documented reason to be closer to the true peak concentration --
+  # a bloom sampled at multiple sites/times naturally spans a range, and
+  # the midpoint is the least-biased single-number summary of a range
+  # with no other information to weight it. Never used as an input to
+  # any threshold decision -- cell_count is reported alongside the
+  # satellite result for context, not fed into the detection pipeline
+  # (the pipeline runs on satellite reflectance only, never on the
+  # ground-truth label it is being validated against, per
+  # docs/DETECTION_PLAN.md §5 "never validate against the same family").
+
+# Same-episode cluster hold-out grouping for leave-one-out calibration
+# (data/validation/CALIBRATION_NOTES.md §1). Each cluster's rows are
+# held out together as one unit, never split, turning 14 events into
+# 12 leave-one-out iterations (10 singles + 2 clusters).
+leave_one_out_clusters:
+  chonburi_aug2019:
+    members: [th_005, th_006, th_007]
+    reason: >
+      Same physical bloom, 19-29 Aug 2019, multiple Chonburi sites
+      (Wonnapha Beach/Laem Thaen, Koh Loy, Tham Phang Beach), all
+      noctiluca_scintillans. th_005's date range contains th_006/th_007's
+      exact date (27 Aug).
+  chonburi_feb2020:
+    members: [th_009, th_010]
+    reason: >
+      Same physical bloom, 11-20 Feb 2020, Phli Pier Bridge and Ang Sila
+      (both Chonburi), both karenia_sp, identical date range.
+
+# Events given lower evidentiary weight when choosing an operating point
+# (data/validation/CALIBRATION_NOTES.md §3) -- pre-monitoring-era
+# (1981-1983), no cell count in any source, documented only as
+# "historical confirmation," not quantitative labels. Still run through
+# the pipeline and shown in event_table.md, per the note there; a miss on
+# one of these must not be reported with the same weight as a miss on a
+# cell-count-bearing event.
+historical_low_weight_events: [th_012, th_013, th_014]
+
+# ---------------------------------------------------------------------
+# Prediction layer -- rule-based risk escalation (docs/DETECTION_PLAN.md
+# §3). Every rule below is readable as a sentence; src/prediction.py
+# evaluates each rule's condition list and reports which fired in
+# `triggered_rules`, never a single opaque score.
+# ---------------------------------------------------------------------
+escalation_rules:
+  elevated:
+    description: "Chlorophyll anomaly is at least 1.5 standard deviations above the seasonal norm."
+    conditions:
+      - "anomaly_z >= 1.5"
+  watch:
+    description: "Anomaly is elevated AND the 14-day trend is rising."
+    conditions:
+      - "anomaly_z >= 1.5"
+      - "trend_14d_rising == true"
+  warning:
+    description: "Anomaly has reached 2.0 std above normal AND the 14-day trend is rising AND sea surface temperature is above its seasonal normal (warm water favours dinoflagellate growth, docs/DETECTION_PLAN.md §3)."
+    conditions:
+      - "anomaly_z >= 2.0"
+      - "trend_14d_rising == true"
+      - "sst_anomaly > 0"
+
+# Trend/acceleration computation parameters (src/prediction.py).
+trend:
+  short_window_days: 7
+  long_window_days: 14
+  # A window is considered "rising" if its linear slope (chlor_a per day)
+  # is positive -- least-squares slope over whatever real MODIS
+  # observations fall in the window (which may be fewer than the window
+  # width in days, given real archive gaps; see climatology.py).
+  rising_slope_min: 0.0
+
+# Prediction confidence statement -- read literally by prediction.py's
+# docstring and never overridden per-call. Published ML forecasting has
+# reached ~96% accuracy at 8-day lead time (docs/DETECTION_PLAN.md §3);
+# this rule-based layer is not claimed to be comparable, and with only 14
+# validation events (0 of which could be matched to real satellite data,
+# see status note above), no lead-time accuracy figure is computed or
+# reported anywhere in this codebase.
+prediction_confidence_label: "indicative, rule-based -- not a validated forecast"
