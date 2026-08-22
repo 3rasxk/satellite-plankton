@@ -35,7 +35,16 @@ COLLECTION_ID = "UCSB-CHG/CHIRPS/DAILY"
 PRECIP_BAND = "precipitation"
 DEFAULT_SCALE_M = 5566  # ~0.05 degree CHIRPS grid
 DEFAULT_LOOKBACK_DAYS = 7
-DEFAULT_BUFFER_M = 5000
+# Must comfortably exceed DEFAULT_SCALE_M (CHIRPS's own native pixel size)
+# -- a buffer smaller than the grid it's sampling can miss every pixel
+# depending on where the point falls relative to the CHIRPS grid, which
+# silently returns recent_rainfall_mm=None instead of a real value.
+# A buffer just above DEFAULT_SCALE_M (e.g. 6000m) is NOT reliably enough
+# in practice -- live-tested against 5 points across the upper Gulf,
+# reduceRegion returned None at 6000m and even 10000m for some points
+# depending on grid alignment; 12000m (~2.15x DEFAULT_SCALE_M) was the
+# smallest buffer that returned a real value at every point tested.
+DEFAULT_BUFFER_M = 12000
 
 # Approximate estuary coordinates (WGS84) for the four river mouths named
 # in docs/DETECTION_PLAN.md §3 as the upper Gulf's main nutrient sources.
@@ -113,9 +122,16 @@ def get_rainfall_proxy(
         buffer_m: radius (metres) of the sample buffer around the point.
 
     Returns:
-        {'recent_rainfall_mm': float, 'lookback_days': int,
+        {'recent_rainfall_mm': float | None, 'lookback_days': int,
          'window_start': str, 'window_end': str,
          'nearest_river_mouth': str, 'river_mouth_distance_km': float}
+
+        `recent_rainfall_mm` can legitimately be `None` -- not just from a
+        too-small buffer (fixed by `DEFAULT_BUFFER_M` exceeding CHIRPS's
+        own ~5.5 km grid), but also from genuine no-data cases such as a
+        query window CHIRPS hasn't yet published or that predates its
+        coverage. Callers must handle `None` explicitly rather than assume
+        a numeric value.
 
     Raises:
         GEEAuthError: GEE not authenticated.
