@@ -23,6 +23,16 @@ functions (`compute_cloud_fraction`, `water_pixel_mask`,
 arrays, so they are unit-testable against synthetic pixel data without a
 live Earth Engine session. Only `get_sentinel2_bands` itself talks to GEE.
 
+The candidate search/sort/cloud-check loop lives in one place,
+`_resolve_sentinel2_scene`, which `get_sentinel2_bands` wraps. This is
+also the function `data-pipeline/src/imagery.py` calls to render the
+true-color and NDCI-heatmap panel thumbnails from — reusing this exact
+loop (rather than a second, independently written one) is what
+guarantees an image and the numeric band reading given for the same
+lat/lng/date/window/buffer/cloud-threshold always describe the same
+resolved Sentinel-2 scene, never two different candidates. See
+`_resolve_sentinel2_scene`'s docstring for the determinism argument.
+
 Known GEE gotcha this module defends against: `reduceRegion` with
 `ee.Reducer.toList()` reduces each band of a multi-band image
 independently, dropping masked pixels per band rather than keeping
@@ -196,7 +206,7 @@ def build_water_cloud_mask(
 # --------------------------------------------------------------------------
 
 
-def get_sentinel2_bands(
+def _resolve_sentinel2_scene(
     lat: float,
     lng: float,
     date: str,
@@ -204,28 +214,34 @@ def get_sentinel2_bands(
     buffer_m: int = DEFAULT_BUFFER_M,
     max_cloud_fraction: float = DEFAULT_MAX_CLOUD_FRACTION,
 ) -> dict:
-    """Sentinel-2 surface-reflectance bands at a point, cloud- and
-    land-masked, nearest usable date to the one requested.
+    """Shared candidate-resolution logic: search, sort-by-proximity-to-
+    `date`, and cloud/water-check Sentinel-2 candidates until one usable
+    scene is found.
 
-    Args:
-        lat, lng: WGS84 coordinates (upper Gulf of Thailand study area).
-        date: requested date, "YYYY-MM-DD". The nearest cloud-free enough
-            image within `search_window_days` on either side is used if
-            the exact date is unusable.
-        search_window_days: how far before/after `date` to search.
-        buffer_m: radius (metres) of the sample buffer around the point.
-            A small buffer (not a single pixel) avoids one noisy pixel
-            dominating the reading.
-        max_cloud_fraction: reject candidate images whose SCL cloud
-            fraction in the buffer exceeds this.
+    This is the single place that loop lives. `get_sentinel2_bands`
+    (numeric path) and `data-pipeline/src/imagery.py` (image-rendering
+    path, added for the true-color/NDCI-heatmap panel thumbnails) both
+    call this function rather than each running their own copy of the
+    search/sort/cloud-check loop — a second, independently written loop
+    could drift (different default threshold, different sort, a future
+    bugfix applied to only one copy) and end up picking a different
+    image than the one the numeric bands came from, which is exactly the
+    inconsistency this project cannot tolerate: a caller must never be
+    shown a picture from a different date than the numbers next to it.
+    Given identical arguments, the underlying GEE query here is
+    deterministic (same collection filter + sort + candidate loop), so
+    both callers resolving with the same lat/lng/date/window/buffer/
+    cloud-threshold land on the same scene by construction, not by luck.
 
     Returns:
-        {B2, B3, B4, B5, B6, cloud_fraction, actual_date}
-        Band values are water-pixel-only means of surface reflectance
-        (as stored by S2_SR_HARMONIZED, i.e. scaled reflectance, not yet
-        divided by 10000 — callers computing indices should apply that
-        scale factor consistently across all bands, which cancels out in
-        ratio-based indices like NDCI/2BDA/3BDA).
+        {
+            "image": ee.Image,        # the resolved scene, full band set
+            "image_id": str,          # "system:index" of the resolved image
+            "region": ee.Geometry,    # the sample buffer used for masking
+            "band_means": {B2, B3, B4, B5, B6},  # water/cloud-masked means
+            "cloud_fraction": float,
+            "actual_date": str,       # "YYYY-MM-DD" of the resolved image
+        }
 
     Raises:
         GEEAuthError: GEE not authenticated.
@@ -321,7 +337,10 @@ def get_sentinel2_bands(
             "%Y-%m-%d"
         )
         return {
-            **band_means,
+            "image": image,
+            "image_id": image_id,
+            "region": region,
+            "band_means": band_means,
             "cloud_fraction": cloud_fraction,
             "actual_date": actual_date,
         }
@@ -331,3 +350,51 @@ def get_sentinel2_bands(
         f"No usable Sentinel-2 image for ({lat}, {lng}) within "
         f"{search_window_days} days of {date}."
     )
+
+
+def get_sentinel2_bands(
+    lat: float,
+    lng: float,
+    date: str,
+    search_window_days: int = DEFAULT_SEARCH_WINDOW_DAYS,
+    buffer_m: int = DEFAULT_BUFFER_M,
+    max_cloud_fraction: float = DEFAULT_MAX_CLOUD_FRACTION,
+) -> dict:
+    """Sentinel-2 surface-reflectance bands at a point, cloud- and
+    land-masked, nearest usable date to the one requested.
+
+    Args:
+        lat, lng: WGS84 coordinates (upper Gulf of Thailand study area).
+        date: requested date, "YYYY-MM-DD". The nearest cloud-free enough
+            image within `search_window_days` on either side is used if
+            the exact date is unusable.
+        search_window_days: how far before/after `date` to search.
+        buffer_m: radius (metres) of the sample buffer around the point.
+            A small buffer (not a single pixel) avoids one noisy pixel
+            dominating the reading.
+        max_cloud_fraction: reject candidate images whose SCL cloud
+            fraction in the buffer exceeds this.
+
+    Returns:
+        {B2, B3, B4, B5, B6, cloud_fraction, actual_date}
+        Band values are water-pixel-only means of surface reflectance
+        (as stored by S2_SR_HARMONIZED, i.e. scaled reflectance, not yet
+        divided by 10000 — callers computing indices should apply that
+        scale factor consistently across all bands, which cancels out in
+        ratio-based indices like NDCI/2BDA/3BDA).
+
+    Raises:
+        GEEAuthError: GEE not authenticated.
+        NoCloudFreeImageryError: no image in the window met the cloud
+            threshold.
+        NoWaterPixelsError: the buffer is entirely land per the JRC GSW
+            mask (or no usable image was found; see below).
+    """
+    resolved = _resolve_sentinel2_scene(
+        lat, lng, date, search_window_days, buffer_m, max_cloud_fraction
+    )
+    return {
+        **resolved["band_means"],
+        "cloud_fraction": resolved["cloud_fraction"],
+        "actual_date": resolved["actual_date"],
+    }
