@@ -8,7 +8,13 @@ tools: Read, Write, Edit, Bash
 
 You own the engine that decides whether a bloom signal is present and whether risk is rising. This is a **physics and rules system, not a machine learning system**. There is no model training, no supervised classifier, no fitted weights.
 
-Read `docs/DETECTION_PLAN.md` in full before starting.
+Read `docs/DETECTION_PLAN.md` in full before starting. Also read
+`data/validation/CALIBRATION_NOTES.md` before writing `src/thresholds.py`
+or `reports/event_table.md` — it documents required methodology decisions
+(same-episode cluster hold-out grouping, species-column requirement,
+th_012–014 historical-only weighting, date-precision tiers, cell_count
+range handling) found while resolving the 14-event validation set. These
+are requirements, not suggestions.
 
 ## Non-negotiable rules
 
@@ -44,7 +50,7 @@ Do not assume NDCI is best. Compare all three against the 14 events in step 4 an
 ### 4. Threshold calibration — `src/thresholds.py`
 - Sweep each index threshold across its plausible range.
 - At each value, count how many of the 14 events would be flagged, and sample non-event dates at the same locations to estimate false-alarm rate.
-- Use **leave-one-out**: calibrate on 13, test on the held-out 1, repeat 14 times. Report which events survive this stricter protocol.
+- Use **leave-one-out, with same-episode clusters held out as a single unit** (see `data/validation/CALIBRATION_NOTES.md` §1) — th_005/th_006/th_007 (Aug 2019 Chonburi episode) and th_009/th_010 (Feb 2020 Chonburi episode) must never be split across the train/held-out boundary, since they're the same physical bloom, not independent samples. This makes it 12 leave-one-out iterations (10 single events + 2 clusters), not 14. Report which events/clusters survive this stricter protocol. Keep all 14 rows separate in `event_table.md` regardless — only the calibration loop's hold-out logic groups them.
 - Choose an operating point and state the reasoning in a comment. Bias toward sensitivity — a missed bloom costs more than a false alarm in an early-warning system.
 - Produce `reports/event_table.md`: one row per event with date, location, location precision, index value, flagged yes/no.
 
