@@ -8,27 +8,61 @@
 #
 # ---------------------------------------------------------------------
 # CALIBRATION STATUS -- read this before trusting any number below.
+# Updated 2026-08-22 -- re-run after 7 of the 14 events gained real
+# coordinates (data/validation/events.csv commit d9811d7). See
+# detection/reports/event_table.md's "newly-coordinate events" section
+# for the full per-event detail behind the summary below.
 # ---------------------------------------------------------------------
 # docs/DETECTION_PLAN.md §4 calls for thresholds calibrated by sweeping
-# against the 14 documented Thai events (leave-one-out). That could not
-# be done: every one of the 14 rows in data/validation/events.csv has a
-# blank lat/lng (location_precision = named_site or province_level), and
-# per CLAUDE.md/DETECTION_PLAN.md, coordinates are never invented for a
-# place name. One regional-proxy attempt was made for th_001 (the single
-# row whose location is described at the scale of "upper Gulf of
-# Thailand" rather than a named beach) using a generic open-water point
-# inside the study area -- it hit a genuine ~2-month MODIS chlor_a data
-# gap and zero Sentinel-2 scenes for that date window (see
-# detection/reports/event_table.md and climatology.py's docstring). So
-# the sweep in thresholds.py ran with ZERO real matched (index_value,
-# flagged_by_source) pairs from the validation set.
+# against the 14 documented Thai events (leave-one-out). This STILL could
+# not be done, but for a different, more specific reason than before.
 #
-# The z-score cutoffs below are therefore LITERATURE/CONVENTION DEFAULTS
-# (the same illustrative shape docs/DETECTION_PLAN.md §3 and
+# Before 2026-08-22: every one of the 14 rows had a blank lat/lng, so 0 of
+# 14 events were even matchable to a satellite pixel.
+#
+# As of 2026-08-22: 7 of the 14 rows (th_003, th_004, th_006, th_008,
+# th_010, th_012, th_014) have a real, human-confirmed coordinate and were
+# each genuinely queried against live Sentinel-2 + MODIS via
+# `thresholds.attempt_satellite_reading` (one generic function, called
+# identically for all 7 -- no event's search window/buffer was hand-tuned
+# to force a match). ALL 7 STILL FAILED TO PRODUCE A USABLE READING, each
+# for its own real, individually verified reason:
+#   - th_003 (2009), th_008 (2010), th_012 (1981), th_014 (1983): predate
+#     Sentinel-2's 2015-06-23 launch -- structurally no scene exists.
+#   - th_004 (2016-01, Cha-am Coast): zero Sentinel-2 scenes returned for
+#     the entire recorded month -- an early-era tiling/coverage gap,
+#     confirmed by a direct Earth Engine collection query.
+#   - th_006 (2019-08-27, Koh Loy): 20 real Sentinel-2 candidates exist in
+#     the search window (confirmed by direct query) but every one is
+#     cloud-rejected -- genuine Aug-2019 monsoon cloud cover.
+#   - th_010 (2020-02-11..20, Ang Sila): Sentinel-2 imagery passes the
+#     cloud check but the sample buffer fails the JRC Global Surface
+#     Water land/water mask at every tested radius (30-250 m) -- a real
+#     near-shore/pier site characteristic, not a fluke; the coordinate is
+#     not moved to force a fit (CLAUDE.md forbids inventing/adjusting a
+#     coordinate to make the pipeline succeed).
+# th_001's regional-proxy attempt (still no coordinate of its own) is
+# unchanged: no usable Sentinel-2 scene, a genuine ~2-month MODIS gap.
+#
+# Net: the sweep/leave-one-out in thresholds.py ran again with ZERO real
+# matched (index_value, flagged_by_source) pairs -- same empty result as
+# before, but now for seven distinct, verified satellite-data-
+# availability reasons instead of "no coordinate at all." This is real,
+# new information about where this pipeline can and cannot currently
+# operate (pre-2015 dates; this specific river-mouth tiling gap; this
+# specific near-shore mask limitation) -- not a repeat of the prior
+# finding.
+#
+# Because there is still no matched subset to calibrate against, the
+# z-score cutoffs below remain LITERATURE/CONVENTION DEFAULTS (the same
+# illustrative shape docs/DETECTION_PLAN.md §3 and
 # .claude/agents/bloom-detection.md §5 give as an example), not values
-# empirically calibrated against the 14 events. This is a limitation to
-# state plainly, not to paper over -- see detection/reports/event_table.md
-# and index_comparison.md.
+# empirically calibrated against the 14 events. A `calibrated_*` sibling
+# key is included per threshold, explicitly `null`, so the shape is ready
+# for a real value the moment any event does produce a matched pair --
+# but no number is forced out of insufficient data now. This is a
+# limitation to state plainly, not to paper over -- see
+# detection/reports/event_table.md and index_comparison.md.
 
 indices:
   primary: ndci            # docs/DETECTION_PLAN.md §2: NDCI is the primary chlorophyll proxy
@@ -47,22 +81,58 @@ climatology:
 # false alarm" (docs/DETECTION_PLAN.md §4) -- since there was no real
 # false-alarm-rate data to trade this off against, erring toward
 # sensitivity was the only defensible default.
+#
+# Shape note (added 2026-08-22, re-run after 7 events gained real
+# coordinates -- see CALIBRATION STATUS above): `elevated_z`/`warning_z`
+# remain plain scalar floats -- this is the field prediction.py's
+# detect()/risk_level() and thresholds.py's leave_one_out() read at
+# runtime (`config["thresholds"][index]["elevated_z"]`), unchanged, so
+# nothing downstream (backend/frontend) needs to know about the new
+# fields below. `literature_default_*` records the same convention value
+# the operating field currently equals, named explicitly so it stays
+# recoverable even after a future real calibration overwrites
+# `elevated_z`/`warning_z`. `calibrated_*` is the value this run's
+# leave-one-out calibration would have produced -- explicitly `null`
+# here because the matched subset is still empty (0 of 14 events; see
+# CALIBRATION STATUS above), not because the field was forgotten. When a
+# future run does produce a real matched subset, the intended convention
+# is: `calibrated_*` gets the real number, `elevated_z`/`warning_z` (the
+# operating value) is updated to match it, and `literature_default_*` is
+# left untouched as the permanent historical reference -- never
+# overwritten, never deleted.
 thresholds:
   ndci:
     elevated_z: 1.5
     warning_z: 2.0
+    literature_default_elevated_z: 1.5
+    literature_default_warning_z: 2.0
+    calibrated_elevated_z: null   # no matched subset this run -- see CALIBRATION STATUS above
+    calibrated_warning_z: null
   2bda:
     elevated_z: 1.5
     warning_z: 2.0
+    literature_default_elevated_z: 1.5
+    literature_default_warning_z: 2.0
+    calibrated_elevated_z: null
+    calibrated_warning_z: null
   3bda:
     elevated_z: 1.5
     warning_z: 2.0
+    literature_default_elevated_z: 1.5
+    literature_default_warning_z: 2.0
+    calibrated_elevated_z: null
+    calibrated_warning_z: null
     note: >
       Carried the same default cutoffs as ndci/2bda pending real
       calibration data -- docs/DETECTION_PLAN.md §2 expects 3BDA to
       perform differently (better) near river mouths specifically
       because it corrects for sediment backscatter, so this index most
-      needs recalibration once real event coordinates exist.
+      needs recalibration once real event coordinates exist. Of the 7
+      newly-coordinate events, th_003/th_008/th_012 ARE river-mouth
+      events (Tha Chin) -- exactly the case 3BDA is meant for -- but all
+      three predate Sentinel-2 or hit a MODIS archive gap this run (see
+      CALIBRATION STATUS above), so this recalibration still could not
+      be attempted with real data.
 
 # cell_count handling (data/validation/CALIBRATION_NOTES.md §5): stored in
 # events.csv as a blank, a single number, or a literal range string like

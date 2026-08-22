@@ -54,6 +54,31 @@ def format_cell_count(cc: dict) -> str:
     return f"{cc['raw']} (midpoint {cc['representative']:,.0f})"
 
 
+def format_satellite_status(row: dict) -> str:
+    """One-cell honest summary of the real satellite-attempt outcome for
+    a matchable row -- distinct real reasons (pre-Sentinel-2-era, cloud
+    rejection, no-scenes tiling gap, land/water mask) must stay
+    distinguishable, not collapsed into one generic 'no data'."""
+    if not row["matchable"]:
+        return "n/a (no coordinate)"
+    s2 = row["sentinel2_status"]
+    clim = row["climatology_status"]
+    if s2 == "ok" and clim == "ok":
+        return "ok"
+    parts = []
+    if s2 == "no_imagery":
+        parts.append(f"S2: no cloud-free scene ({row['sentinel2_error']})")
+    elif s2 == "no_water_pixels":
+        parts.append(f"S2: land/water mask rejected buffer ({row['sentinel2_error']})")
+    elif s2 == "ok":
+        parts.append("S2: ok")
+    if clim == "no_data":
+        parts.append("MODIS climatology: archive gap at this location/window")
+    elif clim == "ok":
+        parts.append("MODIS climatology: ok")
+    return "; ".join(parts) if parts else "n/a"
+
+
 def write_event_table(result: dict) -> None:
     lines = [
         "# Event table -- all 14 documented Thai events",
@@ -64,16 +89,21 @@ def write_event_table(result: dict) -> None:
         "decisions encoded in every column below.",
         "",
         f"**Headline result: {result['n_matchable']} of {result['n_events']} events had "
-        f"lat/lng in events.csv. {result['n_with_real_reading']} of {result['n_events']} "
-        "events produced a real satellite reading in this run** (th_001, via a "
-        "regional-proxy attempt -- see the note under the table; even that attempt "
-        "did not yield a usable Sentinel-2 image, and the reported reading below "
-        "for th_001 is `not applicable`).",
+        f"lat/lng in events.csv (7, added 2026-08-22 -- see "
+        "`data/validation/events.csv` commit d9811d7). "
+        f"{result['n_with_real_reading']} of {result['n_events']} events produced a real "
+        "matched (index_value, z-score) satellite reading in this run.** Zero is not "
+        "the same finding as the prior phase's zero: every one of the 7 newly-coordinate "
+        "events was actually queried against live Sentinel-2/MODIS via Google Earth "
+        "Engine, and each has its own real, distinct reason for not producing a usable "
+        "reading -- see the `satellite status` column and the detail section below the "
+        "table. th_001 (via its separate regional-proxy attempt, no coordinate of its "
+        "own) also produced no usable reading, unchanged from the prior phase.",
         "",
         "| event_id | date | date precision | location | location_precision | species | "
-        "cell_count | matchable | index (primary=ndci) | anomaly_z | flagged | "
-        "low evidentiary weight | notes |",
-        "|---|---|---|---|---|---|---|---|---|---|---|---|---|",
+        "cell_count | matchable | satellite status | index (primary=ndci) | anomaly_z | "
+        "flagged | low evidentiary weight | notes |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for row in result["rows"]:
         idx = row["index_values"]
@@ -85,7 +115,7 @@ def write_event_table(result: dict) -> None:
         )
         lines.append(
             "| {eid} | {date} | {prec} | {loc} | {locprec} | {species} | {cc} | "
-            "{matchable} | {ndci} | {z} | {flagged} | {loweight} | {notes} |".format(
+            "{matchable} | {sat} | {ndci} | {z} | {flagged} | {loweight} | {notes} |".format(
                 eid=row["event_id"],
                 date=row["date_display"],
                 prec=row["date_precision_tier"],
@@ -94,6 +124,7 @@ def write_event_table(result: dict) -> None:
                 species=row["species"],
                 cc=format_cell_count(row["cell_count"]),
                 matchable="yes" if row["matchable"] else "no",
+                sat=format_satellite_status(row),
                 ndci=ndci_val,
                 z=z_display,
                 flagged=flagged_display,
@@ -101,6 +132,79 @@ def write_event_table(result: dict) -> None:
                 notes=row["match_reason"].replace("\n", " "),
             )
         )
+
+    lines += [
+        "",
+        "## The 7 newly-coordinate events -- real satellite-attempt detail",
+        "",
+        "Each row below was a real, live call to `get_sentinel2_bands` (Sentinel-2, "
+        "Google Earth Engine) and `build_climatology` (MODIS chlor_a, 2002-present) at "
+        "the event's own recorded coordinate, searched around its own recorded date "
+        "(`target_date`/`search_window_days` derived only from `date`/`date_start`/"
+        "`date_end` in events.csv -- never hand-tuned per event; see "
+        "`thresholds.event_search_window`).",
+        "",
+        "| event_id | target_date | search_window_days (+/-) | Sentinel-2 result | "
+        "MODIS climatology result |",
+        "|---|---|---|---|---|",
+    ]
+    for row in result["rows"]:
+        if not row["matchable"]:
+            continue
+        s2_cell = (
+            "ok"
+            if row["sentinel2_status"] == "ok"
+            else f"**{row['sentinel2_status']}** -- {row['sentinel2_error']}"
+        )
+        clim_cell = "ok" if row["climatology_status"] == "ok" else "**no_data** -- archive gap"
+        lines.append(
+            f"| {row['event_id']} | {row['target_date']} | {row['search_window_days']} | "
+            f"{s2_cell} | {clim_cell} |"
+        )
+
+    lines += [
+        "",
+        "Reading this honestly, by real cause:",
+        "",
+        "- **th_003 (2009-03), th_008 (2010-07), th_012 (1981-02), th_014 (1983-05):** "
+        "predate Sentinel-2's launch (2015-06-23). There is structurally no Sentinel-2 "
+        "scene to find for these dates -- not a cloud rejection, not a search-window "
+        "problem. th_012/th_014 also predate MODIS-Aqua's 2002 archive start for their "
+        "own historical year, yet MODIS climatology is a day-of-year pool across *all* "
+        "archive years, so it was still attempted and returned real numbers for th_014 "
+        "(n=10, reliable) -- the seasonal baseline is checkable even when the specific "
+        "historical year's own reading is not.",
+        "- **th_004 (2016-01, Cha-am Coast):** within the Sentinel-2 era, but zero scenes "
+        "were returned by the Earth Engine collection query for the entire recorded "
+        "month at this point -- an early-era tiling/coverage gap for this specific "
+        "location, confirmed by a direct collection query, not a cloud rejection. MODIS "
+        "climatology did return a value here (n=1, flagged unreliable by "
+        "`climatology.py`'s own `MIN_RELIABLE_N=5` threshold).",
+        "- **th_006 (2019-08-27, Koh Loy):** Sentinel-2 scenes genuinely exist -- 20 "
+        "candidate images were confirmed in the searched window by a direct collection "
+        "query -- but every one was cloud-rejected (`cloud_fraction` over the "
+        "`max_cloud_fraction=0.5` limit); this is real, heavy Aug-2019 monsoon-season "
+        "cloud cover, not a missing-scene problem. MODIS climatology also returned no "
+        "data at this coordinate.",
+        "- **th_010 (2020-02-11..20, Ang Sila):** Sentinel-2 imagery exists and passes "
+        "the cloud check, but the sample buffer fails the JRC Global Surface Water "
+        "land/water mask (`NoWaterPixelsError`) -- confirmed at buffer radii of 30, 50, "
+        "100, 150, and 250 m, all still land-dominated per the mask, so this is a real "
+        "site characteristic (a narrow, GSW-mask-ambiguous coastal/pier strip), not a "
+        "one-off. The coordinate itself is not adjusted to force a fit -- CLAUDE.md "
+        "forbids inventing or nudging a coordinate to make the pipeline succeed. MODIS "
+        "climatology did return a real, reliable value here (n=6).",
+        "",
+        "**Net result: 0 of these 7 events produced a real matched (index_value, "
+        "z-score) pair** -- for seven different, individually verified reasons, not one "
+        "blanket failure. This is a materially different finding from the prior phase's "
+        "\"0 of 14, no coordinates at all\": these 7 now have real, confirmed "
+        "coordinates and were genuinely queried; the limitation has moved from "
+        "*location* to *satellite data availability at that location/date*, which is "
+        "itself useful information about where this pipeline can and cannot currently "
+        "operate (pre-2015 dates, this specific river-mouth tiling gap, this specific "
+        "near-shore mask limitation).",
+    ]
 
     lines += [
         "",
@@ -135,7 +239,12 @@ def write_event_table(result: dict) -> None:
         "",
         "Per `data/validation/CALIBRATION_NOTES.md` §1, th_005/th_006/th_007 (Aug 2019 "
         "Chonburi episode) and th_009/th_010 (Feb 2020 Chonburi episode) are held out as "
-        "single units, never split.",
+        "single units, never split. Per the new section appended to "
+        "`data/validation/CALIBRATION_NOTES.md` on 2026-08-22 (only one member of each "
+        "cluster -- th_006 and th_010 respectively -- now has a coordinate), a cluster "
+        "is reported `caught` if ANY of its matchable members' real z-score crosses the "
+        "cutoff (same physical event, not independent trials) -- see the `reason` column "
+        "for exactly which member(s) had a coordinate/real reading and which did not.",
         "",
         "| iteration | held-out event(s) | caught | reason |",
         "|---|---|---|---|",
@@ -150,15 +259,28 @@ def write_event_table(result: dict) -> None:
         "",
         "## Reading this table honestly",
         "",
-        "- **0 of 14 events have lat/lng in `events.csv`.** Per `docs/DETECTION_PLAN.md` "
-        "§3, a coordinate is never invented for a named place -- this is reported as a "
-        "finding, not patched around.",
-        "- The one attempted exception (th_001, regional proxy) found no usable "
-        "Sentinel-2 scene and a real ~2-month MODIS data gap around the event date -- "
-        "also a finding, not a bug.",
-        "- Every leave-one-out iteration above therefore reports `caught = n/a` for the "
-        "same underlying reason: no real satellite reading was available for any member "
-        "of that held-out unit.",
+        f"- **{result['n_matchable']} of {result['n_events']} events have lat/lng in "
+        "`events.csv`** (7, added 2026-08-22, human-sourced from public "
+        "references and confirmed by the maintainer -- see events.csv's own citation "
+        "text per row). The remaining 7 (th_001, th_002, th_005, th_007, th_009, th_011, "
+        "th_013) are still deliberately unmatched -- per `docs/DETECTION_PLAN.md` §3, a "
+        "coordinate is never invented for a named place.",
+        f"- **{result['n_with_real_reading']} of {result['n_events']} events produced a "
+        "real matched (index_value, z-score) satellite reading in this run** -- see "
+        "'The 7 newly-coordinate events' section above for the real, individually "
+        "verified reason for each of the 7 that were actually queried and still did not "
+        "produce a usable reading (four predate Sentinel-2's 2015 launch, one is a "
+        "genuine early-era tiling gap, one is genuine monsoon cloud cover, one is a "
+        "genuine near-shore land/water mask limitation).",
+        "- th_001's regional-proxy attempt (still no coordinate of its own) found no "
+        "usable Sentinel-2 scene and a real ~2-month MODIS data gap around the event "
+        "date -- unchanged from the prior phase.",
+        "- Every leave-one-out iteration above therefore still reports `caught = n/a` -- "
+        "not because no member had a coordinate (7 do, now), but because none of those "
+        "coordinates yielded a real satellite reading this run, for the documented "
+        "reasons above. `thresholds.leave_one_out`'s cluster partial-match rule (OR "
+        "across matchable members) is fully implemented and will produce a real "
+        "`caught=True/False` the moment any cluster member does yield a real reading.",
         "- th_012/th_013/th_014 (marked in the low-evidentiary-weight column) are "
         "pre-monitoring-era with no cell count in any source "
         "(`data/validation/CALIBRATION_NOTES.md` §3) -- shown in the table for "
@@ -211,19 +333,34 @@ def write_index_comparison(demo_results: list[dict]) -> None:
 
     lines += [
         "",
+        "## 14-event validation attempt -- still not a real comparison, but for a new reason",
+        "",
+        "As of 2026-08-22, 7 of the 14 events (`data/validation/events.csv` commit "
+        "d9811d7) have a real coordinate and were genuinely queried against live "
+        "Sentinel-2 (see `reports/event_table.md`'s 'newly-coordinate events' section for "
+        "the full per-event detail). None of the 7 produced a usable Sentinel-2 band "
+        "reading this run (four predate Sentinel-2's 2015 launch, one hit a tiling gap, "
+        "one hit full cloud cover, one hit a land/water mask limitation at its "
+        "coordinate) -- so there is still no real per-event NDCI/2BDA/3BDA/B2-B3 value to "
+        "compare against a documented bloom outcome. This is a different, more specific "
+        "limitation than the prior phase's (missing coordinates); it is not yet a "
+        "resolved one. The demo-point table above remains the only real, live "
+        "confirmation that the four index functions compute correctly end-to-end.",
+        "",
         "## What these numbers do and don't show",
         "",
         "- Confirms all four index functions in `src/indices.py` run against real "
         "band values pulled live from Google Earth Engine (`COPERNICUS/S2_SR_HARMONIZED`) "
         "-- not synthetic test fixtures.",
         "- Does NOT show which index best discriminates a real documented bloom, "
-        "because none of the three points/dates above coincide with a documented event "
-        "(`data/validation/events.csv` has no matchable coordinate for comparison, per "
+        "because none of the three demo points/dates above coincide with a documented "
+        "event, and none of the 7 now-coordinate-bearing events produced a real "
+        "Sentinel-2 reading this run either (see the section above and "
         "`event_table.md`).",
         "- Per `docs/DETECTION_PLAN.md` §2, 3BDA is expected to outperform NDCI/2BDA "
-        "specifically near river mouths (turbid water) -- untested here for the same "
-        "reason: no real event coordinate near a river mouth was available to check "
-        "against.",
+        "specifically near river mouths (turbid water) -- still untested against a real "
+        "event: th_003/th_008/th_012 (Tha Chin river mouth, the site this prediction is "
+        "specifically about) all predate Sentinel-2 or hit an archive gap this run.",
         "- B2/B3 (green *Noctiluca* discrimination) is secondary/lower-confidence by "
         "design (`.claude/agents/bloom-detection.md` §1) and, per "
         "`data/validation/CALIBRATION_NOTES.md` §2, is only expected to be meaningful "
@@ -253,12 +390,12 @@ def write_threshold_sweep_plot(result: dict, demo_results: list[dict]) -> None:
     status = []
     for r in result["rows"]:
         if r["index_values"] is not None:
-            status.append(2)  # real reading obtained
-        elif r["event_id"] == "th_001":
-            status.append(1)  # attempted, no data
+            status.append(3)  # real reading obtained
+        elif r["matchable"] or r["event_id"] == "th_001":
+            status.append(1)  # coordinate present (or proxy attempted), no usable data
         else:
-            status.append(0)  # unmatched, no coordinate
-    colors = {0: "#b0b0b0", 1: "#e0952b", 2: "#2b8a3e"}
+            status.append(0)  # unmatched, no coordinate at all
+    colors = {0: "#b0b0b0", 1: "#e0952b", 3: "#2b8a3e"}
     ax.bar(labels, [1] * len(labels), color=[colors[s] for s in status])
     ax.set_ylim(0, 1.2)
     ax.set_yticks([])
@@ -269,8 +406,8 @@ def write_threshold_sweep_plot(result: dict, demo_results: list[dict]) -> None:
     ax.legend(
         handles=[
             Patch(color=colors[0], label="No coordinate (unmatched)"),
-            Patch(color=colors[1], label="Regional proxy attempted, no data"),
-            Patch(color=colors[2], label="Real reading obtained"),
+            Patch(color=colors[1], label="Coordinate/proxy present, no usable satellite reading"),
+            Patch(color=colors[3], label="Real reading obtained"),
         ],
         loc="upper right",
         fontsize=8,
@@ -289,9 +426,11 @@ def write_threshold_sweep_plot(result: dict, demo_results: list[dict]) -> None:
     ax2.legend(fontsize=8)
 
     fig.suptitle(
-        "detection/src/config.yaml thresholds are literature defaults, not empirically "
-        "calibrated -- 0 of 14 events had a matchable coordinate this run (see left panel "
-        "and reports/event_table.md). This is NOT a sensitivity/false-alarm sweep.",
+        f"detection/src/config.yaml thresholds are literature defaults, not empirically "
+        f"calibrated -- {result['n_matchable']} of {result['n_events']} events had a "
+        f"coordinate this run but {result['n_with_real_reading']} produced a usable "
+        "satellite reading (see left panel and reports/event_table.md for each event's "
+        "real, individual reason). This is NOT a sensitivity/false-alarm sweep.",
         fontsize=9,
         wrap=True,
     )

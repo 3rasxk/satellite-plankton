@@ -18,28 +18,63 @@ Every one of its five sections is encoded below:
   §5 cell_count range handling -> parse_cell_count() (midpoint policy,
      read from config.yaml, never silent)
 
-HEADLINE FINDING (read before trusting any "flagged" column): every one
-of the 14 rows in events.csv has a blank lat/lng. Per CLAUDE.md and
-docs/DETECTION_PLAN.md §3, a coordinate is never invented for a place
-name -- "an unmatched event is a finding, not a failure." That leaves 0
-of 14 events matchable to a satellite pixel using their own recorded
-location. One exception was attempted, not a workaround: th_001's
-location is recorded at the scale of "upper Gulf of Thailand" (the whole
-study area), not a named site, so a generic open-water point *inside*
-that same stated scope was tried as a regional proxy -- explicitly not a
-claim about th_001's exact pixel, just a same-scale check of whether the
-described basin-wide super-bloom shows up in a representative sample of
-the basin. It still returned no usable data (see `attempt_th001_regional_proxy`
-below and `reports/event_table.md`) -- a real, live-tested outcome, not a
-hypothetical one.
+HEADLINE FINDING, updated 2026-08-22 (see git commit d9811d7 and
+data/validation/CALIBRATION_NOTES.md for the prior state): the human
+maintainer has since sourced and confirmed real coordinates (from public
+references, Wikipedia/Wikidata) for 7 of the 14 rows -- th_003, th_004,
+th_006, th_008, th_010, th_012, th_014 -- with `location_precision`
+changed from `named_site` to `coordinates`. The other 7
+(th_001, th_002, th_005, th_007, th_009, th_011, th_013) remain
+deliberately unmatched -- no coordinate is invented for a place name, per
+CLAUDE.md and docs/DETECTION_PLAN.md §3.
 
-Consequence for calibration: the sweep-and-count procedure in
-docs/DETECTION_PLAN.md §4 requires (index_value, source_says_bloom) pairs
-per event. With zero real pairs available, `sweep_thresholds` and
-`leave_one_out` below are fully implemented and ready to run the moment
-real coordinates exist for any of these events, but this run produces an
-empty/near-empty result set. That emptiness is reported explicitly in
-`reports/event_table.md`, not hidden.
+This module now attempts a REAL Sentinel-2 + MODIS-climatology reading
+for every one of those 7 coordinate-bearing rows (`attempt_satellite_reading`,
+called generically for any matchable row -- not hand-written per event),
+in addition to th_001's original regional-proxy attempt (kept, unchanged
+in kind, since th_001 still has no coordinate of its own).
+
+RESULT OF THIS RUN (live-tested 2026-08-22, see reports/event_table.md
+for the full per-event detail): 0 of these 7 newly-coordinate-bearing
+events produced a real matched (index_value, z-score) pair, but for
+seven DIFFERENT, DOCUMENTED reasons, not one blanket "no data":
+  - th_003 (2009-03), th_008 (2010-07), th_012 (1981-02), th_014
+    (1983-05): all predate Sentinel-2's launch (2015-06-23) -- there is
+    structurally no Sentinel-2 scene to find, not a cloud/quality
+    rejection. (Also: th_012/th_014 predate MODIS-Aqua's 2002 start, but
+    MODIS climatology is a day-of-year pool across all archive years, so
+    it is attempted anyway and can still return real numbers for the
+    *seasonal* baseline even when the specific historical year cannot.)
+  - th_004 (2016-01, Cha-am Coast): within the Sentinel-2 era but zero
+    scenes were returned for the entire recorded month at this point --
+    an early-era tiling/coverage gap for this specific location, not a
+    cloud rejection.
+  - th_006 (2019-08-27, Koh Loy): Sentinel-2 scenes exist (20 candidates
+    in the searched window, confirmed by direct GEE query) but every one
+    was cloud-rejected -- genuine, heavy monsoon-season cloud cover.
+  - th_010 (2020-02-11..20, Ang Sila): Sentinel-2 imagery exists and
+    passes the cloud check, but the sample buffer fails the JRC Global
+    Surface Water land/water mask (`NoWaterPixelsError`) at this
+    near-shore/pier coordinate -- confirmed at multiple buffer radii
+    (30/50/100/150/250 m), so this is a real site characteristic (a
+    narrow, GSW-mask-ambiguous coastal strip), not a one-off fluke; the
+    coordinate itself is not moved to force a fit (CLAUDE.md: never
+    invent/adjust a coordinate to fit the pipeline).
+
+MODIS climatology, attempted independently of the Sentinel-2 outcome for
+every matchable row (a Sentinel-2 failure does not skip the climatology
+attempt, so a partial result is visible rather than collapsed into one
+boolean), DID succeed for th_004 (n=1, unreliable), th_010 (n=6,
+reliable) and th_014 (n=10, reliable) even where Sentinel-2 failed --
+this is reported per-event as a genuinely partial, not all-or-nothing,
+result.
+
+Together with th_001 (still 0/0, unchanged), the honest match count for
+this run is 0 of 14 events with a full (index_value, z-score) pair.
+`sweep_thresholds` and `leave_one_out` below are fully implemented and
+ready to run the moment any event does produce a real pair; this run's
+`matched_pairs` is still empty, for the reasons above, not because the
+code path is unfinished.
 """
 
 from __future__ import annotations
@@ -210,9 +245,142 @@ def location_status(row: dict) -> dict:
 
 
 # --------------------------------------------------------------------------
-# th_001 regional-proxy attempt -- the one real live GEE attempt made
-# against a validation event. See module docstring for why this is not a
-# precedent for the other 13 rows.
+# Generalized real satellite-reading attempt -- used for every matchable
+# row (a real lat/lng in events.csv), i.e. the 7 rows added 2026-08-22.
+# Not hand-written per event: one function, called the same way for every
+# coordinate-bearing row, so no event's search window or buffer is
+# individually tuned to force a match.
+# --------------------------------------------------------------------------
+
+# Uniform cloud-search margin applied on top of every event's own recorded
+# date window (never hand-picked per event). Matches the 25-day window
+# originally used for th_001's regional-proxy attempt, so an event with an
+# exact single-day date gets exactly the same search generosity th_001 got.
+SEARCH_WINDOW_CLOUD_MARGIN_DAYS = 25
+
+
+def event_search_window(row: dict, prec: dict) -> tuple[str, int]:
+    """(target_date, search_window_days) for get_sentinel2_bands, derived
+    only from the event's own recorded date precision
+    (CALIBRATION_NOTES.md §4) -- never hand-tuned per event to force a
+    match.
+
+    - exact_day (a single recorded date): that date itself, +/-
+      SEARCH_WINDOW_CLOUD_MARGIN_DAYS.
+    - any date range (exact_day_range / month_range / multi_month_range):
+      the midpoint of date_start..date_end, with a search radius wide
+      enough to cover the *entire* recorded range plus the same cloud
+      margin on top -- so a source-recorded month-wide window (e.g.
+      th_004) gets a wider search only because the source itself is less
+      precise about the date, exactly the CALIBRATION_NOTES.md §4
+      precision-tier tradeoff (wider window = more chance of a cloud-free
+      scene, weaker claim that the scene coincides with peak bloom).
+    """
+    date = (row.get("date") or "").strip()
+    start = (row.get("date_start") or "").strip()
+    end = (row.get("date_end") or "").strip()
+
+    if date and not start and not end:
+        return date, SEARCH_WINDOW_CLOUD_MARGIN_DAYS
+
+    from datetime import datetime as _dt
+
+    d1 = _dt.strptime(start, "%Y-%m-%d")
+    d2 = _dt.strptime(end, "%Y-%m-%d")
+    midpoint = d1 + (d2 - d1) / 2
+    half_width_days = max((d2 - d1).days // 2, 0)
+    search_window_days = half_width_days + SEARCH_WINDOW_CLOUD_MARGIN_DAYS
+    return midpoint.strftime("%Y-%m-%d"), search_window_days
+
+
+def attempt_satellite_reading(
+    lat: float, lng: float, target_date: str, search_window_days: int, config: dict
+) -> dict:
+    """Real Sentinel-2 index reading + real MODIS climatology anomaly at
+    one (lat, lng, target_date). Used for every matchable events.csv row
+    and for th_001's regional-proxy points alike.
+
+    The Sentinel-2 attempt and the MODIS climatology attempt are made
+    INDEPENDENTLY -- one failing does not skip the other -- so a genuinely
+    partial result (e.g. a real climatology baseline but no usable
+    Sentinel-2 scene) is visible in the report rather than collapsed into
+    one boolean "matched"/"not matched" flag. z-scores are only computed,
+    for every compared index, when BOTH halves succeeded.
+
+    Returns:
+        {'sentinel2_status': 'ok' | 'no_imagery' | 'no_water_pixels',
+         'sentinel2_error': str | None,
+         'index_values': dict | None, 'cloud_fraction': float | None,
+         'actual_date': str | None,
+         'climatology_status': 'ok' | 'no_data', 'climatology': dict | None,
+         'z_scores': dict | None}  # per compared index, or None
+
+    Raises:
+        GEEAuthError: propagated, never caught (CLAUDE.md "never
+        catch-and-fabricate").
+    """
+    result: dict = {
+        "sentinel2_status": None,
+        "sentinel2_error": None,
+        "index_values": None,
+        "cloud_fraction": None,
+        "actual_date": None,
+        "climatology_status": None,
+        "climatology": None,
+        "z_scores": None,
+    }
+
+    try:
+        bands = get_sentinel2_bands(lat, lng, target_date, search_window_days=search_window_days)
+        result["sentinel2_status"] = "ok"
+        result["cloud_fraction"] = bands.get("cloud_fraction")
+        result["actual_date"] = bands.get("actual_date")
+        result["index_values"] = compute_all_indices(bands)
+    except NoCloudFreeImageryError as exc:
+        result["sentinel2_status"] = "no_imagery"
+        result["sentinel2_error"] = str(exc)
+    except NoWaterPixelsError as exc:
+        result["sentinel2_status"] = "no_water_pixels"
+        result["sentinel2_error"] = str(exc)
+
+    clim = build_climatology(lat, lng, target_date, window_days=config["climatology"]["window_days"])
+    if clim is None:
+        result["climatology_status"] = "no_data"
+    else:
+        result["climatology_status"] = "ok"
+        result["climatology"] = clim
+
+    if result["index_values"] is not None and result["climatology"] is not None:
+        # Every compared index (config.yaml indices.compare) plus the
+        # secondary discrimination feature, all scored against the same
+        # MODIS chlor_a climatology -- same math already used for th_001
+        # in the prior phase, generalized here across indices rather than
+        # computed for the primary index alone, so index_comparison.md
+        # can show a real per-index comparison wherever a real reading
+        # exists.
+        index_names = list(
+            dict.fromkeys(config["indices"]["compare"] + [config["indices"]["secondary_discrimination"]])
+        )
+        result["z_scores"] = {
+            name: z_score(result["index_values"][name], result["climatology"]) for name in index_names
+        }
+
+    return result
+
+
+# --------------------------------------------------------------------------
+# th_001 regional-proxy attempt -- th_001 still has no coordinate of its
+# own (location_name='upper Gulf of Thailand', a study-area-scale
+# description, not a named site), so it alone still uses the
+# multi-candidate-point regional-proxy approach below rather than
+# `attempt_satellite_reading` (which needs one lat/lng, not a list of
+# candidates). `run()` computes th_001's index values/z-scores across all
+# compared indices the same way `attempt_satellite_reading` does for
+# every other matchable row, just inline, since the source data
+# (`th001_proxy['sentinel2']['bands']` / `['modis_climatology']`) comes
+# from a different shape (best-of-N candidate points, not one point). See
+# module docstring for why this is not a precedent for the other 6
+# still-unmatched rows.
 # --------------------------------------------------------------------------
 
 
@@ -316,23 +484,67 @@ def sweep_thresholds(matched_pairs: list[dict], z_grid: list[float]) -> list[dic
     return results
 
 
-def leave_one_out(events: list[dict], config: dict, matched_pairs: list[dict]) -> list[dict]:
+def leave_one_out(rows: list[dict], config: dict, matched_pairs: list[dict]) -> list[dict]:
     """Run the 12-iteration leave-one-out protocol.
 
-    With `matched_pairs` empty (this run's real state -- see module
-    docstring), every iteration reports caught=None (not False -- False
-    would imply the pipeline ran and missed it; None means the pipeline
-    could not run at all for that event/cluster) with a reason.
+    Cluster partial-match rule (data/validation/CALIBRATION_NOTES.md, new
+    section appended 2026-08-22, alongside this run): th_005/th_006/th_007
+    and th_009/th_010 are the same physical bloom observed at multiple
+    sites (CALIBRATION_NOTES.md §1). Now that only ONE member of each
+    cluster has a real coordinate (th_006 and th_010 respectively), a
+    cluster is reported CAUGHT if ANY of its matchable members' real
+    z-score crosses the primary index's cutoff -- not decided
+    independently per member, and not required to be unanimous either.
+    Reasoning: the cluster-mates are evidence about the SAME underlying
+    event, not independent trials -- if the satellite would have flagged
+    the bloom at th_006's pixel, that is evidence the system would have
+    caught "the Aug 2019 Chonburi episode," even though th_005/th_007
+    themselves have no coordinate to check directly. Requiring every
+    member to independently cross the cutoff would effectively be
+    scoring "did every observation site happen to have a coordinate AND
+    cross the cutoff," a much stricter and less meaningful claim than
+    "was this physical event detectable." A cluster member lacking a real
+    z-score (no coordinate, or a coordinate but no usable satellite
+    reading) is simply excluded from the OR -- it never counts as an
+    independent miss on its own. `caught=None` only when EVERY member of
+    the unit lacks a real z-score (nothing to evaluate at all).
 
     Returns:
         [{'label': str, 'held_out_ids': [...], 'caught': bool | None,
           'reason': str}, ...]
     """
+    rows_by_id = {r["event_id"]: r for r in rows}
     matched_by_id = {p["event_id"]: p for p in matched_pairs}
-    iterations = build_loo_iterations(events, config)
+    iterations = build_loo_iterations(rows, config)
+    cutoff = config["thresholds"][config["indices"]["primary"]]["elevated_z"]
+
     results = []
     for it in iterations:
-        available = [eid for eid in it["held_out_ids"] if eid in matched_by_id]
+        held_out_ids = it["held_out_ids"]
+        member_notes = []
+        for eid in held_out_ids:
+            if eid in matched_by_id:
+                member_notes.append(f"{eid}: real z={matched_by_id[eid]['z']:.3f}")
+                continue
+            r = rows_by_id.get(eid, {})
+            if not r.get("matchable"):
+                member_notes.append(f"{eid}: no coordinate in events.csv")
+            elif r.get("sentinel2_status") not in (None, "ok"):
+                member_notes.append(
+                    f"{eid}: coordinate present, no usable Sentinel-2 reading "
+                    f"({r['sentinel2_status']})"
+                )
+            elif r.get("climatology_status") == "no_data":
+                member_notes.append(
+                    f"{eid}: coordinate present, Sentinel-2 reading obtained but no "
+                    "MODIS climatology available for this location/date (archive gap)"
+                )
+            else:
+                member_notes.append(f"{eid}: coordinate present, no real z-score obtained")
+
+        available = [eid for eid in held_out_ids if eid in matched_by_id]
+        member_detail = " | ".join(member_notes)
+
         if not available:
             results.append(
                 {
@@ -340,26 +552,30 @@ def leave_one_out(events: list[dict], config: dict, matched_pairs: list[dict]) -
                     "caught": None,
                     "reason": (
                         "No real satellite reading available for any member of this "
-                        "held-out unit (no coordinate in events.csv; see location_status())."
+                        f"held-out unit. {member_detail}"
                     ),
                 }
             )
             continue
-        # Calibrate on 13 (or 12, for a cluster) events not in this
-        # held-out unit, using whichever cutoff config.yaml specifies for
-        # the primary index -- with real data this would search cutoffs;
-        # with only ever <=1 matched event total in this run, there is no
-        # "calibrate on the rest" to speak of, which is itself recorded.
-        cutoff = config["thresholds"][config["indices"]["primary"]]["elevated_z"]
-        caught = any(
-            matched_by_id[eid]["z"] is not None and matched_by_id[eid]["z"] >= cutoff
-            for eid in available
+
+        # Cluster partial-match rule (see docstring above): OR across
+        # whichever matchable members produced a real z-score. For a
+        # single-event iteration this is just that one event's own result.
+        caught = any(matched_by_id[eid]["z"] >= cutoff for eid in available)
+        cluster_note = (
+            " Cluster rule: caught if ANY matchable member's z crosses the cutoff "
+            "(same physical event, not independent trials)."
+            if len(held_out_ids) > 1
+            else ""
         )
         results.append(
             {
                 **it,
                 "caught": caught,
-                "reason": f"Evaluated against default (uncalibrated) cutoff z>={cutoff}.",
+                "reason": (
+                    f"Evaluated against default (uncalibrated) cutoff z>={cutoff}. "
+                    f"{member_detail}.{cluster_note}"
+                ),
             }
         )
     return results
@@ -373,9 +589,11 @@ def leave_one_out(events: list[dict], config: dict, matched_pairs: list[dict]) -
 def run() -> dict:
     """Run the full event-matching + calibration attempt and return every
     intermediate result the report generators need. Makes real GEE calls
-    (via th_001's regional-proxy attempt) -- not a dry/offline function."""
+    -- for every matchable row (7, as of 2026-08-22) plus th_001's
+    regional-proxy attempt -- not a dry/offline function."""
     config = load_config()
     events = load_events()
+    primary_index = config["indices"]["primary"]
 
     rows = []
     matched_pairs = []
@@ -398,32 +616,79 @@ def run() -> dict:
             "match_method": loc["method"],
             "match_reason": loc["reason"],
             "low_weight": row["event_id"] in config["historical_low_weight_events"],
+            "target_date": None,
+            "search_window_days": None,
+            "sentinel2_status": None,
+            "sentinel2_error": None,
+            "climatology_status": None,
+            "cloud_fraction": None,
+            "actual_date": None,
             "index_values": None,
             "z_scores": None,
             "flagged": None,
         }
 
-        if row["event_id"] == "th_001":
+        if loc["matchable"]:
+            # Real coordinate in events.csv (7 rows as of 2026-08-22) --
+            # one generic call, same for every one of them.
+            lat, lng = float(row["lat"]), float(row["lng"])
+            target_date, search_window_days = event_search_window(row, prec)
+            entry["target_date"] = target_date
+            entry["search_window_days"] = search_window_days
+
+            reading = attempt_satellite_reading(lat, lng, target_date, search_window_days, config)
+            entry["sentinel2_status"] = reading["sentinel2_status"]
+            entry["sentinel2_error"] = reading["sentinel2_error"]
+            entry["climatology_status"] = reading["climatology_status"]
+            entry["cloud_fraction"] = reading["cloud_fraction"]
+            entry["actual_date"] = reading["actual_date"]
+            entry["index_values"] = reading["index_values"]
+            entry["z_scores"] = reading["z_scores"]
+
+            if reading["z_scores"] is not None:
+                z = reading["z_scores"][primary_index]["z"]
+                if z is not None:
+                    matched_pairs.append({"event_id": row["event_id"], "z": z})
+                    cutoff = config["thresholds"][primary_index]["elevated_z"]
+                    entry["flagged"] = z >= cutoff
+
+        elif row["event_id"] == "th_001":
+            # th_001 has no coordinate of its own -- unchanged
+            # multi-candidate-point regional-proxy approach.
             th001_proxy = attempt_th001_regional_proxy(prec["display_date"])
             if th001_proxy["sentinel2"] is not None:
                 bands = th001_proxy["sentinel2"]["bands"]
                 idx = compute_all_indices(bands)
                 entry["index_values"] = idx
+                entry["sentinel2_status"] = "ok"
+                entry["cloud_fraction"] = bands.get("cloud_fraction")
+                entry["actual_date"] = bands.get("actual_date")
+
                 if th001_proxy["modis_climatology"] is not None:
                     clim = th001_proxy["modis_climatology"]["climatology"]
-                    z = z_score(idx[config["indices"]["primary"]], clim)
-                    entry["z_scores"] = {config["indices"]["primary"]: z}
-                    if z["z"] is not None:
-                        matched_pairs.append({"event_id": "th_001", "z": z["z"]})
-                        cutoff = config["thresholds"][config["indices"]["primary"]]["elevated_z"]
-                        entry["flagged"] = z["z"] >= cutoff
+                    entry["climatology_status"] = "ok"
+                    index_names = list(
+                        dict.fromkeys(
+                            config["indices"]["compare"] + [config["indices"]["secondary_discrimination"]]
+                        )
+                    )
+                    entry["z_scores"] = {name: z_score(idx[name], clim) for name in index_names}
+                    z = entry["z_scores"][primary_index]["z"]
+                    if z is not None:
+                        matched_pairs.append({"event_id": "th_001", "z": z})
+                        cutoff = config["thresholds"][primary_index]["elevated_z"]
+                        entry["flagged"] = z >= cutoff
+                else:
+                    entry["climatology_status"] = "no_data"
+            else:
+                entry["sentinel2_status"] = "no_imagery"
 
         rows.append(entry)
 
     n_matchable = sum(1 for r in rows if r["matchable"])
     n_with_real_reading = sum(1 for r in rows if r["index_values"] is not None)
 
-    loo_results = leave_one_out(events, config, matched_pairs)
+    loo_results = leave_one_out(rows, config, matched_pairs)
     z_grid = [1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0]
     sweep = sweep_thresholds(matched_pairs, z_grid)
 

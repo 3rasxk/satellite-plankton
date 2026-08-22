@@ -27,14 +27,20 @@ DISCLAIMER_TEXT = (
 # CLAUDE.md is explicit that the two must not be blurred together.
 CALIBRATION_CAVEAT_TEXT = (
     "Escalation thresholds in config.yaml are literature/convention defaults, "
-    "not empirically calibrated against Thai events: 0 of the 14 documented "
-    "events in data/validation/events.csv currently have a coordinate precise "
-    "enough to match a satellite reading (all are named-place or "
-    "province-level locations; CLAUDE.md/docs/DETECTION_PLAN.md §3 forbid "
-    "inventing a coordinate for a place name). One regional-proxy attempt "
-    "(th_001) was tried at the same spatial scale the source describes and "
-    "returned no usable Sentinel-2 scene. Results below are reported "
-    "per-event, never as a percentage — n=14 cannot support one."
+    "not empirically calibrated against Thai events: 7 of the 14 documented "
+    "events in data/validation/events.csv now have a real, human-confirmed "
+    "coordinate (added 2026-08-22), but all 7 still failed to produce a "
+    "usable satellite reading, each for its own verified reason -- four "
+    "predate Sentinel-2's 2015 launch, one hit a coverage gap, one hit "
+    "monsoon cloud cover, one failed the water-pixel mask at a near-shore "
+    "site. The remaining 7 events still have no coordinate at all (named-"
+    "place or province-level locations only; CLAUDE.md/docs/DETECTION_PLAN.md "
+    "§3 forbid inventing one). Net result across all 14: still 0 real "
+    "matched (index value, known outcome) pairs, so thresholds remain "
+    "uncalibrated -- see detection/src/config.yaml's own header and "
+    "detection/reports/event_table.md for the full per-event detail. "
+    "Results below are reported per-event, never as a percentage — n=14 "
+    "cannot support one."
 )
 
 

@@ -86,3 +86,66 @@ for range values — lower bound, upper bound, or treat-as-wide-uncertainty —
 not silently take e.g. the first number via string parsing. State the
 choice and reasoning in a comment, same as the operating-point choice
 itself (per `docs/DETECTION_PLAN.md` §4).
+
+## 6. Partial cluster coordinate match (added 2026-08-22)
+
+Context: on 2026-08-22 the human maintainer sourced and confirmed real
+coordinates for 7 of the 14 events (`events.csv` commit d9811d7),
+including th_006 (member of the `chonburi_aug2019` cluster, §1) and
+th_010 (member of the `chonburi_feb2020` cluster, §1). Their cluster-mates
+— th_005/th_007, and th_009 — still have no coordinate. This is a case §1
+did not originally cover: what happens in leave-one-out when a cluster is
+only *partially* matchable?
+
+**Decision:** a same-episode cluster is reported `caught` in leave-one-out
+if ANY of its matchable members' real z-score crosses the primary index's
+cutoff — evaluated as a logical OR across whichever members actually
+produced a real z-score, not decided independently per member and not
+required to be unanimous.
+
+**Reasoning:** the cluster-mates are multiple observations of the SAME
+physical bloom (§1's own justification for holding them out together at
+all), not independent trials. If the satellite reading at th_006's pixel
+would have crossed the cutoff, that is real evidence the system would
+have caught "the Aug 2019 Chonburi episode" — the fact that th_005 and
+th_007's own sites have no coordinate to check independently does not
+weaken that evidence about the same event. Requiring every member to
+independently have a coordinate AND cross the cutoff would silently
+change the claim being scored, from "was this physical event detectable"
+to "did every observation site happen to have a documented coordinate AND
+independently cross the cutoff" — a much stricter, less meaningful
+question that has nothing to do with detection performance and everything
+to do with which sites happened to get a Wikipedia/Wikidata coordinate.
+The alternative (requiring unanimity, or averaging members' z-scores) was
+considered and rejected: unanimity is not what "same event" implies
+methodologically (a bloom can be patchy — one site crossing the threshold
+while another site of the same bloom does not is a real, expected outcome
+of a patchy bloom, not evidence the system failed at the second site),
+and averaging would conflate two different signals' strengths with no
+principled weighting between them for a single-index sweep.
+
+A cluster member with no real z-score (no coordinate at all, or a
+coordinate but no usable satellite reading — see
+`reports/event_table.md`'s "newly-coordinate events" detail for th_006's
+and th_010's own real, individually verified non-match reasons this run)
+is simply excluded from the OR; it never counts as an independent miss.
+`caught=None` (not evaluable) only when EVERY member of the cluster lacks
+a real z-score, same as before.
+
+**Implemented in** `thresholds.leave_one_out` — the `available` list
+(members with a real z-score) is computed per iteration and `caught` is
+`any(z >= cutoff for member in available)`; the per-member reasons are
+now reported individually in each iteration's `reason` field (which
+member had a coordinate, which didn't, and why a coordinate-bearing
+member still produced no real z-score this run) rather than one generic
+sentence for the whole unit, since after this change the reasons can
+differ member-to-member within the same cluster.
+
+This run, both `chonburi_aug2019` (th_006 matchable) and
+`chonburi_feb2020` (th_010 matchable) still evaluate as `caught=None`,
+because th_006 and th_010 themselves did not produce a real z-score this
+run (th_006: every candidate Sentinel-2 scene cloud-rejected; th_010:
+sample buffer fails the JRC Global Surface Water land/water mask) — see
+`reports/event_table.md`. The OR rule above is fully implemented and
+ready to resolve to a real `True`/`False` the moment either matchable
+member does produce a real z-score in a future run.
