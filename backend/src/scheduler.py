@@ -15,6 +15,42 @@ row that looks fresh but silently isn't. If no prior row exists yet, a
 placeholder row is inserted with status='error', stale=True, so
 /risk-map's "no_data_yet" branch isn't hit forever if the very first
 scheduled run fails.
+
+Satellite imagery (added alongside the numeric refresh): each cycle also
+renders and caches a true-color and an NDCI-heatmap PNG per site
+(`data-pipeline/src/imagery.py`, via `bridge.get_true_color_image`/
+`get_ndci_heatmap`), stored as BLOB columns on the same `DetectionCache`
+row (`true_color_png`/`ndci_heatmap_png`). This is a caching decision, not
+an on-demand one, specifically because this grid is small (6 sites),
+fixed, and already on a periodic refresh cycle -- unlike `/detect` and the
+new `/satellite-image` endpoint, which take an arbitrary caller-chosen
+lat/lng/date (an effectively unbounded key space with nothing sensible to
+pre-render). The decision is grounded in a real, live measurement made
+during this build (see the backend-api build report): a warm numeric
+`get_sentinel2_bands` call took ~4.2s; adding a true-color render added
+~+2-4s more, an NDCI heatmap ~+2-3s more -- each image roughly doubles or
+triples the round trip. Serving that live, per-request, from `/risk-map`
+(which today reads a plain DB row in milliseconds) would turn a
+sub-second endpoint into a multi-site, multi-second one on every poll,
+for imagery that does not change between Sentinel-2 revisits (~5 days)
+anyway. Paying that cost once per scheduler cycle (default every 6h) for
+6 sites (~12 extra image renders, roughly 30-90s added to the cycle,
+which already runs in the background) and then serving cached bytes in
+milliseconds per request is the correct trade for this bounded set --
+mirrors exactly why the numeric fields are cached here at all.
+
+Image rendering is only attempted when the numeric detection for that
+site succeeded (`status == 'ok'`) -- if `detect()` itself couldn't get a
+usable reading (no_imagery/no_water_pixels/no_climatology), the same
+underlying scene problem would make the image render fail the same way
+(same-scene guarantee), so a second live GEE round trip that's expected
+to fail is skipped rather than attempted and logged as noise. A transient
+image-fetch failure (e.g. a network hiccup fetching the thumbnail bytes,
+distinct from GEE auth or "no scene available") does not mark the whole
+site stale -- the numeric fields are still fresh and real; only the image
+columns are left null with `image_status='fetch_error'`, so a client can
+tell "no picture this cycle" from "no numeric reading this cycle" instead
+of conflating the two.
 """
 
 from __future__ import annotations
@@ -60,6 +96,71 @@ def ensure_monitored_sites() -> None:
         db.close()
 
 
+def _refresh_images(lat: float, lng: float, target_date: str, detection_status: str) -> dict:
+    """Render + fetch true_color/ndci_heatmap PNG bytes for one site, for
+    caching alongside the numeric DetectionCache row (see module
+    docstring "Satellite imagery" for the caching-vs-on-demand reasoning).
+
+    GEEAuthError is deliberately NOT caught here -- it propagates to
+    refresh_one_site's own broad except, which marks the *whole site*
+    stale (numeric fields included). That is correct: GEEAuthError means
+    the GEE session itself is unusable, not "no image for this scene",
+    so it must not be swallowed into a per-image status as if it were a
+    normal data gap.
+    """
+    if detection_status != "ok":
+        # Same-scene guarantee (data-pipeline/src/imagery.py): if detect()
+        # itself couldn't get a usable numeric reading for this date, a
+        # second live GEE call for the image would hit the same
+        # underlying scene problem. Skip rather than retry-and-fail.
+        return dict(
+            true_color_png=None,
+            ndci_heatmap_png=None,
+            image_status="skipped_detection_not_ok",
+            image_error=None,
+        )
+
+    try:
+        true_color = bridge.get_true_color_image(lat, lng, target_date)
+        ndci = bridge.get_ndci_heatmap(lat, lng, target_date)
+        return dict(
+            true_color_png=true_color["image_bytes"],
+            ndci_heatmap_png=ndci["image_bytes"],
+            image_status="ok",
+            image_error=None,
+        )
+    except bridge.GEEAuthError:
+        raise
+    except bridge.NoCloudFreeImageryError as exc:
+        return dict(
+            true_color_png=None,
+            ndci_heatmap_png=None,
+            image_status="no_imagery",
+            image_error=str(exc),
+        )
+    except bridge.NoWaterPixelsError as exc:
+        return dict(
+            true_color_png=None,
+            ndci_heatmap_png=None,
+            image_status="no_water_pixels",
+            image_error=str(exc),
+        )
+    except Exception as exc:  # noqa: BLE001 -- transient thumbnail-fetch
+        # failure (network/upstream, e.g. urllib.error.URLError). The
+        # numeric reading already succeeded and must not be discarded
+        # over an image-only problem -- see module docstring.
+        logger.warning(
+            "scheduler: image render failed for %.4f,%.4f on %s: %s: %s",
+            lat, lng, target_date, type(exc).__name__, exc,
+        )
+        return dict(
+            true_color_png=None,
+            ndci_heatmap_png=None,
+            image_status="fetch_error",
+            image_error=f"{type(exc).__name__}: {exc}",
+        )
+
+
 def refresh_one_site(db: Session, site: MonitoredSite, target_date: str) -> None:
     """Refresh (or mark-stale-on-failure) one site's DetectionCache row.
     Never raises -- every exception is caught here, logged, and turned
@@ -73,6 +174,7 @@ def refresh_one_site(db: Session, site: MonitoredSite, target_date: str) -> None
         prediction = bridge.risk_level(site.lat, site.lng, target_date)
         meta = fetch_satellite_meta(site.lat, site.lng, target_date)
         detection = prediction["detection"]
+        image_fields = _refresh_images(site.lat, site.lng, target_date, detection["status"])
 
         fields = dict(
             target_date=target_date,
@@ -93,6 +195,7 @@ def refresh_one_site(db: Session, site: MonitoredSite, target_date: str) -> None
             fetched_at=datetime.now(timezone.utc),
             stale=False,
             error=None,
+            **image_fields,
         )
 
         if existing is None:

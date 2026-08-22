@@ -70,6 +70,8 @@ class DetectResponse(DisclaimerMixin):
         "index_used": "ndci",
         "index_values": {"ndci": 0.01, "2bda": 0.02, "3bda": 0.03, "b2_b3_ratio": 0.9},
         "cloud_fraction": 0.05, "actual_date": "2024-03-14",
+        "true_color_image_url": "/satellite-image?lat=13.45&lng=100.65&date=2024-03-15&image_type=true_color",
+        "ndci_heatmap_image_url": "/satellite-image?lat=13.45&lng=100.65&date=2024-03-15&image_type=ndci_heatmap",
         "disclaimer": DISCLAIMER_TEXT,
     }})
 
@@ -98,6 +100,20 @@ class DetectResponse(DisclaimerMixin):
         "from the requested `date` (nearest cloud-free image within the search window)."
     )
 
+    true_color_image_url: str | None = Field(
+        default=None, description="GET /satellite-image URL (true-color RGB PNG) for "
+        "this exact lat/lng/date, resolving to the same Sentinel-2 scene this response "
+        "was computed from. Null only when `status != 'ok'` (no usable scene existed "
+        "for the numeric reading either, so a second live render would fail the same "
+        "way) -- never a placeholder image. When non-null, the URL still does a live, "
+        "several-second GEE render on fetch; it is not pre-cached."
+    )
+    ndci_heatmap_image_url: str | None = Field(
+        default=None, description="GET /satellite-image URL (NDCI heatmap PNG, "
+        "5-stop risk ramp) for this exact lat/lng/date. Same null rule as "
+        "`true_color_image_url`."
+    )
+
 
 # --------------------------------------------------------------------------
 # /risk-map (GeoJSON FeatureCollection)
@@ -124,6 +140,21 @@ class RiskMapProperties(DisclaimerMixin):
 
     cloud_fraction: float | None = None
     actual_date: str | None = None
+
+    true_color_image_url: str | None = Field(
+        default=None, description="GET /risk-map/{site_id}/image?image_type=true_color "
+        "URL for this site's latest scheduler-cached true-color PNG. Serves cached "
+        "bytes (fast, no live GEE call) -- unlike /detect's or /satellite-image's "
+        "image URLs, which render live on fetch. Null whenever no cached image exists "
+        "yet for this site (no successful cache row, detection status != 'ok' on the "
+        "last refresh, or the image render itself failed that cycle) -- never a "
+        "placeholder image."
+    )
+    ndci_heatmap_image_url: str | None = Field(
+        default=None, description="GET /risk-map/{site_id}/image?image_type=ndci_heatmap "
+        "URL for this site's latest scheduler-cached NDCI heatmap PNG. Same null rule "
+        "as `true_color_image_url`."
+    )
 
     fetched_at: str | None = Field(
         default=None, description="When this cached reading was computed (ISO 8601). "

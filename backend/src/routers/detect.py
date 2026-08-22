@@ -5,6 +5,7 @@ rule-based prediction layer (see /risk-map, /timeseries for that)."""
 from __future__ import annotations
 
 from datetime import date as date_cls
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -13,6 +14,14 @@ from ..satellite_meta import fetch_satellite_meta
 from ..schemas import DetectResponse
 
 router = APIRouter()
+
+
+def _satellite_image_url(lat: float, lng: float, date: str, image_type: str) -> str:
+    """Build a /satellite-image URL from this response's own lat/lng/date
+    -- no extra GEE call here, just URL construction (per backend-api.md's
+    brief: "cheap to add, no extra GEE call inside /detect itself")."""
+    qs = urlencode({"lat": lat, "lng": lng, "date": date, "image_type": image_type})
+    return f"/satellite-image?{qs}"
 
 
 @router.get("/detect", response_model=DetectResponse, tags=["detection"])
@@ -51,6 +60,19 @@ def get_detect(
             f"unusable, not just this one reading: {exc}",
         ) from exc
 
+    # Image URLs only when the numeric detection itself succeeded --
+    # status != 'ok' means no usable Sentinel-2 scene existed for the
+    # numeric reading either (no_imagery/no_water_pixels/no_climatology),
+    # so a live image render for the same lat/lng/date would fail the
+    # same way (same-scene guarantee). Null here, not a URL that's known
+    # in advance to 404 -- see schemas.DetectResponse field docs.
+    if result["status"] == "ok":
+        true_color_url = _satellite_image_url(lat, lng, date, "true_color")
+        ndci_heatmap_url = _satellite_image_url(lat, lng, date, "ndci_heatmap")
+    else:
+        true_color_url = None
+        ndci_heatmap_url = None
+
     return DetectResponse(
         lat=lat,
         lng=lng,
@@ -63,4 +85,6 @@ def get_detect(
         reason=result["reason"],
         cloud_fraction=meta["cloud_fraction"],
         actual_date=meta["actual_date"],
+        true_color_image_url=true_color_url,
+        ndci_heatmap_image_url=ndci_heatmap_url,
     )

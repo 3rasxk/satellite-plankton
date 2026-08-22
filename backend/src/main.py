@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 from . import _detection as bridge
 from .db import SessionLocal, get_db, init_db  # noqa: F401  (get_db re-exported for routers/tests)
 from .db_models import ValidationEvent
-from .routers import detect, risk_map, summary, timeseries, validation
+from .routers import detect, risk_map, satellite_image, summary, timeseries, validation
 from .scheduler import create_scheduler, ensure_monitored_sites
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -53,6 +53,7 @@ app.add_middleware(
 app.include_router(risk_map.router)
 app.include_router(timeseries.router)
 app.include_router(detect.router)
+app.include_router(satellite_image.router)
 app.include_router(summary.router)
 app.include_router(validation.router)
 
@@ -129,5 +130,13 @@ def root() -> dict:
     return {
         "service": "Gulf of Thailand Algal Bloom Monitor -- API",
         "docs": "/docs",
-        "endpoints": ["/risk-map", "/timeseries", "/detect", "/summary", "/validation"],
+        "endpoints": [
+            "/risk-map",
+            "/risk-map/{site_id}/image",
+            "/timeseries",
+            "/detect",
+            "/satellite-image",
+            "/summary",
+            "/validation",
+        ],
     }

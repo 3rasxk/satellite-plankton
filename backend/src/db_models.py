@@ -14,7 +14,11 @@ SQLAlchemy ORM models. Four tables:
                     `stale` distinguishes "the last scheduler run for this
                     site failed, this is old data" from "this is the
                     latest real reading" -- a failed refresh must never
-                    silently look like a fresh one.
+                    silently look like a fresh one. Also carries
+                    pre-rendered true-color/NDCI-heatmap PNG bytes
+                    (`true_color_png`/`ndci_heatmap_png`) refreshed on the
+                    same cycle -- see scheduler.py for why this bounded
+                    6-site grid is cached rather than rendered on demand.
 - ValidationEvent   mirrors data/validation/events.csv (14 rows), upserted
                     read-only at startup from that file. Not editable via
                     any API route -- events.csv is the single source of
@@ -33,7 +37,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -86,6 +90,21 @@ class DetectionCache(Base):
     # -- satellite metadata (surfaced whenever satellite-backed) --
     cloud_fraction: Mapped[float | None] = mapped_column(Float, nullable=True)
     actual_date: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    # -- pre-rendered satellite imagery (scheduler-cached, see scheduler.py
+    # _refresh_images) -- PNG bytes of the same resolved Sentinel-2 scene
+    # `actual_date`/`cloud_fraction` above describe (data-pipeline/src/
+    # imagery.py's same-scene guarantee). Only this monitored 6-site grid
+    # gets images pre-rendered and cached this way; /detect and
+    # /satellite-image render on demand instead -- see scheduler.py's
+    # docstring / the backend-api build report for the latency reasoning
+    # behind that split.
+    true_color_png: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    ndci_heatmap_png: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    image_status: Mapped[str | None] = mapped_column(
+        String, nullable=True
+    )  # ok|skipped_detection_not_ok|no_imagery|no_water_pixels|fetch_error|not_attempted
+    image_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     stale: Mapped[bool] = mapped_column(Boolean, default=False)

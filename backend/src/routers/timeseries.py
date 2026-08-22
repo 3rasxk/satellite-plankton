@@ -6,7 +6,38 @@ detection/data-pipeline expose -- Sentinel-2 bands are a per-date point
 query, so a per-day Sentinel-2 pull across months of history would mean
 one live GEE call per day requested, which is impractical). See
 schemas.TimeseriesPoint's docstring-equivalent field descriptions for why
-cloud_fraction/actual_date are explicitly null here rather than omitted."""
+cloud_fraction/actual_date are explicitly null here rather than omitted.
+
+Deliberately no per-point satellite image (no image_url field added to
+TimeseriesPoint), despite the human's initial request mentioning imagery
+"alongside every detection result" including /timeseries. Two independent
+reasons ruled it out, not just latency:
+
+1. Scale: this series returns up to ~880 points for a single lat/lng
+   (confirmed range in this project: 2002-07-12 to 2025-11-30 at some
+   coordinates). Attaching a rendered image per point would mean ~880
+   synchronous live GEE image-render calls in one request -- at this
+   endpoint's own measured per-image cost (see backend-api build report:
+   +2-4s per true-color render, warm session), that is tens of minutes of
+   wall-clock time and hundreds of GEE calls for one page load, not a
+   minor inefficiency.
+2. Data-type mismatch, independent of scale: this series is MODIS chlor_a
+   (~1 km, daily composite, 2002-present climatology baseline per
+   CLAUDE.md §0), not Sentinel-2. There is no Sentinel-2 scene tied 1:1 to
+   a MODIS timeseries point in the first place -- "the image for this
+   point" is not a well-defined thing here the way it is for /detect
+   (which IS a specific Sentinel-2-backed reading). Rendering *some*
+   Sentinel-2 image near a MODIS point's date would silently blend two
+   different satellites/resolutions into what looks like one reading,
+   which CLAUDE.md's truth-boundary rules (never conflate detection
+   sources) argue against.
+
+The frontend is expected to pair this series with /detect's image fields
+(`true_color_image_url`/`ndci_heatmap_image_url`) for whatever single date
+is currently selected in the UI (e.g. a click on the anomaly strip) --
+that reuses /detect's existing per-date image machinery instead of
+duplicating it here, and keeps the Sentinel-2-vs-MODIS distinction
+explicit rather than papered over."""
 
 from __future__ import annotations
 

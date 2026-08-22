@@ -30,6 +30,7 @@ Design tables for: monitored sites/grid cells, cached detection results (avoid r
 - `GET /detect?lat=&lng=&date=` → `{anomaly_z, index_values, detected, index_used, disclaimer}` — thin wrapper over `bloom-detection.detect()`.
 - `GET /summary` → region-wide stats: site counts per risk level, most recent detected signal, data freshness.
 - `GET /validation` → the 14-row per-event table (never a percentage), from `bloom-detection`'s threshold calibration output.
+- `GET /satellite-image?lat=&lng=&date=&image_type=true_color|ndci_heatmap` → live-rendered PNG (Content-Type: image/png, not base64/JSON) of the exact Sentinel-2 scene `/detect` would use for the same lat/lng/date. `/detect`'s own response carries `true_color_image_url`/`ndci_heatmap_image_url` pointing at this endpoint (null when `status != 'ok'`). `GET /risk-map/{site_id}/image?image_type=...` serves the scheduler's pre-rendered/cached bytes for the fixed 6-site grid instead (no live call) — see `src/scheduler.py` for the caching-vs-on-demand reasoning, grounded in a real measured latency delta.
 
 `docs/FRONTEND_PLAN.md` §3 was updated to match `/detect` — no naming reconciliation needed at Phase 4 handoff.
 

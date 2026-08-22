@@ -103,6 +103,16 @@ get_modis_chlorophyll_history = _dp.get_modis_chlorophyll_history
 get_modis_sst = _dp.get_modis_sst
 get_rainfall_proxy = _dp.get_rainfall_proxy
 
+# Image rendering (data-pipeline/src/imagery.py) -- added for backend-api's
+# satellite-image endpoints (GET /satellite-image, /risk-map/{id}/image).
+# detection/src's own prediction.py/thresholds.py never call these (no
+# detection/prediction logic uses rendered images, only numeric bands) --
+# re-exported here purely as a pass-through so backend/src/_detection.py
+# can reach them through this same bridge module rather than opening a
+# fourth, parallel path into data-pipeline/src.
+get_true_color_image = _dp.get_true_color_image
+get_ndci_heatmap = _dp.get_ndci_heatmap
+
 # `day_of_year_climatology` is a pure function in data-pipeline/src/modis.py
 # whose own docstring says bloom-detection is "expected to build on this
 # rather than reimplement it" — re-exported here for src/climatology.py so
@@ -126,4 +136,6 @@ __all__ = [
     "day_of_year_climatology",
     "NoCloudFreeImageryError",
     "NoWaterPixelsError",
+    "get_true_color_image",
+    "get_ndci_heatmap",
 ]

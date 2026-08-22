@@ -11,18 +11,25 @@ functions fabricate data when auth is missing — they raise
 `auth.GEEAuthError` instead. Downstream code (`detection/`) must never
 catch that error and substitute a placeholder value.
 
-Public functions re-exported here for `bloom-detection` and other
-downstream consumers:
+Public functions re-exported here for `bloom-detection`, `backend-api`,
+and other downstream consumers:
     get_sentinel2_bands(lat, lng, date)
     get_modis_chlorophyll_history(lat, lng)
     get_modis_sst(lat, lng, date)
     get_rainfall_proxy(lat, lng, date)
+    get_true_color_image(lat, lng, date)   -- PNG thumbnail, see imagery.py
+    get_ndci_heatmap(lat, lng, date)       -- PNG thumbnail, see imagery.py
 """
 
 from .auth import GEEAuthError, initialize_ee
+from .imagery import get_ndci_heatmap, get_true_color_image
 from .modis import get_modis_chlorophyll_history, get_modis_sst
 from .rainfall import get_rainfall_proxy
-from .sentinel2 import get_sentinel2_bands
+from .sentinel2 import (
+    NoCloudFreeImageryError,
+    NoWaterPixelsError,
+    get_sentinel2_bands,
+)
 
 __all__ = [
     "GEEAuthError",
@@ -31,4 +38,8 @@ __all__ = [
     "get_modis_chlorophyll_history",
     "get_modis_sst",
     "get_rainfall_proxy",
+    "get_true_color_image",
+    "get_ndci_heatmap",
+    "NoCloudFreeImageryError",
+    "NoWaterPixelsError",
 ]

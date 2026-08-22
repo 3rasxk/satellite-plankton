@@ -1,6 +1,8 @@
 # backend
 
-FastAPI service — five endpoints (`/risk-map`, `/timeseries`, `/detect`, `/summary`, `/validation`) + scheduler. Owned by the `backend-api` agent — see `.claude/agents/backend-api.md`. Wraps `detection/src`'s `detect()`/`risk_level()` (Phase 2) in HTTP responses — no detection/prediction logic lives here.
+FastAPI service — `/risk-map`, `/risk-map/{site_id}/image`, `/timeseries`, `/detect`, `/satellite-image`, `/summary`, `/validation` — + scheduler. Owned by the `backend-api` agent — see `.claude/agents/backend-api.md`. Wraps `detection/src`'s `detect()`/`risk_level()` (Phase 2) in HTTP responses — no detection/prediction logic lives here.
+
+`/detect` and `/satellite-image` render a true-color/NDCI-heatmap satellite image on demand (live GEE call, several seconds — no small enumerable key space to cache). `/risk-map`'s fixed 6-site grid instead gets its images pre-rendered and cached by the scheduler alongside the numeric refresh, then served from the DB in milliseconds via `/risk-map/{site_id}/image` — see `src/scheduler.py`'s module docstring for the real, measured-latency reasoning behind that split.
 
 ## Setup
 
@@ -29,7 +31,7 @@ No real Supabase project exists yet (`backend/.env.example`'s `SUPABASE_URL`/`SU
 
 Tables (`src/db_models.py`):
 - `monitored_sites` — the grid `/risk-map`/`/summary`/the scheduler operate over (`src/grid.py`, 6 points, upserted at startup). Not the validation set.
-- `detection_cache` — one row per site, upserted by the scheduler with the latest `risk_level()`/`detect()` result. `/risk-map` and `/summary` read this, never GEE live. `stale` + `error` distinguish "last refresh failed, this is old data" from "this is fresh."
+- `detection_cache` — one row per site, upserted by the scheduler with the latest `risk_level()`/`detect()` result. `/risk-map` and `/summary` read this, never GEE live. `stale` + `error` distinguish "last refresh failed, this is old data" from "this is fresh." Also carries `true_color_png`/`ndci_heatmap_png` (BLOB, pre-rendered PNG bytes) + `image_status`/`image_error`, refreshed on the same cycle — see `src/scheduler.py`.
 - `validation_events` — mirrors `data/validation/events.csv` (14 rows), upserted read-only at startup. Never written to via any API route.
 - `validation_cache` — caches `thresholds.run()`'s output (`/validation`'s data source) for `VALIDATION_CACHE_TTL_HOURS`, since `run()` makes a real, slow GEE call.
 

@@ -130,6 +130,16 @@ get_sentinel2_bands = _data_pipeline_bridge.get_sentinel2_bands
 get_modis_chlorophyll_history = _data_pipeline_bridge.get_modis_chlorophyll_history
 day_of_year_climatology = _data_pipeline_bridge.day_of_year_climatology
 
+# Image rendering (data-pipeline/src/imagery.py, re-exported through
+# detection/src/_data_pipeline.py) -- true-color and NDCI-heatmap PNG
+# thumbnails of the exact same resolved Sentinel-2 scene
+# get_sentinel2_bands returns numeric bands for (same-scene guarantee, see
+# data-pipeline/src/imagery.py's module docstring). Used by
+# routers/satellite_image.py (on-demand, per lat/lng/date) and
+# scheduler.py (pre-rendered/cached for the 6-site monitored grid).
+get_true_color_image = _data_pipeline_bridge.get_true_color_image
+get_ndci_heatmap = _data_pipeline_bridge.get_ndci_heatmap
+
 # Pure function for computing an anomaly z-score -- reused (not
 # reimplemented) for /timeseries, same call climatology.py itself makes
 # for the single-date case in detect().
@@ -148,4 +158,6 @@ __all__ = [
     "get_modis_chlorophyll_history",
     "day_of_year_climatology",
     "z_score",
+    "get_true_color_image",
+    "get_ndci_heatmap",
 ]
