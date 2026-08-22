@@ -19,9 +19,21 @@ never resolved, only water-colour signatures.
 
 Cloud masking and land/water masking are implemented as pure, GEE-free
 functions (`compute_cloud_fraction`, `water_pixel_mask`,
-`masked_band_mean`) operating on plain numpy arrays, so they are
-unit-testable against synthetic pixel data without a live Earth Engine
-session. Only `get_sentinel2_bands` itself talks to GEE.
+`masked_band_mean`, `build_water_cloud_mask`) operating on plain numpy
+arrays, so they are unit-testable against synthetic pixel data without a
+live Earth Engine session. Only `get_sentinel2_bands` itself talks to GEE.
+
+Known GEE gotcha this module defends against: `reduceRegion` with
+`ee.Reducer.toList()` reduces each band of a multi-band image
+independently, dropping masked pixels per band rather than keeping
+positionally-aligned lists. The JRC `occurrence` band is masked
+(no data) over pixels that were never observed as water, so a
+land/beach point can return a full-length `SCL` list alongside a short
+or empty `occurrence` list. Naively combining a cloud mask and a water
+mask built from differently-sized arrays either raises a numpy
+broadcast `ValueError` or, worse, silently misaligns pixels. This module
+checks array lengths explicitly and raises the typed `NoWaterPixelsError`
+instead of guessing.
 """
 
 from __future__ import annotations
@@ -135,6 +147,50 @@ def masked_band_mean(band_values: Any, mask: Any) -> float:
     return float(np.nanmean(kept))
 
 
+def build_water_cloud_mask(
+    scl_values: Any,
+    occurrence_values: Any,
+    cloud_classes: tuple = DEFAULT_CLOUD_CLASSES,
+    min_occurrence_pct: float = DEFAULT_MIN_WATER_OCCURRENCE_PCT,
+) -> np.ndarray:
+    """Combined cloud-clear AND water boolean mask, pure numpy.
+
+    `scl_values` and `occurrence_values` are independent per-band results
+    of a GEE `reduceRegion(reducer=ee.Reducer.toList())` call against a
+    multi-band image. GEE's `toList` reducer drops masked pixels
+    *per band independently*, so the two lists are not guaranteed to be
+    the same length or positionally aligned -- most commonly because the
+    JRC Global Surface Water `occurrence` band has no data at a land/
+    shore pixel (it's a statistical mask defined only over
+    historically-water pixels), so a land point can return a full-length
+    `SCL` list alongside a short or empty `occurrence` list.
+
+    A length mismatch (including an empty `occurrence_values`) is treated
+    the same as "no water pixels found" -- we never guess or pad values
+    to force the arrays to align; we raise the same typed error used when
+    every pixel is explicitly land, so callers already handling
+    `NoWaterPixelsError` (retry next candidate date, or surface the error)
+    don't need a second code path.
+
+    Raises:
+        NoWaterPixelsError: `occurrence_values` is empty, or its length
+            does not match `scl_values`'s length.
+    """
+    scl_arr = np.asarray(scl_values)
+    occurrence_arr = np.asarray(occurrence_values, dtype=float)
+    if scl_arr.size == 0 or occurrence_arr.size != scl_arr.size:
+        raise NoWaterPixelsError(
+            f"Occurrence band returned {occurrence_arr.size} pixel(s) but "
+            f"SCL returned {scl_arr.size} -- the sample buffer is likely "
+            f"on land/shore, where JRC Global Surface Water has no "
+            f"coverage, so reduceRegion's per-band toList reducer dropped "
+            f"some or all of the occurrence pixels."
+        )
+    cloud_mask = ~np.isin(scl_arr, cloud_classes)
+    water_mask = water_pixel_mask(occurrence_arr, min_occurrence_pct)
+    return cloud_mask & water_mask
+
+
 # --------------------------------------------------------------------------
 # GEE-backed extraction.
 # --------------------------------------------------------------------------
@@ -233,9 +289,11 @@ def get_sentinel2_bands(
             continue
 
         occurrence_values = sample.get("occurrence", [])
-        cloud_mask = ~np.isin(np.asarray(scl_values), DEFAULT_CLOUD_CLASSES)
-        water_mask = water_pixel_mask(occurrence_values, DEFAULT_MIN_WATER_OCCURRENCE_PCT)
-        combined_mask = cloud_mask & water_mask[: cloud_mask.size]
+        try:
+            combined_mask = build_water_cloud_mask(scl_values, occurrence_values)
+        except NoWaterPixelsError as exc:
+            best_error = exc
+            continue
 
         try:
             band_means = {
@@ -244,6 +302,19 @@ def get_sentinel2_bands(
             }
         except NoWaterPixelsError as exc:
             best_error = exc
+            continue
+        except ValueError as exc:
+            # A spectral band's toList result came back a different length
+            # than the SCL/occurrence-derived mask -- the same per-band
+            # independent-masking gotcha `build_water_cloud_mask` guards
+            # against, just surfacing on B2-B6 instead of `occurrence`.
+            # Treat as an unusable sample for this candidate rather than
+            # letting a raw numpy broadcast error escape.
+            best_error = NoWaterPixelsError(
+                f"Candidate {image_id}: inconsistent per-band pixel counts "
+                f"in the sample buffer ({exc}) -- treating as no usable "
+                f"water pixels for this date."
+            )
             continue
 
         actual_date = datetime.fromtimestamp(time_start_ms / 1000, tz=timezone.utc).strftime(

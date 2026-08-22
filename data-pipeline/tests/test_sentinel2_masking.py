@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.sentinel2 import (
     NoWaterPixelsError,
+    build_water_cloud_mask,
     compute_cloud_fraction,
     masked_band_mean,
     water_pixel_mask,
@@ -89,3 +90,47 @@ def test_combined_cloud_and_water_mask_realistic_buffer():
     mean_val = masked_band_mean(band, combined)
     expected = np.mean([120, 130, 140, 135, 128, 132])
     assert mean_val == pytest.approx(expected)
+
+
+def test_build_water_cloud_mask_empty_occurrence_raises_typed_error():
+    """Regression test for a live bug: a land/beach point returns a
+    full-length SCL list (GEE's per-band toList reducer still classifies
+    every pixel) but an EMPTY occurrence list, because JRC Global Surface
+    Water has no data outside historically-water pixels. The old code did
+    `cloud_mask & water_mask[: cloud_mask.size]`, which numpy cannot
+    broadcast when water_mask is shorter (e.g. shape (30,) vs (0,)),
+    crashing with a raw ValueError instead of the typed
+    NoWaterPixelsError the docstring already promises for an all-land
+    buffer. This must raise NoWaterPixelsError, not ValueError.
+    """
+    scl = np.array([6] * 30)  # 30 pixels, all "water" per SCL classification
+    occurrence = np.array([])  # JRC occurrence band returned nothing at all
+
+    with pytest.raises(NoWaterPixelsError):
+        build_water_cloud_mask(scl, occurrence)
+
+
+def test_build_water_cloud_mask_shorter_occurrence_raises_typed_error():
+    """Same gotcha, but occurrence returns some pixels -- just fewer than
+    SCL, rather than zero. Any length mismatch is untrustworthy (no valid
+    positional correspondence between the two independently-reduced
+    lists), so this must also raise NoWaterPixelsError, not silently
+    truncate/broadcast or raise a bare ValueError.
+    """
+    scl = np.array([6] * 30)
+    occurrence = np.array([90.0] * 12)  # shorter than scl, not empty
+
+    with pytest.raises(NoWaterPixelsError):
+        build_water_cloud_mask(scl, occurrence)
+
+
+def test_build_water_cloud_mask_matched_lengths_still_works():
+    """Sanity check: when SCL and occurrence lists are the same length
+    (the normal/expected case), build_water_cloud_mask still produces the
+    correct combined boolean mask instead of always raising.
+    """
+    scl = np.array([6, 6, 9, 6])  # index 2 = cloud
+    occurrence = np.array([90.0, 20.0, 95.0, 80.0])  # index 1 = land (<50%)
+
+    mask = build_water_cloud_mask(scl, occurrence)
+    assert list(mask) == [True, False, False, True]
