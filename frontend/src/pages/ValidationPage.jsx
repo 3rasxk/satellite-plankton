@@ -1,6 +1,7 @@
 import { useApi } from '../hooks/useApi.js'
 import { getValidation } from '../api/client.js'
 import { formatZ } from '../constants.js'
+import SatelliteImage from '../components/SatelliteImage.jsx'
 
 /**
  * Validation view — not named in docs/FRONTEND_PLAN.md's route table
@@ -20,6 +21,14 @@ import { formatZ } from '../constants.js'
  * straight from the response's counts and per-row fields, so it will
  * also render correctly, unchanged, once some events do get real
  * coordinates later.
+ *
+ * The "Satellite image" column follows the same rule: it renders a real
+ * image only when `ev.matchable && ev.anomaly_z != null` (a real
+ * satellite reading exists — see backend/src/routers/validation.py),
+ * using `ev.true_color_image_url`/`ev.ndci_heatmap_image_url`, which the
+ * backend itself only populates under that exact condition. All 14 rows
+ * show "no satellite image available" today because 0 of them meet it
+ * yet; no "5" or "7" is hardcoded anywhere in this file.
  */
 export default function ValidationPage() {
   const { data, loading, error, refetch } = useApi(getValidation, [])
@@ -83,6 +92,7 @@ export default function ValidationPage() {
                     <th>Cell count</th>
                     <th>Match</th>
                     <th>Anomaly z</th>
+                    <th>Satellite image</th>
                     <th>Notes</th>
                   </tr>
                 </thead>
@@ -112,6 +122,18 @@ export default function ValidationPage() {
                       </td>
                       <td className="mono">
                         {ev.anomaly_z != null ? formatZ(ev.anomaly_z) : '—'}
+                      </td>
+                      <td className="event-image-cell">
+                        {ev.matchable && ev.anomaly_z != null ? (
+                          <SatelliteImage
+                            trueColorUrl={ev.true_color_image_url}
+                            ndciHeatmapUrl={ev.ndci_heatmap_image_url}
+                            noImageMessage="No satellite image available for this event."
+                            compact
+                          />
+                        ) : (
+                          <span className="no-rules">No satellite image available for this event.</span>
+                        )}
                       </td>
                       <td>{ev.notes}</td>
                     </tr>

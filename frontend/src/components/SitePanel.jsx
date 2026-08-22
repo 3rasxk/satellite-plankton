@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from 'react'
 import { useApi } from '../hooks/useApi.js'
 import { getTimeseries, detect } from '../api/client.js'
 import AnomalyStrip from './AnomalyStrip.jsx'
+import SatelliteImage from './SatelliteImage.jsx'
 import { segmentsFromTimeseries } from '../utils/series.js'
 import TimeSeriesChart from './TimeSeriesChart.jsx'
 import {
@@ -48,6 +49,49 @@ export default function SitePanel({ site, onClose }) {
 
   const riskColorVar = RISK_COLOR_VAR[site.risk_level] || null
   const isNoData = NO_DATA_STATUS.has(site.status)
+
+  // Image source: when the panel was opened from a map marker, `site`
+  // carries `site_id` plus the scheduler's already-cached image URLs
+  // (fast — a DB blob read, no live GEE call). Prefer those. Only fall
+  // back to /detect's live (multi-second) render when there's no known
+  // site_id to have a cache for in the first place (e.g. a future
+  // arbitrary-point click that isn't one of the 6 monitored sites).
+  const usingCachedImage = !!site.site_id
+  const cachedTrueColor = usingCachedImage ? site.true_color_image_url || null : null
+  const cachedNdci = usingCachedImage ? site.ndci_heatmap_image_url || null : null
+
+  const liveTrueColor = !usingCachedImage ? dt.data?.true_color_image_url || null : null
+  const liveNdci = !usingCachedImage ? dt.data?.ndci_heatmap_image_url || null : null
+
+  const trueColorImageUrl = usingCachedImage ? cachedTrueColor : liveTrueColor
+  const ndciHeatmapImageUrl = usingCachedImage ? cachedNdci : liveNdci
+
+  let imageCaption = null
+  let noImageMessage = null
+  if (usingCachedImage) {
+    imageCaption = site.actual_date
+      ? `Cached scheduler reading · scene ${site.actual_date}`
+      : 'Cached scheduler reading'
+    if (!trueColorImageUrl && !ndciHeatmapImageUrl) {
+      noImageMessage = isNoData
+        ? STATUS_EXPLAINER[site.status] || 'No cached satellite image for this site yet.'
+        : "The scheduler's last reading was usable, but no image was cached for it this cycle."
+    }
+  } else if (dt.data) {
+    imageCaption = dt.data.actual_date ? `Live render · scene ${dt.data.actual_date}` : 'Live render'
+    if (!trueColorImageUrl && !ndciHeatmapImageUrl) {
+      noImageMessage =
+        dt.data.status !== 'ok'
+          ? STATUS_EXPLAINER[dt.data.status] || dt.data.reason || 'No satellite image available for today.'
+          : 'No satellite image available for today.'
+    }
+  }
+
+  // Only render the image block once its data source has actually
+  // resolved: the cached path is synchronous (already on `site`), the
+  // live path needs /detect's fetch to finish first — otherwise this
+  // would flash a premature "no image" state before dt.data arrives.
+  const imageSectionReady = usingCachedImage || (!!dt.data && !dt.loading && !dt.error)
 
   return (
     <aside className="site-panel" aria-label={`Detail panel for ${site.name}`}>
@@ -118,6 +162,27 @@ export default function SitePanel({ site, onClose }) {
             />
             <TimeSeriesChart points={ts.data.points} />
           </>
+        )}
+      </section>
+
+      {/* --- Satellite image: cached (fast, from the map's own risk-map
+          fetch) when opened from a marker, live /detect render otherwise --- */}
+      <section>
+        <div className="section-title">Satellite image</div>
+        {!usingCachedImage && dt.loading && <p className="no-rules">Checking today&apos;s satellite pass…</p>}
+        {!usingCachedImage && dt.error && (
+          <div className="state-panel error">
+            <h3>Couldn&apos;t reach the data service.</h3>
+            <button type="button" className="retry-btn" onClick={dt.refetch}>Retry</button>
+          </div>
+        )}
+        {imageSectionReady && (
+          <SatelliteImage
+            trueColorUrl={trueColorImageUrl}
+            ndciHeatmapUrl={ndciHeatmapImageUrl}
+            noImageMessage={noImageMessage}
+            caption={imageCaption}
+          />
         )}
       </section>
 

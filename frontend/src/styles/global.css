@@ -498,6 +498,103 @@ button {
 }
 
 /* ---------------------------------------------------------------------- */
+/* Satellite image                                                        */
+/* ---------------------------------------------------------------------- */
+
+.satellite-image-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.satellite-toggle {
+  display: flex;
+  gap: 6px;
+}
+
+.satellite-toggle button {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  background: transparent;
+  border: var(--hairline);
+  color: var(--ink-dim);
+  padding: 4px 10px;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.satellite-toggle button.active {
+  border-color: var(--clear);
+  color: var(--ink);
+}
+
+.satellite-toggle button:hover {
+  color: var(--ink);
+}
+
+.satellite-image-frame {
+  border: var(--hairline);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--deep);
+  min-height: 160px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px;
+}
+
+.satellite-image-frame .no-rules,
+.satellite-image-frame .status-banner {
+  margin: 0;
+}
+
+.satellite-image {
+  width: 100%;
+  max-width: 100%;
+  display: block;
+  border-radius: var(--radius);
+}
+
+.satellite-caption {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-dim);
+  margin: 0;
+}
+
+.satellite-no-image {
+  margin: 0;
+}
+
+/* Compact variant — used inline in the validation table, one row per
+   event, so the image reads as a thumbnail, not a full panel image. */
+.satellite-image-block.compact {
+  min-width: 140px;
+}
+
+.satellite-image-block.compact .satellite-image-frame {
+  min-height: 90px;
+  max-width: 160px;
+  padding: 4px;
+}
+
+.satellite-image-block.compact .satellite-image {
+  max-width: 150px;
+}
+
+.satellite-image-block.compact .satellite-toggle button {
+  padding: 2px 6px;
+  font-size: 10px;
+}
+
+.event-image-cell {
+  min-width: 160px;
+}
+
+/* ---------------------------------------------------------------------- */
 /* Anomaly strip — signature component                                    */
 /* ---------------------------------------------------------------------- */
 

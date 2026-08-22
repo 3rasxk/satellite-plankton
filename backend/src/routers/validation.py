@@ -16,6 +16,7 @@ and pointless.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -30,6 +31,17 @@ from ..schemas import LeaveOneOutRow, ValidationEventRow, ValidationResponse
 router = APIRouter()
 
 
+def _validation_image_url(lat: float, lng: float, date: str, image_type: str) -> str:
+    """Same URL shape as routers/detect.py's `_satellite_image_url` --
+    built from the event's own coordinate and the actual Sentinel-2 scene
+    date the matching attempt already resolved (thresholds.py's
+    `attempt_satellite_reading` -> entry["actual_date"]), so this resolves
+    to the exact same scene the event's anomaly_z was computed from
+    (same-scene guarantee), not a fresh/different search."""
+    qs = urlencode({"lat": lat, "lng": lng, "date": date, "image_type": image_type})
+    return f"/satellite-image?{qs}"
+
+
 def _build_payload() -> dict:
     """Runs thresholds.run() (real GEE call) and reduces it to the plain-
     dict shape stored in ValidationCache.payload / returned to callers."""
@@ -42,6 +54,26 @@ def _build_payload() -> dict:
         flagged = row["flagged"]
         if row["z_scores"] and primary_index in row["z_scores"]:
             z_val = row["z_scores"][primary_index]["z"]
+
+        # A real satellite reading exists only when z_val is not None
+        # (mirrors /detect's status == "ok" gate) -- and only matchable
+        # rows ever populate lat/lng/actual_date (th_001's regional-proxy
+        # path deliberately does not, since it has no coordinate of its
+        # own; CLAUDE.md forbids treating a proxy point as the event's
+        # location). Both conditions collapse to "z_val is not None" in
+        # practice since z_scores are only ever computed alongside a real
+        # lat/lng/actual_date, but both are checked explicitly so a future
+        # code path can't accidentally produce a URL without a real
+        # coordinate behind it.
+        true_color_url = None
+        ndci_heatmap_url = None
+        if z_val is not None and row.get("lat") is not None and row.get("actual_date"):
+            true_color_url = _validation_image_url(
+                row["lat"], row["lng"], row["actual_date"], "true_color"
+            )
+            ndci_heatmap_url = _validation_image_url(
+                row["lat"], row["lng"], row["actual_date"], "ndci_heatmap"
+            )
 
         events.append(
             {
@@ -60,6 +92,8 @@ def _build_payload() -> dict:
                 "anomaly_z": z_val,
                 "flagged": flagged,
                 "notes": row["match_reason"] or "",
+                "true_color_image_url": true_color_url,
+                "ndci_heatmap_image_url": ndci_heatmap_url,
             }
         )
 

@@ -286,6 +286,20 @@ class ValidationEventRow(BaseModel):
     )
     notes: str
 
+    true_color_image_url: str | None = Field(
+        default=None, description="GET /satellite-image URL (true-color RGB PNG) for "
+        "this event's own coordinate and the actual Sentinel-2 scene date the matching "
+        "attempt used. Null unless `matchable` is true AND a real satellite reading "
+        "exists (`anomaly_z` is not null) -- currently null for all 14 events, since "
+        "none has produced a usable reading yet (see `calibration_caveat`). Never a "
+        "placeholder image; becomes non-null automatically the moment a future event "
+        "does produce one, no frontend change required."
+    )
+    ndci_heatmap_image_url: str | None = Field(
+        default=None, description="GET /satellite-image URL (NDCI heatmap PNG) for "
+        "this event. Same null rule as `true_color_image_url`."
+    )
+
 
 class LeaveOneOutRow(BaseModel):
     iteration_label: str

@@ -616,6 +616,8 @@ def run() -> dict:
             "match_method": loc["method"],
             "match_reason": loc["reason"],
             "low_weight": row["event_id"] in config["historical_low_weight_events"],
+            "lat": None,
+            "lng": None,
             "target_date": None,
             "search_window_days": None,
             "sentinel2_status": None,
@@ -632,6 +634,8 @@ def run() -> dict:
             # Real coordinate in events.csv (7 rows as of 2026-08-22) --
             # one generic call, same for every one of them.
             lat, lng = float(row["lat"]), float(row["lng"])
+            entry["lat"] = lat
+            entry["lng"] = lng
             target_date, search_window_days = event_search_window(row, prec)
             entry["target_date"] = target_date
             entry["search_window_days"] = search_window_days
