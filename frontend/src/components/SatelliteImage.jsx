@@ -1,6 +1,23 @@
 import { useState } from 'react'
 import { useSatelliteImage } from '../hooks/useSatelliteImage.js'
 
+// data-pipeline/src/imagery.py renders this thumbnail over a wider ~500m
+// buffer for visual context, while the numeric reading next to it
+// (cloud_fraction, NDCI, anomaly_z) is sampled from a tighter, clear ~30m
+// buffer at the same center point (data-pipeline/src/sentinel2.py
+// DEFAULT_BUFFER_M) -- this is a deliberate, documented tradeoff (see both
+// modules' docstrings), not a bug: the picture and the number can
+// legitimately disagree about how much cloud/turbidity is visible,
+// because they're sampled over different-sized areas of the same scene.
+// Always shown, not just on hover/error, so a reader never mistakes a
+// clean number next to a visibly cloudy or turbid picture for a
+// contradiction.
+const BUFFER_CAVEAT_TEXT =
+  "This image shows a wider ~500m area for visual context. The numeric reading " +
+  '(cloud fraction, NDCI, anomaly) is sampled from a smaller, clear ~30m area at ' +
+  "the center, and may not reflect everything visible in the wider image — clouds " +
+  "or turbidity outside the sampled area won't affect the number."
+
 /**
  * Renders a satellite image fetched from a relative backend URL
  * (`/satellite-image?...` or `/risk-map/{site_id}/image?...`), with a
@@ -88,6 +105,8 @@ export default function SatelliteImage({
       </div>
 
       {caption && !loading && !error && objectUrl && <p className="satellite-caption">{caption}</p>}
+
+      <p className="satellite-buffer-caveat">{BUFFER_CAVEAT_TEXT}</p>
     </div>
   )
 }

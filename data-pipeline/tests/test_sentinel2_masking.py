@@ -42,6 +42,46 @@ def test_cloud_fraction_empty_array_is_fully_unusable():
     assert compute_cloud_fraction(np.array([])) == 1.0
 
 
+def test_tight_buffer_cloud_fraction_can_be_zero_while_wider_region_has_real_cloud():
+    """Regression/documentation test for a human-audit finding (project
+    orchestrator, 2026-08-19/23): `get_sentinel2_bands` (this module)
+    computes cloud_fraction over a tight ~30 m buffer (DEFAULT_BUFFER_M),
+    while `imagery.py`'s `get_true_color_image`/`get_ndci_heatmap` render
+    their thumbnail over a much wider ~500 m buffer
+    (DEFAULT_IMAGE_REGION_BUFFER_M) around the same center point on the
+    same resolved scene (imagery.py's own module docstring, "Visualization
+    region vs. numeric sample region"). Live-confirmed for the Cha-am grid
+    site (12.75, 100.05): 30 m and 150 m buffers both read
+    cloud_fraction=0.0 on the resolved scene (actual_date=2026-08-18),
+    while that same scene's actual 500 m image-rendering buffer reads
+    cloud_fraction=0.1666 (16.7%). That is NOT a bug -- the tight buffer
+    genuinely never saw the cloud, because the cloud sits entirely outside
+    its (smaller) sampled ground area. This test locks that shape in with
+    synthetic SCL pixels so it can't silently regress into looking like a
+    calculation bug later.
+    """
+    # Tight ~30 m buffer sample: entirely clear water (SCL=6, not a
+    # cloud class).
+    tight_scl = np.array([6, 6, 6, 6, 6, 6, 6, 6, 6])
+    assert compute_cloud_fraction(tight_scl) == 0.0
+
+    # Wide ~500 m buffer sample: a strict superset of the tight buffer's
+    # own pixels (still all clear) PLUS additional pixels that exist only
+    # in the wider ground area -- some of which are real cloud (SCL=9).
+    # This mirrors the real geometric relationship: the 500 m render
+    # region contains the 30 m sample region, not a disjoint area.
+    outside_tight_buffer = np.array([9, 9, 6, 6, 6, 6])  # 2 of 6 extra pixels are cloud
+    wide_scl = np.concatenate([tight_scl, outside_tight_buffer])
+
+    wide_cloud_fraction = compute_cloud_fraction(wide_scl)
+    assert wide_cloud_fraction > 0.0
+    assert wide_cloud_fraction == pytest.approx(2 / 15)
+
+    # The tight buffer's own reading is unaffected by pixels it never
+    # sampled -- same array, same result as at the top of this test.
+    assert compute_cloud_fraction(tight_scl) == 0.0
+
+
 def test_water_pixel_mask_threshold():
     occurrence = np.array([0, 20, 49, 50, 80, 100])
     mask = water_pixel_mask(occurrence, min_occurrence_pct=50.0)

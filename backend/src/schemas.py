@@ -123,6 +123,18 @@ class DetectResponse(DisclaimerMixin):
 class RiskMapProperties(DisclaimerMixin):
     site_id: str
     name: str
+    site_type: Literal["monitoring_grid"] = Field(
+        default="monitoring_grid",
+        description="Explicit, typed marker that this site is one of src/grid.py's "
+        "6 live-monitoring points, NOT a data/validation/events.csv historical event "
+        "-- some grid site names collide with (differently-coordinated) validated "
+        "event location names, e.g. grid site 'chaam' ('Cha-am coast, Phetchaburi', "
+        "12.75/100.05) vs. validated event th_004 ('Cha-am Coast, Phetchaburi', "
+        "12.794/99.984). Every /risk-map feature is a monitoring-grid site today, so "
+        "this is currently a constant, but it's a real typed field (not a hardcoded "
+        "frontend assumption) so it generalizes cleanly if this endpoint, or the "
+        "SitePanel it feeds, ever surfaces a non-grid site type.",
+    )
 
     # -- prediction (risk_level(), rule-based, indicative) --
     risk_level: Literal["normal", "elevated", "watch", "warning"]

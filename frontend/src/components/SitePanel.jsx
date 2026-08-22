@@ -97,6 +97,19 @@ export default function SitePanel({ site, onClose }) {
     <aside className="site-panel" aria-label={`Detail panel for ${site.name}`}>
       <div className="site-panel-header">
         <div>
+          {/* This panel only ever receives a monitoring-grid site (see
+              /risk-map's RiskMapProperties.site_type -- currently the only
+              value that field can carry, since RiskMap.jsx only ever opens
+              this panel from a /risk-map feature). Some grid site names
+              closely match, at a different coordinate, a validated
+              data/validation/events.csv historical event's name (e.g.
+              "Cha-am coast, Phetchaburi" here vs. th_004's "Cha-am Coast,
+              Phetchaburi") -- this badge exists so a reader never mistakes
+              this live "today" reading for that validated event's own
+              record. If this panel is ever wired to render a non-grid
+              site_type, this unconditional badge must become conditional
+              on site.site_type. */}
+          <span className="site-type-badge">Live monitoring site</span>
           <div className="site-name">{site.name}</div>
           <div className="site-coords mono">
             {site.lat.toFixed(4)}°N, {site.lng.toFixed(4)}°E

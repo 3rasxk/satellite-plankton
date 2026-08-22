@@ -366,6 +366,27 @@ button {
   font-weight: 600;
 }
 
+/* Distinguishes a live monitoring-grid site (src/grid.py, "today's"
+   reading) from a validated historical event (data/validation/events.csv,
+   /validation page) -- some grid site names closely match a validated
+   event's name at a different coordinate. Deliberately styled with the
+   neutral --no-data/--no-data-line tokens, not a ramp colour (tokens.css:
+   the 5 ramp colours mean chlorophyll concentration and nothing else,
+   never used decoratively) -- this badge is chrome, not a data reading. */
+.site-type-badge {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--no-data-line);
+  background: rgba(58, 69, 87, 0.4);
+  color: var(--ink-dim);
+  margin-bottom: 4px;
+}
+
 .site-coords {
   font-family: var(--font-mono);
   font-size: var(--fs-14);
@@ -567,6 +588,24 @@ button {
 
 .satellite-no-image {
   margin: 0;
+}
+
+/* Always-visible honesty note (never hidden behind hover/expand) that the
+   picture (wider ~500m render buffer) and the numeric reading next to it
+   (tighter ~30m sample buffer) cover different-sized areas of the same
+   scene -- see SatelliteImage.jsx's BUFFER_CAVEAT_TEXT. Deliberately not
+   styled like .status-banner (that pattern means "something is wrong /
+   missing"); this is a permanent explainer, not a state. */
+.satellite-buffer-caveat {
+  font-family: var(--font-body);
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--ink-dim);
+  margin: 0;
+}
+
+.satellite-image-block.compact .satellite-buffer-caveat {
+  font-size: 10px;
 }
 
 /* Compact variant — used inline in the validation table, one row per
