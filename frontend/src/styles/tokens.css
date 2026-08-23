@@ -1,47 +1,99 @@
-/* Design tokens — docs/FRONTEND_PLAN.md §4. Do not improvise colours:
-   the five ramp colours (+ deep/shelf base) mean chlorophyll concentration
-   and nothing else — never used decoratively (buttons, accents, non-data
-   chrome). */
+/* Design tokens — docs/FRONTEND_PLAN.md §4 (Apple-style light theme,
+   redesigned 2026-08). Do not improvise colours: the four risk tokens
+   (--risk-normal / --risk-elevated / --risk-watch / --risk-warning) mean
+   chlorophyll concentration and nothing else — never used decoratively
+   (buttons, accents, non-data chrome). --accent is the mirror rule: it is
+   the ONLY colour used for interactive elements (links, active nav,
+   buttons, focus ring, primary chart trace) and must never be used to
+   express a risk reading. */
 
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600&family=Inter:wght@400;500&family=IBM+Plex+Mono:wght@400&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
 
 :root {
-  /* ocean-colour ramp */
-  --deep: #0a1929; /* deep water — page background */
-  --shelf: #123a5a; /* shallow shelf — panels, cards */
-  --clear: #2e86ab; /* low chlorophyll — safe / normal */
-  --elevated: #48c9a9; /* elevated — watch tier one */
-  --bloom: #e8c547; /* bloom likely — watch tier two */
-  --severe: #d64545; /* severe bloom — warning */
-  --ink: #e8f1f8; /* primary text */
-  --ink-dim: #7a9ab5; /* secondary text, labels */
+  /* ---- surfaces & text --------------------------------------------- */
+  --bg: #ffffff; /* page background */
+  --surface: #f5f5f7; /* cards, panels, chrome bands */
+  --surface-raised: #ffffff; /* a card nested inside a --surface panel (e.g. detect-block
+       sitting inside the --surface site-panel) — white-on-grey gives the
+       nested card its own edge without another colour */
+  --border: #d2d2d7; /* thin hairline borders */
+  --text: #1d1d1f; /* primary text */
+  --text-secondary: #6e6e73; /* secondary text, labels, captions */
 
-  /* neutral, deliberately OUTSIDE the ramp — no_imagery / no_climatology /
-     stale / error states must never borrow a ramp colour, that would
-     imply a risk reading that doesn't exist */
-  --no-data: #3a4557;
-  --no-data-line: #5a6a80;
+  /* ---- accent — interactive elements ONLY ---------------------------
+     links, active nav state, buttons, focus ring, primary chart trace.
+     Never used for a risk reading (see --risk-* below) so an interactive
+     control and a data colour are never visually confusable. */
+  --accent: #0071e3;
+  --accent-rgb: 0, 113, 227;
 
-  --font-display: 'Space Grotesk', system-ui, -apple-system, sans-serif;
-  --font-body: 'Inter', system-ui, -apple-system, sans-serif;
+  /* ---- risk ramp — chlorophyll concentration tiers ------------------
+     Same 4 tiers, same tier→hue assignment as the old dark theme
+     (normal/elevated/watch/warning), shifted onto Apple's system palette.
+     --risk-normal is a deliberately neutral grey rather than the accent
+     blue: the brief reserves blue for interactive elements only, and a
+     grey "near baseline" reading reads as genuinely neutral/calm the way
+     a green would already claim "good" and blue would collide with
+     --accent. See docs/FRONTEND_PLAN.md §4 for the full reasoning. */
+  --risk-normal: #8e8e93; /* Apple systemGray — near seasonal baseline */
+  --risk-elevated: #34c759; /* Apple systemGreen — one rule-based signal triggered */
+  --risk-watch: #ff9f0a; /* Apple systemOrange — multiple signals, rising trend */
+  --risk-warning: #ff3b30; /* Apple systemRed — strong multi-signal anomaly */
+  --risk-normal-rgb: 142, 142, 147;
+  --risk-elevated-rgb: 52, 199, 89;
+  --risk-watch-rgb: 255, 159, 10;
+  --risk-warning-rgb: 255, 59, 48;
+
+  /* neutral, deliberately OUTSIDE both the risk ramp and the accent — a
+     no_imagery / no_climatology / stale / error state must never borrow
+     either, that would imply either a risk reading or an actionable
+     control that doesn't exist. */
+  --no-data: #e5e5ea;
+  --no-data-line: #aeaeb2;
+  --no-data-rgb: 174, 174, 178;
+
+  /* ---- type ----------------------------------------------------------
+     Inter is the one typeface for headings and UI text (Space Grotesk is
+     gone — no separate "display" face). --font-display is kept as an
+     alias so existing heading selectors don't need touching; it is
+     identical to --font-body today. IBM Plex Mono is now scoped to raw
+     numeric/identifier readouts ONLY — coordinates, index values,
+     z-scores, dates, scene ids — never general UI text or labels (see
+     global.css: every former mono label — nav, eyebrows, section titles,
+     badges, buttons, pill text — moved to --font-body). */
+  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', system-ui,
+    sans-serif;
+  --font-display: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif;
   --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
 
-  --fs-12: 12px;
-  --fs-14: 14px;
-  --fs-16: 16px;
-  --fs-20: 20px;
-  --fs-28: 28px;
-  --fs-40: 40px;
+  /* Larger scale + more generous rhythm than the old instrument-panel
+     type scale. */
+  --fs-12: 13px;
+  --fs-14: 15px;
+  --fs-16: 17px;
+  --fs-20: 22px;
+  --fs-28: 32px;
+  --fs-40: 44px;
 
-  --hairline: 1px solid rgba(122, 154, 181, 0.2);
-  --radius: 2px;
+  --line-height: 1.6;
 
-  --focus-ring: 2px solid var(--elevated);
+  /* ---- chrome ---------------------------------------------------------
+     Thin hairline border for card/panel edges. Two radii: --radius for
+     small interactive chrome (buttons, nav items, toggles), --radius-lg
+     for cards (12–16px per brief). --shadow-card is the subtle card
+     elevation from the brief, replacing the old flat hairline-only /
+     glow-border look entirely. */
+  --hairline: 1px solid var(--border);
+  --radius: 8px;
+  --radius-lg: 14px;
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.08);
+
+  --focus-ring: 2px solid var(--accent);
 
   --motion-fast: 150ms ease-out;
   --motion-panel: 200ms ease-out;
 
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 @media (prefers-reduced-motion: reduce) {

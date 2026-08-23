@@ -102,57 +102,76 @@ Every response carries a `disclaimer` field — surface it, don't discard it.
 
 ## 4. Design direction
 
-The subject is **ocean-colour remote sensing**. The design should look like it belongs to that world — satellite data products, chlorophyll ramps, instrument readouts — not like a generic SaaS dashboard.
+**Redesigned 2026-08 to an Apple-style light theme.** This section is the current source of truth (`frontend/src/styles/tokens.css` / `global.css` implement it); the previous dark ocean-colour direction (deep blues, Space Grotesk, hairline-only flat panels) is retired. The functional/honesty elements below are unchanged from before — this redesign is a restyle, not a rebuild: the disclaimer banner, the satellite-image buffer caveat, the "Live monitoring site" badge, `triggered_rules` plain-language display, the `AnomalyStrip` signature component, and every non-`ok` honest state (dashed/hatched "no reading" treatment) all carry over in content and behaviour, only their colours/type/surfaces changed.
 
-### Colour — derived from the actual data, not decoration
+### Colour — a light, neutral surface with data doing the talking
 
-The scientific ocean-colour ramp (deep blue → cyan → green → yellow → red) *is* the palette. It carries meaning: it's the same ramp used in published chlorophyll imagery, so a reader familiar with the domain reads the map instantly.
+Rather than a domain-flavoured instrument-panel palette, the chrome is now a quiet white/light-grey Apple-style surface, and colour is spent only where it's meaningful: the single accent for interactivity, and the risk ramp for actual chlorophyll readings.
 
 ```css
---deep:      #0A1929;  /* deep water — page background */
---shelf:     #123A5A;  /* shallow shelf — panels, cards */
---clear:     #2E86AB;  /* low chlorophyll — safe */
---elevated:  #48C9A9;  /* elevated — watch */
---bloom:     #E8C547;  /* bloom likely — warning */
---severe:    #D64545;  /* severe bloom — alert */
---ink:       #E8F1F8;  /* primary text */
---ink-dim:   #7A9AB5;  /* secondary text, labels */
+--bg:             #FFFFFF;  /* page background */
+--surface:        #F5F5F7;  /* cards, panels, chrome bands */
+--surface-raised:  #FFFFFF; /* a card nested inside a --surface panel */
+--border:         #D2D2D7;  /* thin borders */
+--text:           #1D1D1F;  /* primary text */
+--text-secondary: #6E6E73;  /* secondary text, labels */
+
+--accent: #0071E3;          /* Apple blue — interactive elements ONLY:
+                                links, active nav, buttons, focus ring,
+                                the single-series chart trace. Never used
+                                for a risk reading. */
+
+/* risk ramp — chlorophyll concentration tiers, same tier→hue assignment
+   as the old dark theme (normal/elevated/watch/warning), new hues */
+--risk-normal:   #8E8E93;   /* neutral grey — near seasonal baseline */
+--risk-elevated: #34C759;   /* Apple systemGreen — one signal triggered */
+--risk-watch:    #FF9F0A;   /* Apple systemOrange — multiple signals, rising */
+--risk-warning:  #FF3B30;   /* Apple systemRed — strong multi-signal anomaly */
+
+--no-data:      #E5E5EA;    /* neutral, OUTSIDE both the risk ramp and the
+--no-data-line: #AEAEB2;       accent — a cloud-cover/no-baseline/stale/
+                                error state must never borrow either */
 ```
 
-Risk levels map directly onto `--clear` / `--bloom` / `--severe` (three published levels), with `--elevated` available if a fourth tier is added later. **Never use these five ramp colours for anything non-data** — no accent buttons, no decorative fills. Colour means concentration here; spending it decoratively breaks the reading.
+`--risk-normal` is deliberately a neutral grey rather than the accent blue or a green: blue is reserved for interactive elements only (a "normal" map marker must never look like a clickable control), and green would prematurely read as "good" for a tier that just means "no anomaly detected yet," which is a narrower claim. Grey reads as genuinely neutral — the Apple-native way to say "nothing to report."
+
+**The rule from the old palette carries over unchanged:** the four risk tokens mean chlorophyll concentration and nothing else — never a button, an accent, or decorative chrome. Its mirror: `--accent` is the *only* colour used for interactive elements, so a risk reading and a clickable control are never visually confusable.
 
 ### Typography
 
 | Role | Face | Use |
 |------|------|-----|
-| Display | **Space Grotesk** (600) | Page titles, stat numbers |
-| Body | **Inter** (400/500) | Prose, labels, UI text |
-| Data | **IBM Plex Mono** (400) | Coordinates, index values, dates, readouts |
+| Body & display | **Inter** (400/500/600), SF Pro in the fallback stack | Everything — titles, labels, prose, UI text |
+| Data | **IBM Plex Mono** (400/500) | Coordinates, index values, z-scores, dates — raw numeric/identifier readouts ONLY |
 
-The mono face for all numeric readouts is the deliberate choice: this is instrument data, and tabular figures line up in the time-series panel. Load via Google Fonts with `display=swap`, weights limited to those listed (don't pull whole families).
+Space Grotesk is gone; there is one primary typeface (Inter, falling back to `-apple-system`/SF Pro so native Apple devices render actual San Francisco). The old design used mono for nearly all uppercase UI labels (nav, section titles, badges, pill text, buttons) as part of its "instrument panel" feel — that's now reduced: mono is scoped strictly to the raw numeric/identifier readouts the old §4 "Data" row already named (coordinates, index values, z-scores, dates, scene ids), never general UI text or labels. For example, in the site panel's detect grid, the `<dt>` labels ("Anomaly z-score") are now body text; only the `<dd>` values are mono.
 
-Type scale: 12 / 14 / 16 / 20 / 28 / 40px. Labels and eyebrows in 12px mono, uppercase, `letter-spacing: 0.08em`.
+Type scale is larger and roomier than before: 13 / 15 / 17 / 22 / 32 / 44px (was 12/14/16/20/28/40), body line-height 1.6. Labels/eyebrows are 12–13px, uppercase, `letter-spacing: 0.05–0.06em`, in body weight 500 — no longer mono.
+
+### Cards
+
+Every panel-like surface (state panels, stat cards, the risk legend, the site panel's detect block and chart wrap, the validation table's LOO list items) is a white or light-grey card: `border-radius: 12–16px` (`--radius-lg: 14px`), a subtle shadow `0 1px 3px rgba(0,0,0,0.08)` (`--shadow-card`), and a `1px solid var(--border)` hairline. This replaces the old flat hairline-only look entirely — no more `border-radius: 2px` sharp corners or glow-style coloured borders on hover states (interactive borders now use `--accent` directly, not a translucent glow). Small interactive chrome (buttons, nav pills, toggles) uses the tighter `--radius: 8px`.
 
 ### Signature element — the anomaly strip
 
-`AnomalyStrip.jsx` is the one memorable component. A horizontal ribbon showing the chlorophyll anomaly over the last ~90 days as a continuous colour band, using the same ramp as the map — echoing how satellite swath data is actually presented. It sits above the time-series chart in the site panel and again at the top of the summary page.
-
-Why it earns its place: it compresses "is this unusual for this time of year?" into a single glance, which is the actual question the system answers. A line chart alone can't do that without the reader mentally holding the baseline.
-
-Keep everything around it quiet: flat panels, hairline borders (`1px solid rgba(122,154,181,0.2)`), no shadows, no gradients, `border-radius: 2px`.
+`AnomalyStrip.jsx` is still the one memorable, signature component and its concept is unchanged: a horizontal ribbon of colour segments over ~90 days (site panel) or across monitored sites (summary page), using the risk ramp, compressing "is this unusual for this time of year?" into one glance. Only its surface/colours moved to the new tokens — a hairline border in `--border`, the no-data hatch now rendered in the light neutral (`--no-data`/`#D2D2D7` stripe) instead of the old dark hatch.
 
 ### Motion
 
-Minimal and functional only:
+Unchanged from before:
 - Site panel slides in from the right, 200ms `ease-out`
 - Map cells fade on data refresh, 150ms
 - Nothing else. No scroll animations, no page transitions.
 
 Respect `prefers-reduced-motion: reduce` — disable both.
 
+### Basemap
+
+Leaflet's tile layer is CartoDB Positron (`https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png`), replacing the old CartoDB Dark Matter tiles — a light, muted basemap so the light-theme risk markers stay legible, mirroring how the old dark basemap kept the dark-theme ramp legible.
+
 ### Quality floor
 
-Responsive down to 375px (map goes full-bleed, panel becomes a bottom sheet). Visible keyboard focus on every interactive element (`outline: 2px solid var(--elevated)`). Map cells reachable by keyboard, not mouse-only.
+Responsive down to 375px (map goes full-bleed, panel becomes a bottom sheet). Visible keyboard focus on every interactive element (`outline: 2px solid var(--accent)`). Map cells reachable by keyboard, not mouse-only. All unchanged from before.
 
 ---
 

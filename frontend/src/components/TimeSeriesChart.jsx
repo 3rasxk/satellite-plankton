@@ -34,16 +34,16 @@ export default function TimeSeriesChart({ points }) {
     <div className="chart-wrap">
       <ResponsiveContainer width="100%" height={180}>
         <LineChart data={data} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
-          <CartesianGrid strokeDasharray="2 4" stroke="rgba(122,154,181,0.15)" />
+          <CartesianGrid strokeDasharray="2 4" stroke="rgba(60,60,67,0.08)" />
           <XAxis
             dataKey="date"
-            tick={{ fontSize: 11, fill: 'var(--ink-dim)', fontFamily: 'var(--font-mono)' }}
+            tick={{ fontSize: 11, fill: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}
             tickLine={false}
-            axisLine={{ stroke: 'rgba(122,154,181,0.2)' }}
+            axisLine={{ stroke: 'rgba(60,60,67,0.12)' }}
             minTickGap={40}
           />
           <YAxis
-            tick={{ fontSize: 11, fill: 'var(--ink-dim)', fontFamily: 'var(--font-mono)' }}
+            tick={{ fontSize: 11, fill: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}
             tickLine={false}
             axisLine={false}
             width={40}
@@ -52,26 +52,37 @@ export default function TimeSeriesChart({ points }) {
               angle: -90,
               position: 'insideLeft',
               fontSize: 10,
-              fill: 'var(--ink-dim)',
+              fill: 'var(--text-secondary)',
             }}
           />
           <Tooltip
             contentStyle={{
-              background: 'var(--deep)',
-              border: '1px solid rgba(122,154,181,0.3)',
-              borderRadius: 2,
+              background: 'var(--surface-raised)',
+              border: '1px solid var(--border)',
+              borderRadius: 8,
+              boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
               fontFamily: 'var(--font-mono)',
               fontSize: 12,
             }}
-            labelStyle={{ color: 'var(--ink-dim)' }}
-            itemStyle={{ color: 'var(--ink)' }}
+            labelStyle={{ color: 'var(--text-secondary)' }}
+            itemStyle={{ color: 'var(--text)' }}
           />
-          <ReferenceLine y={0} stroke="rgba(122,154,181,0.3)" />
+          <ReferenceLine y={0} stroke="var(--border)" />
+          {/* Primary trace uses --accent rather than a risk-ramp colour:
+              this is a raw MODIS chlor_a line, not one of the 4 discrete
+              risk tiers, so a risk token would misleadingly imply a tier
+              reading. Accent blue as the single data-trace colour mirrors
+              how Apple's own first-party chart-driven apps (Health,
+              Stocks) use systemBlue for a primary non-categorical trace —
+              it's a deliberate exception to "accent = interactive only"
+              for the one chart in the app with a single, un-categorised
+              series. See RegionTrendChart.jsx for the multi-line case,
+              which intentionally does NOT use accent or risk colours. */}
           <Line
             type="monotone"
             dataKey="chlor_a"
-            stroke="var(--clear)"
-            strokeWidth={1.5}
+            stroke="var(--accent)"
+            strokeWidth={2}
             dot={false}
             isAnimationActive={false}
           />

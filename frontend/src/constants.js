@@ -10,14 +10,17 @@
 export const DISCLAIMER_TEXT =
   'Detection is at satellite-pixel resolution. Small or scattered blooms may not be visible. Presence and absence are the reliable signal — concentration estimates are approximate.'
 
-// risk_level enum -> ramp colour. Four published tiers map onto the four
-// data colours 1:1 — see docs/FRONTEND_PLAN.md §4 ("--elevated available
-// if a fourth tier is added later" — it now is, for real).
+// risk_level enum -> risk-ramp colour. Four published tiers map onto the
+// four risk tokens 1:1 — see docs/FRONTEND_PLAN.md §4. Apple-palette
+// redesign: normal is a neutral grey (kept off the accent blue, which is
+// reserved for interactive elements only), elevated/watch/warning are
+// Apple systemGreen/systemOrange/systemRed — same tier order as the old
+// dark-theme ramp, new hues.
 export const RISK_COLOR_VAR = {
-  normal: '--clear',
-  elevated: '--elevated',
-  watch: '--bloom',
-  warning: '--severe',
+  normal: '--risk-normal',
+  elevated: '--risk-elevated',
+  watch: '--risk-watch',
+  warning: '--risk-warning',
 }
 
 // Same ramp as RISK_COLOR_VAR, as literal hex — Leaflet's SVG/Canvas
@@ -26,14 +29,14 @@ export const RISK_COLOR_VAR = {
 // markers need the literal value. Keep in sync with styles/tokens.css by
 // hand; both are small and rarely change.
 export const RISK_COLOR_HEX = {
-  normal: '#2E86AB',
-  elevated: '#48C9A9',
-  watch: '#E8C547',
-  warning: '#D64545',
+  normal: '#8E8E93',
+  elevated: '#34C759',
+  watch: '#FF9F0A',
+  warning: '#FF3B30',
 }
 
-export const NO_DATA_HEX = '#3A4557'
-export const NO_DATA_LINE_HEX = '#5A6A80'
+export const NO_DATA_HEX = '#E5E5EA'
+export const NO_DATA_LINE_HEX = '#AEAEB2'
 
 export const RISK_LABEL = {
   normal: 'Normal',
@@ -83,10 +86,10 @@ export const STATUS_EXPLAINER = {
 // presented as a calibrated threshold.
 export function zToColorVar(z) {
   if (z === null || z === undefined) return null
-  if (z <= 0) return '--clear'
-  if (z <= 1) return '--elevated'
-  if (z <= 2) return '--bloom'
-  return '--severe'
+  if (z <= 0) return '--risk-normal'
+  if (z <= 1) return '--risk-elevated'
+  if (z <= 2) return '--risk-watch'
+  return '--risk-warning'
 }
 
 export function formatZ(z) {

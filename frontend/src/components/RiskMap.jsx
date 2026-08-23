@@ -5,9 +5,10 @@ import { RISK_COLOR_HEX, NO_DATA_HEX, NO_DATA_LINE_HEX, STATUS_LABEL, NO_DATA_ST
 const UPPER_GULF_CENTER = [12.9, 100.75]
 const UPPER_GULF_ZOOM = 9
 
-// CartoDB Dark Matter — muted dark basemap so the ramp stays legible
-// (docs/FRONTEND_PLAN.md §5).
-const TILE_URL = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+// CartoDB Positron — light, muted basemap for the Apple-style light theme
+// (docs/FRONTEND_PLAN.md §4). Same tile scheme/attribution as the old
+// dark_all basemap, just the light_all variant.
+const TILE_URL = 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
 const TILE_ATTRIBUTION =
   '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
 
