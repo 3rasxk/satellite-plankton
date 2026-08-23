@@ -114,6 +114,27 @@ class DetectResponse(DisclaimerMixin):
         "`true_color_image_url`."
     )
 
+    elevated_z_threshold: float | None = Field(
+        default=None, description="The operative 'elevated' z-score cutoff for "
+        "`index_used`, read live from detection/src/config.yaml -- not a "
+        "hardcoded frontend copy. Null when status != 'ok' (no index_used to "
+        "look a threshold up for)."
+    )
+    warning_z_threshold: float | None = Field(
+        default=None, description="The operative 'warning' z-score cutoff for "
+        "`index_used`, same sourcing as `elevated_z_threshold`."
+    )
+    threshold_source: Literal["literature_default", "calibrated"] | None = Field(
+        default=None, description="Whether the two threshold values above are "
+        "config.yaml's literature/convention defaults or a real value from a "
+        "leave-one-out calibration run. Always 'literature_default' as of this "
+        "build -- see /validation's calibration_caveat for why (0 of 14 "
+        "validation events have produced a usable satellite reading yet, so no "
+        "calibrated_* value exists in config.yaml to prefer over the default). "
+        "Read live, not hardcoded, so this flips automatically the moment a "
+        "future calibration run does populate a real value."
+    )
+
 
 # --------------------------------------------------------------------------
 # /risk-map (GeoJSON FeatureCollection)

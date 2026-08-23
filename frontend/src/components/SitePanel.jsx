@@ -223,6 +223,12 @@ export default function SitePanel({ site, onClose }) {
             <dl className="detect-grid">
               <dt>Index used</dt>
               <dd className="mono">{dt.data.index_used}</dd>
+              <dt>Raw index value</dt>
+              <dd className="mono">
+                {dt.data.index_values && dt.data.index_values[dt.data.index_used] != null
+                  ? dt.data.index_values[dt.data.index_used].toFixed(4)
+                  : '—'}
+              </dd>
               <dt>Anomaly z-score</dt>
               <dd className="mono">
                 {formatZ(dt.data.anomaly_z)}
@@ -235,6 +241,31 @@ export default function SitePanel({ site, onClose }) {
                 {dt.data.cloud_fraction != null ? `${Math.round(dt.data.cloud_fraction * 100)}%` : '—'}
               </dd>
             </dl>
+            {dt.data.elevated_z_threshold != null && (
+              <div className="threshold-context">
+                <p className="threshold-context-label">
+                  Rule thresholds for {dt.data.index_used}
+                  {dt.data.threshold_source === 'literature_default' && (
+                    <span className="threshold-source-badge">literature default — not calibrated</span>
+                  )}
+                  {dt.data.threshold_source === 'calibrated' && (
+                    <span className="threshold-source-badge threshold-source-calibrated">calibrated</span>
+                  )}
+                </p>
+                <dl className="detect-grid">
+                  <dt>Elevated fires at</dt>
+                  <dd className="mono">z ≥ {dt.data.elevated_z_threshold.toFixed(2)}</dd>
+                  <dt>Warning fires at</dt>
+                  <dd className="mono">z ≥ {dt.data.warning_z_threshold.toFixed(2)}</dd>
+                </dl>
+                {dt.data.threshold_source === 'literature_default' && (
+                  <p className="threshold-context-note">
+                    These are published-literature convention values, not thresholds tuned
+                    against real Thai bloom data — see the Validation page for why.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         )}
       </section>

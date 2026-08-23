@@ -73,6 +73,29 @@ def get_detect(
         true_color_url = None
         ndci_heatmap_url = None
 
+    # Threshold context -- read live from config.yaml (via detection/src/
+    # prediction.py's own load_config(), never a hardcoded copy), so a
+    # caller can see the exact number a reading was compared against, not
+    # just infer it from color. calibrated_* is null until a future
+    # calibration run populates it; prefer it over the literature default
+    # the moment it exists, so this flips automatically with no code
+    # change needed here.
+    elevated_z_threshold = warning_z_threshold = None
+    threshold_source = None
+    if result["status"] == "ok":
+        config = bridge.load_prediction_config()
+        index_thresholds = config["thresholds"][result["index_used"]]
+        calibrated_elevated = index_thresholds.get("calibrated_elevated_z")
+        calibrated_warning = index_thresholds.get("calibrated_warning_z")
+        if calibrated_elevated is not None and calibrated_warning is not None:
+            elevated_z_threshold = calibrated_elevated
+            warning_z_threshold = calibrated_warning
+            threshold_source = "calibrated"
+        else:
+            elevated_z_threshold = index_thresholds["elevated_z"]
+            warning_z_threshold = index_thresholds["warning_z"]
+            threshold_source = "literature_default"
+
     return DetectResponse(
         lat=lat,
         lng=lng,
@@ -87,4 +110,7 @@ def get_detect(
         actual_date=meta["actual_date"],
         true_color_image_url=true_color_url,
         ndci_heatmap_image_url=ndci_heatmap_url,
+        elevated_z_threshold=elevated_z_threshold,
+        warning_z_threshold=warning_z_threshold,
+        threshold_source=threshold_source,
     )
