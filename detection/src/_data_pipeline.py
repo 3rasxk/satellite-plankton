@@ -113,6 +113,12 @@ get_rainfall_proxy = _dp.get_rainfall_proxy
 get_true_color_image = _dp.get_true_color_image
 get_ndci_heatmap = _dp.get_ndci_heatmap
 
+# Study-area boundary check (data-pipeline/src/study_area.py) -- pure, no
+# GEE call. Re-exported for the same pass-through reason as the image
+# functions above: backend/src/_detection.py reaches it through this one
+# bridge rather than a separate path into data-pipeline/src.
+check_point_in_study_area = _dp.check_point_in_study_area
+
 # `day_of_year_climatology` is a pure function in data-pipeline/src/modis.py
 # whose own docstring says bloom-detection is "expected to build on this
 # rather than reimplement it" — re-exported here for src/climatology.py so
@@ -138,4 +144,5 @@ __all__ = [
     "NoWaterPixelsError",
     "get_true_color_image",
     "get_ndci_heatmap",
+    "check_point_in_study_area",
 ]

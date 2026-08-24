@@ -124,6 +124,17 @@ class DetectResponse(DisclaimerMixin):
         default=None, description="The operative 'warning' z-score cutoff for "
         "`index_used`, same sourcing as `elevated_z_threshold`."
     )
+    in_study_area: bool = Field(
+        description="Whether lat/lng falls inside the confirmed upper Gulf of "
+        "Thailand study-area polygon (data-pipeline/src/study_area.py). A "
+        "reading outside it is never blocked or fabricated -- it's flagged, "
+        "not refused -- but should not be trusted to the same degree as a "
+        "reading inside the study area."
+    )
+    study_area_warning: str | None = Field(
+        default=None, description="Non-null only when in_study_area is False -- "
+        "the real warning text from check_point_in_study_area()."
+    )
     threshold_source: Literal["literature_default", "calibrated"] | None = Field(
         default=None, description="Whether the two threshold values above are "
         "config.yaml's literature/convention defaults or a real value from a "

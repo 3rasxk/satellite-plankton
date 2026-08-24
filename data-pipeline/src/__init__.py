@@ -19,6 +19,9 @@ and other downstream consumers:
     get_rainfall_proxy(lat, lng, date)
     get_true_color_image(lat, lng, date)   -- PNG thumbnail, see imagery.py
     get_ndci_heatmap(lat, lng, date)       -- PNG thumbnail, see imagery.py
+    check_point_in_study_area(lat, lng)    -- boundary check, see study_area.py
+                                               (pure, no GEE call -- doesn't
+                                               need auth to run)
 """
 
 from .auth import GEEAuthError, initialize_ee
@@ -30,6 +33,7 @@ from .sentinel2 import (
     NoWaterPixelsError,
     get_sentinel2_bands,
 )
+from .study_area import STUDY_AREA_POLYGON_LATLNG, check_point_in_study_area
 
 __all__ = [
     "GEEAuthError",
@@ -42,4 +46,6 @@ __all__ = [
     "get_ndci_heatmap",
     "NoCloudFreeImageryError",
     "NoWaterPixelsError",
+    "check_point_in_study_area",
+    "STUDY_AREA_POLYGON_LATLNG",
 ]

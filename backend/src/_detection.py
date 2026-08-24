@@ -140,6 +140,10 @@ day_of_year_climatology = _data_pipeline_bridge.day_of_year_climatology
 get_true_color_image = _data_pipeline_bridge.get_true_color_image
 get_ndci_heatmap = _data_pipeline_bridge.get_ndci_heatmap
 
+# Study-area boundary check -- pure, no GEE call. Used by routers/detect.py
+# to flag (never silently accept) a query outside the upper Gulf polygon.
+check_point_in_study_area = _data_pipeline_bridge.check_point_in_study_area
+
 # Pure function for computing an anomaly z-score -- reused (not
 # reimplemented) for /timeseries, same call climatology.py itself makes
 # for the single-date case in detect().
@@ -160,4 +164,5 @@ __all__ = [
     "z_score",
     "get_true_color_image",
     "get_ndci_heatmap",
+    "check_point_in_study_area",
 ]

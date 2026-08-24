@@ -35,6 +35,12 @@ def get_detect(
     except ValueError:
         raise HTTPException(status_code=422, detail="date must be YYYY-MM-DD")
 
+    # Study-area check -- pure, no GEE call, runs regardless of what
+    # happens below. Never blocks or short-circuits the request (an
+    # out-of-area point is still a real query, just flagged, per the
+    # human's "don't silently accept" requirement, not a "don't accept").
+    area_check = bridge.check_point_in_study_area(lat, lng)
+
     try:
         result = bridge.detect(lat, lng, date)
     except bridge.GEEAuthError as exc:
@@ -113,4 +119,6 @@ def get_detect(
         elevated_z_threshold=elevated_z_threshold,
         warning_z_threshold=warning_z_threshold,
         threshold_source=threshold_source,
+        in_study_area=area_check["in_study_area"],
+        study_area_warning=area_check["warning"],
     )

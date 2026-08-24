@@ -67,7 +67,7 @@ satellite-data ──► bloom-detection
 
 1. **Google Earth Engine** — sign up (free for research, needs approval), authenticate locally. If auth fails with an SSL certificate error, a Python from another toolchain (e.g. PlatformIO) is being used — create a clean virtualenv from the system Python instead.
 2. **Confirm the 14 Thai events file** — `data/validation/events.csv`, extracted from Luang-on et al. (2023, *Frontiers in Marine Science* 10:1031901), a SEAFDEC-archived 1984 paper, and a 2018 MOAC bulletin. This set is locked — no further data collection is planned. Verify coordinates where the source gives only a place-name.
-3. **Confirm the study area bounding box** (upper Gulf of Thailand) and focus sites (e.g. Chonburi / Bang Saen).
+3. **Study area** — confirmed 2026-08-24 as a real polygon (not an axis-aligned bounding box), stored in `data-pipeline/src/study_area.py` (`STUDY_AREA_POLYGON_LATLNG`). This is a boundary-check only (`check_point_in_study_area`), not a scan area — `/risk-map` does not enumerate points inside it. The actual monitored sites are the fixed, hand-picked list in `backend/src/grid.py` (Bang Saen, Si Racha, Tha Chin mouth, Chao Phraya mouth, upper-Gulf open water, Cha-am), independent of this polygon.
 4. **Supabase/DB keys** + hosting account.
 5. **Review thresholds and escalation rules** in `detection/src/config.yaml` — accept or change.
 

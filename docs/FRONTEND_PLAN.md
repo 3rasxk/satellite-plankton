@@ -199,7 +199,7 @@ Responsive down to 375px (map goes full-bleed, panel becomes a bottom sheet). Vi
 └────────────────────────────────────────────────┘
 ```
 
-- Map centred on the upper Gulf, zoom fitted to the bounding box from the backend
+- Map centred on the upper Gulf, zoom fitted to the six monitored sites in `backend/src/grid.py`. (Correction, 2026-08-24: this line originally said "zoom fitted to the bounding box from the backend" — no backend bounding box was ever implemented; the frontend uses a fixed Leaflet view. A real study-area polygon now exists at `data-pipeline/src/study_area.py`, but it's a boundary check, not something `/risk-map` fits a zoom level to.)
 - Risk grid as a GeoJSON layer, cells filled by `risk_level`, 60% opacity so the basemap reads through
 - Basemap: a muted/dark tile set so the ramp stays legible. CartoDB Dark Matter or similar
 - Legend fixed bottom-left, showing the three levels *with what they mean*, not just colour swatches
