@@ -41,4 +41,12 @@ export async function getValidation() {
   return data
 }
 
+// backend/src/main.py's existing meta route at GET / — reused here only to
+// prove the API is reachable (Sidebar's connectivity pill), not for its
+// response shape.
+export async function getMeta() {
+  const { data } = await client.get('/')
+  return data
+}
+
 export default client

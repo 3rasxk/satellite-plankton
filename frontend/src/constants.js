@@ -45,6 +45,16 @@ export const RISK_LABEL = {
   warning: 'Warning',
 }
 
+// Thai counterpart to RISK_LABEL — same 4 tiers, same meaning, translated
+// copy only (not a new claim). Shared by every later Thai-copy screen
+// (Tasks 3, 4, 5, 7) so the tier labels stay consistent across the app.
+export const RISK_LABEL_TH = {
+  normal: 'ปกติ',
+  elevated: 'เริ่มพบสัญญาณ',
+  watch: 'เฝ้าระวัง',
+  warning: 'เตือนภัย',
+}
+
 export const RISK_MEANING = {
   normal: 'Chlorophyll near the seasonal baseline for this site.',
   elevated: 'Chlorophyll above baseline — one rule-based signal triggered.',
