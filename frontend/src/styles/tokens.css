@@ -7,7 +7,7 @@
    buttons, focus ring, primary chart trace) and must never be used to
    express a risk reading. */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+Thai:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
 
 :root {
   /* ---- surfaces & text --------------------------------------------- */
@@ -16,15 +16,21 @@
   --surface-raised: #ffffff; /* a card nested inside a --surface panel (e.g. detect-block
        sitting inside the --surface site-panel) — white-on-grey gives the
        nested card its own edge without another colour */
-  --border: #d2d2d7; /* thin hairline borders */
+  --surface-card: #fafafa; /* card body inside a --surface panel — one step lighter than --surface-raised's pure white, per spec's card-surface tier */
+  --divider: #e5e5ea; /* primary hairline — spec's "dividers" */
+  --divider-soft: #f0f0f2; /* secondary/nested divider — spec's "secondary divider" */
+  --border: var(--divider); /* alias for backward compatibility — existing components read --border */
   --text: #1d1d1f; /* primary text */
   --text-secondary: #6e6e73; /* secondary text, labels, captions */
+  --text-tertiary: #8e8e93;
+  --text-muted: #aeaeb2;
 
   /* ---- accent — interactive elements ONLY ---------------------------
      links, active nav state, buttons, focus ring, primary chart trace.
      Never used for a risk reading (see --risk-* below) so an interactive
      control and a data colour are never visually confusable. */
   --accent: #0071e3;
+  --accent-hover: #0058b4;
   --accent-rgb: 0, 113, 227;
 
   /* ---- risk ramp — chlorophyll concentration tiers ------------------
@@ -61,9 +67,8 @@
      z-scores, dates, scene ids — never general UI text or labels (see
      global.css: every former mono label — nav, eyebrows, section titles,
      badges, buttons, pill text — moved to --font-body). */
-  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', system-ui,
-    sans-serif;
-  --font-display: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif;
+  --font-body: 'Inter', 'Noto Sans Thai', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', system-ui, sans-serif;
+  --font-display: 'Inter', 'Noto Sans Thai', -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif;
   --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
 
   /* Larger scale + more generous rhythm than the old instrument-panel
@@ -86,7 +91,13 @@
   --hairline: 1px solid var(--border);
   --radius: 8px;
   --radius-lg: 14px;
+  --radius-control: 8px; /* controls, 7-9px per spec */
+  --radius-pill: 999px;
   --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.08);
+
+  --glass-bg: rgba(255, 255, 255, 0.86);
+  --glass-blur: blur(20px) saturate(180%);
+  --glass-border: 0.5px solid rgba(0, 0, 0, 0.06);
 
   --focus-ring: 2px solid var(--accent);
 
