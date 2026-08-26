@@ -259,7 +259,14 @@ Keep all three existing page imports for now — Tasks 3, 6, 8 remove them one a
 
 - [ ] **Step 5: Sidebar + shell CSS**
 
-Add a new section to `frontend/src/styles/global.css` (append, with a section-header comment `/* ---- Sidebar shell (HAB Sentinel) ---- */`) — this replaces the old `.app-header`/`.app-nav`/`.brand*` rules, which should be deleted since `App.jsx` no longer renders that markup:
+First, add two dedicated status tokens to `frontend/src/styles/tokens.css` (near the `--no-data*` tokens Task 1 added), for the sidebar's live/offline connectivity pill. These are deliberately NOT `--risk-elevated`/`--risk-warning` — the connectivity pill is a system-health signal, not a chlorophyll reading, and reusing a risk-tier token for it would violate this plan's Global Constraint that `--risk-*` tokens mean chlorophyll-concentration tier only, never decorative. Same hex values as `--risk-elevated`/`--risk-warning` (Apple systemGreen/systemRed — the right visual language for "ok"/"error" on its own merits), but under names that carry no risk-tier meaning:
+
+```css
+--status-ok: #34c759;
+--status-error: #ff3b30;
+```
+
+Then add a new section to `frontend/src/styles/global.css` (append, with a section-header comment `/* ---- Sidebar shell (HAB Sentinel) ---- */`) — this replaces the old `.app-header`/`.app-nav`/`.brand*` rules, which should be deleted since `App.jsx` no longer renders that markup:
 
 ```css
 .app-shell {
@@ -276,6 +283,8 @@ Add a new section to `frontend/src/styles/global.css` (append, with a section-he
 
 .app-main {
   flex: 1;
+  display: flex;
+  flex-direction: column;
   min-height: 0;
 }
 
@@ -332,11 +341,11 @@ Add a new section to `frontend/src/styles/global.css` (append, with a section-he
 
 .sidebar-status-pill {
   background: rgba(52, 199, 89, 0.1);
-  color: var(--risk-elevated);
+  color: var(--status-ok);
 }
 .sidebar-status-pill.offline {
   background: rgba(255, 59, 48, 0.1);
-  color: var(--risk-warning);
+  color: var(--status-error);
 }
 
 .sidebar-status-pill .dot,
@@ -385,10 +394,10 @@ Add a new section to `frontend/src/styles/global.css` (append, with a section-he
   background: none;
 }
 .sidebar-pill.outline .dot {
-  background: var(--risk-elevated);
+  background: var(--status-ok);
 }
 .sidebar-pill.outline.offline .dot {
-  background: var(--risk-warning);
+  background: var(--status-error);
 }
 
 .sidebar-settings-btn {
@@ -1906,7 +1915,7 @@ Append to `global.css`:
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--risk-elevated);
+  background: var(--status-ok);
   margin-right: 6px;
 }
 ```

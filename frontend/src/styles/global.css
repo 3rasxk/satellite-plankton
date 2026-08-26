@@ -925,6 +925,8 @@ table.events-table td.mono {
 
 .app-main {
   flex: 1;
+  display: flex;
+  flex-direction: column;
   min-height: 0;
 }
 
@@ -981,11 +983,11 @@ table.events-table td.mono {
 
 .sidebar-status-pill {
   background: rgba(52, 199, 89, 0.1);
-  color: var(--risk-elevated);
+  color: var(--status-ok);
 }
 .sidebar-status-pill.offline {
   background: rgba(255, 59, 48, 0.1);
-  color: var(--risk-warning);
+  color: var(--status-error);
 }
 
 .sidebar-status-pill .dot,
@@ -1034,10 +1036,10 @@ table.events-table td.mono {
   background: none;
 }
 .sidebar-pill.outline .dot {
-  background: var(--risk-elevated);
+  background: var(--status-ok);
 }
 .sidebar-pill.outline.offline .dot {
-  background: var(--risk-warning);
+  background: var(--status-error);
 }
 
 .sidebar-settings-btn {

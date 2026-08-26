@@ -58,6 +58,12 @@
   --no-data-line: #aeaeb2;
   --no-data-rgb: 174, 174, 178;
 
+  /* system-health signal (e.g. API connectivity pill) — deliberately
+     distinct from --risk-*, which means chlorophyll-concentration tier
+     only and must never be reused for decorative/status purposes. */
+  --status-ok: #34c759;
+  --status-error: #ff3b30;
+
   /* ---- type ----------------------------------------------------------
      Inter is the one typeface for headings and UI text (Space Grotesk is
      gone — no separate "display" face). --font-display is kept as an
