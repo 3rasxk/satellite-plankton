@@ -52,6 +52,9 @@ Flex row: map fills remaining width, 360px analytics panel on right.
 **Right panel cards** (top to bottom), all driven by `/detect` + `/timeseries` + `/satellite-image` for the selected site:
 1. Alert card: uppercase label + status pill, large heading (e.g. "เฝ้าระวัง"), location subtitle, divider, "ความเชื่อมั่นของการพยากรณ์: ปานกลาง" (qualitative only, never a fabricated %), "กฎที่ถูกกระตุ้น: N/3", amber-tinted callout explaining why, footnote disclosing rule-based (non-ML) methodology.
 2. Spectral metrics card: 2×2 grid — Chlorophyll-a (mg/m³), NDCI (20m, labeled "approx"), SST (°C), Anomaly z-score — IBM Plex Mono tabular numbers; footer with scene date + cloud %.
+   - **SST has no backend field** (`DetectResponse`/`RiskMapProperties` carry no `sst`; MODIS SST was a locked-decisions intent, never implemented) — render its cell as `—`, with the same "ไม่มีข้อมูล" honesty treatment used elsewhere, never a fabricated number.
+   - **NDCI** and **Anomaly z-score**: from `dt.data.index_values[dt.data.index_used]` and `dt.data.anomaly_z` (the Sentinel-2, per-scene detection reading) — same numbers SitePanel's "Detection verdict" block already shows.
+   - **Chlorophyll-a (mg/m³)**: `/detect` has no chlor_a field (its index_values are NDCI/2BDA/3BDA/B2-B3 ratio, not raw chlorophyll). Use the latest point from the site's already-fetched `/timeseries` series (MODIS chlor_a) instead, and caption the card with *both* dates — the Sentinel-2 scene date (NDCI/z) and the MODIS point date (chlor_a) — since they are two different sensors/resolutions and may not be the same day; never imply one date covers all four numbers.
 3. NDCI trend chart card (reuses `TimeSeriesChart`/`RegionTrendChart`): inline SVG dual-line — solid blue "ปี 2026" vs dashed gray "ค่าฐาน 20 ปี", month axis labels, footnote citing `/timeseries` + MODIS climatology as real sources.
 4. Satellite image card (reuses `SatelliteImage`): True Color / NDCI Heatmap toggle, 150px image frame (rounded, bordered), caption with scene date, footnote on the sampling-buffer caveat (image ~500m context, index sampled from a narrower ~30m area).
 
@@ -68,6 +71,10 @@ Below: table card "ค่าอ่านล่าสุดต่อจุดต�
 Title + subtitle citing MODIS climatology, 90-day window. 4 stat cards (จุดตรวจวัด, มีค่าอ่าน, เฝ้าระวัง, z-score สูงสุด), large mono numbers, computed from real per-site data.
 
 Below: one row per site (reuses `AnomalyStrip.jsx`) — name + current z-score, 45-cell horizontal strip colored by risk level over time, diagonal-hatch cells where no reading exists. Axis footer: "90 วันก่อน / ล่าสุด".
+
+Per-site 45-cell strip: bucket each site's last 90 days of `/timeseries` points into 45 equal-width 2-day windows; a cell's z is the mean of that window's non-null `anomaly_z` values, or null (hatched) if the window has none.
+
+**Resolution of a gap in the original brief:** the old `SummaryPage.jsx` (being replaced) surfaced region-wide data with no home in the new 5-screen nav — `/summary`'s `most_recent_detected_signal` + `prediction_confidence_label`, and a per-site 90-day chlorophyll trend overlay (`RegionTrendChart.jsx`, all 6 sites on one chart). Nothing here should regress, so this screen also carries, below the 4 stat cards and above the per-site strips: a compact "ล่าสุดทั้งภูมิภาค" callout (most recent detected signal + prediction confidence, from `/summary`), and below the per-site strips, the existing multi-site trend chart (`RegionTrendChart`, reused as-is). This keeps every real data source the app currently surfaces reachable somewhere in the new nav.
 
 ## Screen 4 — พื้นที่เพาะเลี้ยงสัตว์น้ำ (Aquaculture Zones)
 
@@ -87,7 +94,9 @@ Two-column row:
 - Service Status card: GEE, FastAPI, Scheduler, MODIS climatology — dot + status text (presentational; no live health-check endpoint exists).
 - Scan History log: timestamped entries — presentational.
 
-Bottom card: 14-event historical reference dataset callout, honestly reporting 0/14 matched to lat/lng (source events only have place names, system doesn't geocode them — matches `/validation` response), plus 3 summary stats (14 events, 0 matched, 6 plankton species).
+Bottom card: 14-event historical reference dataset callout, reading `n_events` / `n_matchable` / `n_with_real_satellite_reading` live from `/validation` — **do not hardcode "0/14 matched"**: as of this spec, 7 of 14 events already carry a real coordinate (`n_matchable`, recalibration landed 2026-08-22) but 0 of those 7 produced a usable satellite reading (`n_with_real_satellite_reading`), each for its own documented reason (see `calibration_caveat`). The card must read these three counts from the response every time, not restate a point-in-time number, since `n_matchable` is expected to keep changing as more events get coordinates. 3 summary stats: `n_events`, `n_matchable`, 6 plankton species (species count is a static fact about the dataset, not from the API).
+
+Additionally — CLAUDE.md's Definition of Done requires the full 14-row per-event table and leave-one-out calibration table to remain published somewhere in the UI (not just 3 summary stats). Screen 5's bottom card holds the summary callout; immediately below it, this screen also carries the full events table and leave-one-out list, reusing the existing `ValidationPage.jsx` table/list markup verbatim (all 10 columns, LOO iterations), restyled to match the card system. This is additive to the screen list above, not a new screen.
 
 ## Interaction Scope
 
