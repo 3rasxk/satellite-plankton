@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
-import { MapContainer, TileLayer, CircleMarker, useMap } from 'react-leaflet'
+import { MapContainer, TileLayer, CircleMarker, ZoomControl, useMap } from 'react-leaflet'
 import { RISK_COLOR_HEX, NO_DATA_HEX, NO_DATA_LINE_HEX, STATUS_LABEL, NO_DATA_STATUS } from '../constants.js'
+import NdciRasterOverlay from './NdciRasterOverlay.jsx'
 
 const UPPER_GULF_CENTER = [12.9, 100.75]
 const UPPER_GULF_ZOOM = 9
@@ -11,6 +12,16 @@ const UPPER_GULF_ZOOM = 9
 const TILE_URL = 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
 const TILE_ATTRIBUTION =
   '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+
+// True-color satellite basemap for the "True Color (RGB)" view mode — this
+// is a general-purpose Esri imagery basemap, NOT the app's own Sentinel-2
+// pipeline output (that stays scoped to SatelliteImage.jsx's per-site
+// buffer renders); it exists to give the map view mode a plausible
+// satellite backdrop.
+const TRUE_COLOR_TILE_URL =
+  'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+const TRUE_COLOR_ATTRIBUTION =
+  'Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community'
 
 function FitToFeatures({ features }) {
   const map = useMap()
@@ -50,7 +61,7 @@ function makeAccessible(layer, label, onActivate) {
   })
 }
 
-export default function RiskMap({ featureCollection, onSelectSite }) {
+export default function RiskMap({ featureCollection, onSelectSite, mode = 'risk' }) {
   const features = featureCollection?.features || []
 
   return (
@@ -60,8 +71,14 @@ export default function RiskMap({ featureCollection, onSelectSite }) {
       zoom={UPPER_GULF_ZOOM}
       scrollWheelZoom
       attributionControl
+      zoomControl={false}
     >
-      <TileLayer url={TILE_URL} attribution={TILE_ATTRIBUTION} />
+      <ZoomControl position="topright" />
+      <TileLayer
+        url={mode === 'true_color' ? TRUE_COLOR_TILE_URL : TILE_URL}
+        attribution={mode === 'true_color' ? TRUE_COLOR_ATTRIBUTION : TILE_ATTRIBUTION}
+      />
+      {mode === 'ndci' && <NdciRasterOverlay />}
       <FitToFeatures features={features} />
       {features.map((feature) => {
         const [lng, lat] = feature.geometry.coordinates

@@ -7,7 +7,7 @@ import 'leaflet/dist/leaflet.css'
 import './styles/tokens.css'
 import './styles/global.css'
 import App from './App.jsx'
-import RiskMapPage from './pages/RiskMapPage.jsx'
+import OverviewPage from './pages/OverviewPage.jsx'
 import SummaryPage from './pages/SummaryPage.jsx'
 import ValidationPage from './pages/ValidationPage.jsx'
 
@@ -26,7 +26,7 @@ createRoot(document.getElementById('root')).render(
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<App />}>
-          <Route index element={<RiskMapPage />} />
+          <Route index element={<OverviewPage />} />
           <Route path="ndci" element={<NdciStub />} />
           <Route path="anomaly" element={<SummaryPage />} />
           <Route path="aquaculture" element={<AquacultureStub />} />

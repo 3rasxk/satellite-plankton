@@ -1058,3 +1058,92 @@ table.events-table td.mono {
 .sidebar-settings-btn:hover {
   background: var(--divider-soft);
 }
+
+/* ---- Overview page: map + side panel ---- */
+.overview-page {
+  display: flex;
+  height: 100%;
+}
+.overview-map-area {
+  flex: 1;
+  position: relative;
+}
+.overview-map-area .leaflet-map {
+  height: 100%;
+}
+.overview-side-panel {
+  width: 360px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--divider);
+  overflow-y: auto;
+}
+
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: var(--glass-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
+
+.map-segmented-control {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 500;
+  display: flex;
+  padding: 3px;
+  gap: 2px;
+}
+.map-segmented-control button {
+  border: none;
+  background: none;
+  padding: 6px 10px;
+  border-radius: calc(var(--radius-lg) - 4px);
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.map-segmented-control button.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.map-date-pill {
+  position: absolute;
+  top: 16px;
+  right: 60px;
+  z-index: 500;
+  padding: 7px 14px;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.risk-legend {
+  position: absolute;
+  z-index: 500;
+  padding: 12px 14px;
+  cursor: grab;
+  max-width: 220px;
+}
+
+.ndci-gradient-bar {
+  height: 10px;
+  border-radius: 5px;
+  margin: 8px 0 4px;
+  background: linear-gradient(
+    90deg,
+    rgb(10, 30, 90) 0%,
+    rgb(176, 224, 230) 40%,
+    rgb(255, 159, 10) 70%,
+    rgb(139, 0, 0) 100%
+  );
+}
+.ndci-gradient-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+}
