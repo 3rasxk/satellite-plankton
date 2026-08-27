@@ -1,5 +1,5 @@
 """
-SQLAlchemy ORM models. Four tables:
+SQLAlchemy ORM models. Five tables:
 
 - MonitoredSite     the grid `/risk-map`, `/summary`, and the scheduler
                     operate over (src/grid.py MONITORED_GRID, upserted at
@@ -31,6 +31,10 @@ SQLAlchemy ORM models. Four tables:
                     VALIDATION_CACHE_TTL_HOURS. run() makes a real GEE
                     call (th_001 regional-proxy attempt), so this avoids
                     repeating it on every /validation request.
+- WatchOverlayCache singleton snapshot of the scheduler-produced,
+                    region-wide NDCI watch overlay. `/watch-overlay`
+                    serves only this table; it never starts a live
+                    Earth Engine request.
 """
 
 from __future__ import annotations
@@ -145,3 +149,32 @@ class ValidationCache(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
     computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     payload: Mapped[dict] = mapped_column(JSON)
+
+
+class WatchOverlayCache(Base):
+    """The latest region-wide NDCI watch overlay, stored as singleton id=1."""
+
+    __tablename__ = "watch_overlay_cache"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    status: Mapped[str] = mapped_column(String)
+    tile_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    map_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    target_date: Mapped[str | None] = mapped_column(String, nullable=True)
+    source_window_start: Mapped[str | None] = mapped_column(String, nullable=True)
+    source_window_end: Mapped[str | None] = mapped_column(String, nullable=True)
+    newest_scene_date: Mapped[str | None] = mapped_column(String, nullable=True)
+    baseline_periods: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    threshold_z: Mapped[float | None] = mapped_column(Float, nullable=True)
+    baseline_years: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    seasonal_window_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    min_baseline_observations: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    water_occurrence_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    water_mask: Mapped[str | None] = mapped_column(String, nullable=True)
+    output_grid_m: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    effective_resolution_m: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    color: Mapped[str | None] = mapped_column(String, nullable=True)
+    stale: Mapped[bool] = mapped_column(Boolean, default=False)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    caveat: Mapped[str] = mapped_column(Text)

@@ -1,7 +1,7 @@
 """
 FastAPI app entrypoint. Wires up: DB init, monitored-grid seed,
 validation-events seed (read-only mirror of data/validation/events.csv),
-the scheduler, and the five routers.
+the scheduler, and the seven routers.
 
 Run with: `uvicorn src.main:app --reload` from `backend/` (see README.md).
 """
@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 from . import _detection as bridge
 from .db import SessionLocal, get_db, init_db  # noqa: F401  (get_db re-exported for routers/tests)
 from .db_models import ValidationEvent
-from .routers import detect, risk_map, satellite_image, summary, timeseries, validation
+from .routers import detect, risk_map, satellite_image, summary, timeseries, validation, watch_overlay
 from .scheduler import create_scheduler, ensure_monitored_sites
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -56,6 +56,7 @@ app.include_router(detect.router)
 app.include_router(satellite_image.router)
 app.include_router(summary.router)
 app.include_router(validation.router)
+app.include_router(watch_overlay.router)
 
 _scheduler = None
 
@@ -138,5 +139,6 @@ def root() -> dict:
             "/satellite-image",
             "/summary",
             "/validation",
+            "/watch-overlay",
         ],
     }

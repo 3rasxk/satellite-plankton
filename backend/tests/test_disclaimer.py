@@ -54,3 +54,12 @@ def test_summary_response_has_disclaimer(client):
     body = resp.json()
     assert body["disclaimer"] == DISCLAIMER_TEXT
     assert len(body["disclaimer"]) > 0
+
+
+def test_watch_overlay_response_has_disclaimer(client):
+    """The empty scheduler-cache state is still a complete public response."""
+    resp = client.get("/watch-overlay")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["disclaimer"] == DISCLAIMER_TEXT
+    assert len(body["disclaimer"]) > 0

@@ -43,6 +43,13 @@ CALIBRATION_CAVEAT_TEXT = (
     "cannot support one."
 )
 
+WATCH_OVERLAY_CAVEAT = (
+    "NDCI watch signal, not bloom confirmation or a forecast. Sediment, optically "
+    "complex coastal water, and residual cloud may produce a signal. The 10 m output "
+    "grid uses Sentinel-2 B5 with 20 m effective source resolution. The water mask "
+    "uses Gulf-connected historical surface water and does not measure salinity."
+)
+
 
 class DisclaimerMixin(BaseModel):
     disclaimer: str = Field(
@@ -51,6 +58,34 @@ class DisclaimerMixin(BaseModel):
         "resolution, small/scattered blooms may be missed, presence/absence is the "
         "reliable signal.",
     )
+
+
+# --------------------------------------------------------------------------
+# /watch-overlay (scheduler-cached NDCI watch signal)
+# --------------------------------------------------------------------------
+
+
+class WatchOverlayResponse(DisclaimerMixin):
+    status: Literal["ok", "no_imagery", "error"]
+    tile_url: str | None = None
+    generated_at: str | None = None
+    target_date: str | None = None
+    source_window_start: str | None = None
+    source_window_end: str | None = None
+    newest_scene_date: str | None = None
+    baseline_periods: list[dict] | None = None
+    threshold_z: float | None = None
+    baseline_years: int | None = None
+    seasonal_window_days: int | None = None
+    min_baseline_observations: int | None = None
+    water_occurrence_pct: float | None = None
+    water_mask: str | None = None
+    output_grid_m: int | None = None
+    effective_resolution_m: int | None = None
+    color: str | None = None
+    stale: bool
+    error: str | None = None
+    caveat: str
 
 
 # --------------------------------------------------------------------------

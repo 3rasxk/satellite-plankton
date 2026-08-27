@@ -107,9 +107,11 @@ def test_openapi_schema_never_declares_a_percentage_or_ratio_field(client):
     """Contract-level check (distinct from test_validation.py's
     response-instance check): walks the generated OpenAPI schema itself
     -- every Pydantic model's declared field names, across the whole API,
-    not just one /validation response payload -- so a percentage/ratio
-    field added to *any* future schema (not only ValidationResponse) is
-    caught before it ships."""
+    not just one /validation response payload. ``water_occurrence_pct`` is
+    the sole exception: it is the configured historical-surface-water mask
+    provenance for `/watch-overlay`, not a validation or performance rate.
+    Every other percentage/ratio-shaped public field is caught before it
+    ships."""
     resp = client.get("/openapi.json")
     assert resp.status_code == 200
     schema = resp.json()
@@ -117,6 +119,7 @@ def test_openapi_schema_never_declares_a_percentage_or_ratio_field(client):
     banned_fragments = ("percent", "pct", "accuracy", "success_rate", "hit_rate", "recall")
     schemas = schema.get("components", {}).get("schemas", {})
     assert schemas, "OpenAPI schema unexpectedly has no component schemas"
+    allowed_fields = {"WatchOverlayResponse.water_occurrence_pct"}
 
     offending = []
     for model_name, model_def in schemas.items():
@@ -124,7 +127,9 @@ def test_openapi_schema_never_declares_a_percentage_or_ratio_field(client):
             lowered = field_name.lower()
             for fragment in banned_fragments:
                 if fragment in lowered:
-                    offending.append(f"{model_name}.{field_name}")
+                    qualified_name = f"{model_name}.{field_name}"
+                    if qualified_name not in allowed_fields:
+                        offending.append(qualified_name)
 
     assert not offending, f"percentage/ratio-shaped field(s) found in OpenAPI schema: {offending}"
 
