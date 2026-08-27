@@ -1,8 +1,9 @@
 import { useEffect } from 'react'
-import { MapContainer, TileLayer, ZoomControl, useMap } from 'react-leaflet'
+import { CircleMarker, MapContainer, Popup, TileLayer, ZoomControl, useMap } from 'react-leaflet'
 import { MAP_BOUNDS, syncMinimumBoundsZoom } from '../utils/mapBounds.js'
 import NdciRasterOverlay from './NdciRasterOverlay.jsx'
-import { canRenderWatchTiles } from '../utils/watchOverlay.js'
+import WatchSitePopup from './WatchSitePopup.jsx'
+import { canRenderWatchTiles, getVisibleSiteAlerts } from '../utils/watchOverlay.js'
 
 // CartoDB Positron — light, muted basemap for the Apple-style light theme
 // (docs/FRONTEND_PLAN.md §4). Same tile scheme/attribution as the old
@@ -54,6 +55,7 @@ function ScanBoundsView() {
 
 export default function RiskMap({ mode = 'true_color', watchOverlay = null }) {
   const usesTrueColorBase = mode === 'true_color' || mode === 'watch'
+  const siteAlerts = getVisibleSiteAlerts(mode, watchOverlay)
 
   return (
     <MapContainer
@@ -76,6 +78,16 @@ export default function RiskMap({ mode = 'true_color', watchOverlay = null }) {
       />
       {mode === 'ndci' && <NdciRasterOverlay />}
       {canRenderWatchTiles(mode, watchOverlay) && <TileLayer key={watchOverlay.tile_url} url={watchOverlay.tile_url} opacity={0.9} zIndex={450} />}
+      {siteAlerts.map((alert) => (
+        <CircleMarker
+          key={alert.site_id}
+          center={[alert.lat, alert.lng]}
+          radius={9}
+          pathOptions={{ color: '#FFFFFF', weight: 2, fillColor: alert.color, fillOpacity: 0.92 }}
+        >
+          <Popup><WatchSitePopup alert={alert} /></Popup>
+        </CircleMarker>
+      ))}
     </MapContainer>
   )
 }

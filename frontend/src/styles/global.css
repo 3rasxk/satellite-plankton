@@ -193,11 +193,6 @@ button {
   flex: none;
 }
 
-.legend-swatch.no-data {
-  background: var(--no-data);
-  border: 1px dashed var(--no-data-line);
-}
-
 .legend-label {
   font-weight: 500;
   color: var(--text);
@@ -1011,15 +1006,20 @@ table.events-table td.mono {
   left: 16px;
   z-index: 500;
   display: flex;
+  max-width: calc(100% - 32px);
   padding: 3px;
   gap: 2px;
 }
 .map-segmented-control button {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 44px;
   border: none;
   background: none;
-  padding: 6px 10px;
+  padding: 6px 9px;
   border-radius: calc(var(--radius-lg) - 4px);
   font-size: 12px;
+  line-height: 1.2;
   color: var(--text-secondary);
   cursor: pointer;
 }
@@ -1071,8 +1071,7 @@ table.events-table td.mono {
   background: rgba(var(--accent-rgb), 0.08);
 }
 
-.legend-swatch.watch-overlay { background: var(--risk-watch); }
-.legend-swatch.transparent-overlay { background: transparent; border: 1px dashed var(--no-data-line); }
+.legend-swatch.transparent-overlay { background: transparent; border: 1px solid var(--no-data-line); border-radius: 2px; }
 
 .risk-legend {
   position: absolute;
@@ -1090,6 +1089,66 @@ table.events-table td.mono {
 .risk-legend .legend-meaning {
   font-size: 11px;
   line-height: 1.4;
+}
+
+.watch-site-popup {
+  min-width: min(280px, calc(100vw - 64px));
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: var(--fs-12);
+  line-height: 1.4;
+}
+
+.watch-site-popup > strong,
+.watch-site-level {
+  display: block;
+}
+
+.watch-site-popup > strong {
+  font-size: var(--fs-14);
+  overflow-wrap: anywhere;
+}
+
+.watch-site-level {
+  margin-top: 2px;
+  font-weight: 600;
+}
+
+.watch-site-popup dl {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 12px;
+  margin: 10px 0;
+}
+
+.watch-site-popup dt {
+  color: var(--text-secondary);
+}
+
+.watch-site-popup dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.watch-site-popup small {
+  display: block;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+@media (max-width: 420px) {
+  .map-segmented-control {
+    top: 8px;
+    left: 8px;
+    max-width: calc(100% - 16px);
+  }
+
+  .map-segmented-control button {
+    font-size: 11px;
+  }
 }
 
 .ndci-gradient-bar {

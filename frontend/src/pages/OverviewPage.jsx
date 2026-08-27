@@ -11,9 +11,13 @@ import { getWatchOverlayMessage } from '../utils/watchOverlay.js'
 function WatchOverlayState({ loading, overlay, error, onRetry }) {
   const message = getWatchOverlayMessage(overlay, error)
   const hasTiles = Boolean(overlay?.tile_url)
+  const metadata = overlay?.analysis_metadata
   const sourceWindow = overlay?.source_window_start && overlay?.source_window_end
     ? `${overlay.source_window_start} – ${overlay.source_window_end}`
     : null
+  const newestSentinelDate = metadata?.newest_sentinel_scene_date || overlay?.newest_scene_date
+  const newestSstDate = metadata?.newest_sst_scene_date
+  const mosaicCaveat = metadata?.mosaic_caveat || 'พิกเซลโมเสกอาจมาจากหลายวันที่แตกต่างกัน'
   const errorDetail = error?.message || (!hasTiles ? overlay?.error : null)
 
   return (
@@ -22,10 +26,11 @@ function WatchOverlayState({ loading, overlay, error, onRetry }) {
         <span>กำลังโหลดชั้นข้อมูล NDCI watch…</span>
       ) : (
         <>
-          <span>{message || 'NDCI watch พร้อมใช้งาน'}</span>
+          <span>{message || 'สัญญาณ NDCI 3 ระดับพร้อมใช้งาน'}</span>
           {hasTiles && sourceWindow && <span>ช่วงภาพ {sourceWindow}</span>}
-          {hasTiles && overlay.newest_scene_date && <span>ฉากล่าสุด {overlay.newest_scene_date}</span>}
-          {hasTiles && <span>พิกเซลโมเสกอาจมาจากหลายวันที่แตกต่างกัน</span>}
+          {hasTiles && newestSentinelDate && <span>Sentinel ล่าสุด {newestSentinelDate}</span>}
+          {hasTiles && newestSstDate && <span>SST ล่าสุด {newestSstDate}</span>}
+          {hasTiles && <span>{mosaicCaveat}</span>}
           {errorDetail && <span>{errorDetail}</span>}
           {!hasTiles && <button type="button" className="watch-overlay-retry" onClick={onRetry}>ลองใหม่</button>}
         </>
