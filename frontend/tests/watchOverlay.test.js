@@ -19,6 +19,7 @@ const overlay = {
       { code: 'warning', class_code: 3, label_th: 'เตือนภัย', color: '#FF3B30' },
       { code: 'no_data', class_code: 0, label_th: 'ไม่มีข้อมูล', color: '#8E8E93' },
       { code: 'legacy', class_code: 4, label_th: 'รูปแบบเดิม', color: '#AF52DE' },
+      { code: 'unknown', class_code: 5, label_th: 'ไม่ทราบค่า', color: '#5856D6' },
     ],
     site_alerts: [
       { site_id: 'normal', level: 'normal', lat: 13, lng: 100 },
@@ -27,6 +28,7 @@ const overlay = {
       { site_id: 'bad-coordinates', level: 'watch', lat: null, lng: 100.3, color: '#FF9F0A' },
       { site_id: 'no-data', level: 'no_data', lat: 13.3, lng: 100.4, color: '#8E8E93' },
       { site_id: 'legacy', level: 'legacy', lat: 13.4, lng: 100.5, color: '#AF52DE' },
+      { site_id: 'unknown', level: 'unknown', lat: 13.5, lng: 100.6, color: '#5856D6' },
     ],
   },
 }
