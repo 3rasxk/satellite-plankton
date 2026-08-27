@@ -14,7 +14,7 @@ const LEVELS = ['normal', 'elevated', 'watch', 'warning']
  * overlay (NdciRasterOverlay.jsx), not a claim about a real calibrated
  * index scale.
  */
-export default function RiskLegend({ mode = 'risk' }) {
+export default function RiskLegend({ mode = 'risk', watchOverlay = null }) {
   const [pos, setPos] = useState({ x: 16, y: 16 })
   const dragRef = useRef(null)
 
@@ -41,7 +41,20 @@ export default function RiskLegend({ mode = 'risk' }) {
       style={{ left: pos.x, bottom: pos.y }}
       onPointerDown={onPointerDown}
     >
-      {mode === 'ndci' ? (
+      {mode === 'watch' ? (
+        <>
+          <h3>NDCI watch signal</h3>
+          <div className="legend-row">
+            <span className="legend-swatch watch-overlay" />
+            <span><span className="legend-label">เฝ้าระวัง: z ≥ {watchOverlay?.threshold_z ?? 1.5}</span><span className="legend-meaning">สีส้มคือสัญญาณ NDCI สูงกว่าฐานฤดูกาล</span></span>
+          </div>
+          <div className="legend-row">
+            <span className="legend-swatch transparent-overlay" />
+            <span className="legend-meaning">โปร่งใส: ต่ำกว่าเกณฑ์ เมฆบัง ไม่ใช่น้ำทะเลเชื่อมต่ออ่าว หรือข้อมูลฐานไม่พอ</span>
+          </div>
+          <span className="legend-meaning">กริด {watchOverlay?.output_grid_m ?? 10} m; ความละเอียดต้นทาง NDCI {watchOverlay?.effective_resolution_m ?? 20} m</span>
+        </>
+      ) : mode === 'ndci' ? (
         <>
           <h3>NDCI Index</h3>
           <div className="ndci-gradient-bar" />
@@ -65,13 +78,13 @@ export default function RiskLegend({ mode = 'risk' }) {
           ))}
         </>
       )}
-      <div className="legend-row">
+      {mode !== 'watch' && <div className="legend-row">
         <span className="legend-swatch no-data" />
         <span>
           <span className="legend-label">ไม่มีค่าอ่าน</span>
           <span className="legend-meaning">ไม่ใช่ระดับเสี่ยง — เมฆบัง ไม่มีข้อมูลฐาน หรือยังไม่ได้ตรวจสอบ</span>
         </span>
-      </div>
+      </div>}
     </div>
   )
 }

@@ -1046,6 +1046,39 @@ table.events-table td.mono {
   gap: 7px;
 }
 
+.watch-overlay-state {
+  position: absolute;
+  top: 58px;
+  right: 60px;
+  z-index: 500;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-width: min(360px, calc(100% - 76px));
+  padding: 7px 10px;
+  font-size: var(--fs-12);
+  line-height: 1.35;
+  color: var(--text-secondary);
+}
+
+.watch-overlay-retry {
+  align-self: flex-start;
+  min-height: 32px;
+  padding: 4px 8px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.watch-overlay-retry:hover {
+  background: rgba(var(--accent-rgb), 0.08);
+}
+
+.legend-swatch.watch-overlay { background: var(--risk-watch); }
+.legend-swatch.transparent-overlay { background: transparent; border: 1px dashed var(--no-data-line); }
+
 .risk-legend {
   position: absolute;
   z-index: 500;

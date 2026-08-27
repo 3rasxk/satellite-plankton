@@ -3,6 +3,7 @@ import { MapContainer, TileLayer, CircleMarker, ZoomControl, useMap } from 'reac
 import { RISK_COLOR_HEX, NO_DATA_HEX, NO_DATA_LINE_HEX, STATUS_LABEL, NO_DATA_STATUS } from '../constants.js'
 import { MAP_BOUNDS, syncMinimumBoundsZoom } from '../utils/mapBounds.js'
 import NdciRasterOverlay from './NdciRasterOverlay.jsx'
+import { canRenderWatchTiles } from '../utils/watchOverlay.js'
 
 const UPPER_GULF_CENTER = [12.9, 100.75]
 const UPPER_GULF_ZOOM = 9
@@ -53,6 +54,14 @@ function FitToFeatures({ features }) {
   return null
 }
 
+function WatchModeView({ active }) {
+  const map = useMap()
+  useEffect(() => {
+    if (active) map.setView(UPPER_GULF_CENTER, UPPER_GULF_ZOOM)
+  }, [active, map])
+  return null
+}
+
 /**
  * Makes a Leaflet vector layer keyboard-reachable: Leaflet renders
  * CircleMarker as an SVG <path>, which isn't in the tab order or
@@ -76,8 +85,10 @@ function makeAccessible(layer, label, onActivate) {
   })
 }
 
-export default function RiskMap({ featureCollection, onSelectSite = () => {}, mode = 'risk' }) {
+export default function RiskMap({ featureCollection, onSelectSite = () => {}, mode = 'risk', watchOverlay = null }) {
   const features = featureCollection?.features || []
+  const visibleFeatures = mode === 'watch' ? [] : features
+  const usesTrueColorBase = mode === 'true_color' || mode === 'watch'
 
   return (
     <MapContainer
@@ -92,14 +103,16 @@ export default function RiskMap({ featureCollection, onSelectSite = () => {}, mo
       zoomControl={false}
     >
       <BoundsZoomLock />
+      <WatchModeView active={mode === 'watch'} />
       <ZoomControl position="topright" />
       <TileLayer
-        url={mode === 'true_color' ? TRUE_COLOR_TILE_URL : TILE_URL}
-        attribution={mode === 'true_color' ? TRUE_COLOR_ATTRIBUTION : TILE_ATTRIBUTION}
+        url={usesTrueColorBase ? TRUE_COLOR_TILE_URL : TILE_URL}
+        attribution={usesTrueColorBase ? TRUE_COLOR_ATTRIBUTION : TILE_ATTRIBUTION}
       />
       {mode === 'ndci' && <NdciRasterOverlay />}
-      <FitToFeatures features={features} />
-      {features.map((feature) => {
+      {canRenderWatchTiles(mode, watchOverlay) && <TileLayer key={watchOverlay.tile_url} url={watchOverlay.tile_url} opacity={0.9} zIndex={450} />}
+      <FitToFeatures features={visibleFeatures} />
+      {visibleFeatures.map((feature) => {
         const [lng, lat] = feature.geometry.coordinates
         const props = feature.properties
         const isNoData = NO_DATA_STATUS.has(props.status)
