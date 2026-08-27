@@ -1,10 +1,10 @@
 """NDCI watch-overlay temporal helpers and Earth Engine tile builder.
 
-Data sources: Sentinel-2 L2A surface reflectance and JRC Global Surface
-Water occurrence, both via Google Earth Engine. Limitations: the resulting
-current anomaly screen is not bloom confirmation or a forecast; optical
-coastal-water signals can include sediment, residual cloud, and other
-non-bloom effects.
+Data sources: Sentinel-2 L2A surface reflectance, JRC Global Surface Water,
+and MODIS-Aqua L3 sea-surface temperature via Google Earth Engine.
+Limitations: the resulting anomaly screen is not bloom confirmation or a
+forecast; optical coastal-water signals can include sediment, residual cloud,
+and other non-bloom effects.
 """
 
 from datetime import date, timedelta
@@ -19,6 +19,9 @@ from .study_area import upper_gulf_scan_ee_polygon
 
 NUMERICAL_STD_EPSILON = 1e-6
 NDCI_DENOMINATOR_EPSILON = 1e-6
+MODIS_SST_COLLECTION_ID = "NASA/OCEANDATA/MODIS-Aqua/L3SMI"
+MODIS_SST_ARCHIVE_START_DATE = "2002-07-04"
+SITE_SAMPLE_NODATA = -9999
 WATCH_WATER_MASK_LABEL = "gulf_connected_historical_surface_water"
 WATCH_CAVEAT = (
     "NDCI watch signal, not bloom confirmation or a forecast. Sediment, optically "
@@ -50,6 +53,90 @@ def seasonal_windows(
         end_exclusive = anchor + timedelta(days=window_days + 1)
         windows.append((start.isoformat(), end_exclusive.isoformat()))
     return windows
+
+
+def sst_seasonal_windows(
+    target_date: str, *, archive_start_date: str, window_days: int
+) -> list[tuple[str, str]]:
+    target = date.fromisoformat(target_date)
+    archive_start = date.fromisoformat(archive_start_date)
+    windows = []
+    for year in range(archive_start.year, target.year):
+        try:
+            anchor = target.replace(year=year)
+        except ValueError:
+            anchor = target.replace(year=year, day=28)
+        start = anchor - timedelta(days=window_days)
+        end_exclusive = anchor + timedelta(days=window_days + 1)
+        if end_exclusive > archive_start:
+            windows.append(
+                (max(start, archive_start).isoformat(), end_exclusive.isoformat())
+            )
+    return windows
+
+
+def _utc_date_from_millis(value):
+    if value is None:
+        return None
+    return datetime.fromtimestamp(value / 1000, tz=timezone.utc).date().isoformat()
+
+
+def _nullable_sample_value(properties: dict, name: str):
+    value = properties.get(name)
+    return None if value == SITE_SAMPLE_NODATA else value
+
+
+def _parse_site_alerts(sampled, *, level_definitions: list[dict]) -> list[dict]:
+    """Return ordered alert records for sampled class codes 1 through 3."""
+    levels_by_class = {
+        definition["class_code"]: definition for definition in level_definitions
+    }
+    alerts = []
+    for input_order, feature in enumerate(sampled):
+        properties = feature.get("properties", {})
+        raw_level = properties.get("level_code")
+        try:
+            level_code = int(raw_level)
+        except (TypeError, ValueError):
+            continue
+        definition = levels_by_class.get(level_code)
+        if definition is None:
+            continue
+        slope = _nullable_sample_value(properties, "ndci_slope_per_day")
+        current_sst = _nullable_sample_value(properties, "current_sst")
+        seasonal_sst = _nullable_sample_value(properties, "seasonal_sst")
+        alerts.append(
+            (
+                properties.get("_site_order", input_order),
+                {
+                    "site_id": properties.get("site_id"),
+                    "name": properties.get("name"),
+                    "lat": properties.get("lat"),
+                    "lng": properties.get("lng"),
+                    "level": definition["code"],
+                    "label_th": definition["label_th"],
+                    "color": definition["color"],
+                    "ndci_z": _nullable_sample_value(properties, "ndci_z"),
+                    "latest_scene_date": _utc_date_from_millis(
+                        _nullable_sample_value(properties, "latest_acquired_ms")
+                    ),
+                    "trend_slope_per_day": slope,
+                    "trend_observations": _nullable_sample_value(
+                        properties, "trend_observation_count"
+                    ),
+                    "trend_rising": slope is not None and slope > 0,
+                    "current_sst": current_sst,
+                    "seasonal_sst": seasonal_sst,
+                    "sst_date": _utc_date_from_millis(
+                        _nullable_sample_value(properties, "sst_acquired_ms")
+                    ),
+                    "sst_above_normal": current_sst is not None
+                    and seasonal_sst is not None
+                    and current_sst > seasonal_sst,
+                },
+            )
+        )
+    return [alert for _, alert in sorted(alerts, key=lambda item: item[0])]
 
 
 def trend_window(target_date: str, window_days: int) -> tuple[str, str]:
@@ -262,17 +349,16 @@ def _build_source_collections(
     return current, baseline
 
 
-def _build_watch_image(
+def _build_current_anomaly(
     *,
     current,
     baseline,
-    region,
-    threshold_z: float,
     min_baseline_observations: int,
-    color: str,
 ):
-    """Return the thresholded current NDCI anomaly image, styled for tiles."""
-    latest = current.qualityMosaic("acquired_ms").select("ndci")
+    """Return current NDCI z-score and its per-pixel acquisition timestamp."""
+    latest = current.qualityMosaic("acquired_ms")
+    latest_ndci = latest.select("ndci")
+    latest_acquired_ms = latest.select("acquired_ms").rename("latest_acquired_ms")
     stats = baseline.select("ndci").reduce(
         ee.Reducer.mean()
         .combine(ee.Reducer.stdDev(), sharedInputs=True)
@@ -284,12 +370,153 @@ def _build_watch_image(
     valid_baseline = count.gte(min_baseline_observations).And(
         std.gt(NUMERICAL_STD_EPSILON)
     )
-    z = latest.subtract(mean).divide(std).rename("ndci_z").updateMask(valid_baseline)
-    watch = z.updateMask(z.gte(threshold_z)).clip(region)
-    return watch.visualize(
-        min=threshold_z,
-        max=threshold_z + 0.01,
-        palette=[color.lstrip("#")],
+    z = (
+        latest_ndci.subtract(mean)
+        .divide(std)
+        .rename("ndci_z")
+        .updateMask(valid_baseline)
+    )
+    return z, latest_acquired_ms.updateMask(z.mask())
+
+
+def _build_sst_images(
+    target_date: str,
+    *,
+    region,
+    search_window_days: int,
+    climatology_window_days: int,
+):
+    """Build nearest-pixel current SST and all-prior-year seasonal SST."""
+    target = date.fromisoformat(target_date)
+    target_ms = int(
+        datetime.combine(target, datetime.min.time(), tzinfo=timezone.utc).timestamp()
+        * 1000
+    )
+    current_start = target - timedelta(days=search_window_days)
+    current_end_exclusive = target + timedelta(days=search_window_days + 1)
+    source = ee.ImageCollection(MODIS_SST_COLLECTION_ID).filterBounds(region)
+    current_source = source.filterDate(
+        current_start.isoformat(), current_end_exclusive.isoformat()
+    )
+
+    def add_quality(image):
+        sst = image.select("sst").rename("current_sst").clip(region)
+        acquired_ms = ee.Number(image.get("system:time_start"))
+        distance_days = acquired_ms.subtract(target_ms).abs().divide(86_400_000)
+        later_tie_breaker = acquired_ms.gte(target_ms).multiply(0.1)
+        quality = (
+            ee.Image.constant(
+                distance_days.multiply(-1).add(later_tie_breaker)
+            )
+            .rename("sst_quality")
+            .updateMask(sst.mask())
+        )
+        acquired = (
+            ee.Image.constant(acquired_ms)
+            .rename("sst_acquired_ms")
+            .updateMask(sst.mask())
+        )
+        return sst.addBands(acquired).addBands(quality)
+
+    current_mosaic = current_source.map(add_quality).qualityMosaic("sst_quality")
+    current_sst = (
+        current_mosaic.select("current_sst")
+        .clip(region)
+        .set(
+            "newest_sst_scene_ms",
+            current_source.aggregate_max("system:time_start"),
+        )
+    )
+    sst_acquired_ms = current_mosaic.select("sst_acquired_ms").clip(region)
+
+    windows = sst_seasonal_windows(
+        target_date,
+        archive_start_date=MODIS_SST_ARCHIVE_START_DATE,
+        window_days=climatology_window_days,
+    )
+    if not windows:
+        raise ValueError("target_date must be later than the MODIS SST archive start")
+    first_start, first_end = windows[0]
+    seasonal_collection = source.filterDate(first_start, first_end).select("sst")
+    for start, end in windows[1:]:
+        seasonal_collection = seasonal_collection.merge(
+            source.filterDate(start, end).select("sst")
+        )
+    seasonal_sst_count = seasonal_collection.count().rename("seasonal_sst_count")
+    seasonal_sst = (
+        seasonal_collection.mean()
+        .rename("seasonal_sst")
+        .clip(region)
+        .updateMask(seasonal_sst_count.gt(0))
+    )
+    return current_sst, sst_acquired_ms, seasonal_sst, seasonal_sst_count
+
+
+def _build_classification_image(
+    *,
+    z,
+    latest_acquired_ms,
+    trend,
+    current_sst,
+    seasonal_sst,
+    sst_acquired_ms,
+    elevated_z: float,
+    warning_z: float,
+    min_trend_observations: int,
+    region,
+):
+    """Build auditable level codes with all supporting evidence bands."""
+    slope = trend.select("ndci_slope_per_day")
+    trend_count = trend.select("trend_observation_count")
+    elevated = z.gte(elevated_z)
+    rising = trend_count.gte(min_trend_observations).And(slope.gt(0))
+    sst_above = current_sst.gt(seasonal_sst)
+
+    level = ee.Image.constant(1).rename("level_code").updateMask(elevated)
+    level = level.where(elevated.And(rising), 2)
+    level = level.where(z.gte(warning_z).And(rising).And(sst_above), 3)
+    return (
+        level.addBands(z.unmask(SITE_SAMPLE_NODATA))
+        .addBands(latest_acquired_ms.unmask(SITE_SAMPLE_NODATA))
+        .addBands(slope.unmask(SITE_SAMPLE_NODATA))
+        .addBands(trend_count.unmask(SITE_SAMPLE_NODATA))
+        .addBands(current_sst.unmask(SITE_SAMPLE_NODATA))
+        .addBands(seasonal_sst.unmask(SITE_SAMPLE_NODATA))
+        .addBands(sst_acquired_ms.unmask(SITE_SAMPLE_NODATA))
+        .clip(region)
+    )
+
+
+def _sample_site_alerts(
+    analysis_image,
+    *,
+    monitoring_sites: list[dict],
+    level_definitions: list[dict],
+    scale_m: int,
+) -> list[dict]:
+    """Sample alert evidence from the same final image used for tile styling."""
+    features = []
+    for site_order, site in enumerate(monitoring_sites):
+        properties = {
+            "_site_order": site_order,
+            "site_id": site["site_id"],
+            "name": site["name"],
+            "lat": site["lat"],
+            "lng": site["lng"],
+        }
+        features.append(
+            ee.Feature(
+                ee.Geometry.Point([site["lng"], site["lat"]]), properties
+            )
+        )
+    sampled = analysis_image.sampleRegions(
+        collection=ee.FeatureCollection(features),
+        scale=scale_m,
+        geometries=False,
+    )
+    return _parse_site_alerts(
+        sampled.getInfo().get("features", []),
+        level_definitions=level_definitions,
     )
 
 
@@ -297,17 +524,24 @@ def build_ndci_watch_overlay(
     target_date: str,
     *,
     threshold_z: float,
+    warning_threshold_z: float,
     latest_window_days: int,
     baseline_years: int,
     seasonal_window_days: int,
     min_baseline_observations: int,
+    trend_window_days: int,
+    min_trend_observations: int,
+    sst_search_window_days: int,
+    sst_climatology_window_days: int,
+    sst_resolution_m: int,
     water_occurrence_pct: float,
     gulf_seed_points: list[list[float]],
     output_scale_m: int,
     effective_resolution_m: int,
-    color: str,
+    level_colors: dict[str, str],
+    monitoring_sites: list[dict],
 ) -> dict:
-    """Build an upper-Gulf current NDCI anomaly tile and run metadata."""
+    """Build a three-tier upper-Gulf NDCI/SST watch tile and site alerts."""
     initialize_ee()
 
     target = date.fromisoformat(target_date)
@@ -341,13 +575,125 @@ def build_ndci_watch_overlay(
     newest_scene_date = datetime.fromtimestamp(
         newest_scene_ms / 1000, tz=timezone.utc
     ).date().isoformat()
-    styled = _build_watch_image(
+    z, latest_acquired_ms = _build_current_anomaly(
         current=current,
         baseline=baseline,
-        region=region,
-        threshold_z=threshold_z,
         min_baseline_observations=min_baseline_observations,
-        color=color,
+    )
+    trend_start, trend_end = trend_window(target_date, trend_window_days)
+    trend_source = _build_masked_ndci_collection(
+        trend_start,
+        trend_end,
+        region=region,
+        water_mask=water_mask,
+        output_scale_m=output_scale_m,
+    )
+    daily_trend_source = _daily_ndci_collection(
+        trend_source, trend_start, trend_end
+    )
+    trend = _build_trend_image(
+        daily_trend_source, min_observations=min_trend_observations
+    )
+    current_sst, sst_acquired_ms, seasonal_sst, _seasonal_sst_count = (
+        _build_sst_images(
+            target_date,
+            region=region,
+            search_window_days=sst_search_window_days,
+            climatology_window_days=sst_climatology_window_days,
+        )
+    )
+    newest_sst_scene_date = _utc_date_from_millis(
+        current_sst.get("newest_sst_scene_ms").getInfo()
+    )
+    analysis = _build_classification_image(
+        z=z,
+        latest_acquired_ms=latest_acquired_ms,
+        trend=trend,
+        current_sst=current_sst,
+        seasonal_sst=seasonal_sst,
+        sst_acquired_ms=sst_acquired_ms,
+        elevated_z=threshold_z,
+        warning_z=warning_threshold_z,
+        min_trend_observations=min_trend_observations,
+        region=region,
+    )
+    level_definitions = [
+        {
+            "code": "elevated",
+            "class_code": 1,
+            "label_th": "เริ่มผิดปกติ",
+            "color": level_colors["elevated"],
+            "min_z": threshold_z,
+            "requires_rising_trend": False,
+            "requires_sst_above_normal": False,
+        },
+        {
+            "code": "watch",
+            "class_code": 2,
+            "label_th": "เฝ้าระวัง",
+            "color": level_colors["watch"],
+            "min_z": threshold_z,
+            "requires_rising_trend": True,
+            "requires_sst_above_normal": False,
+        },
+        {
+            "code": "warning",
+            "class_code": 3,
+            "label_th": "เตือนภัย",
+            "color": level_colors["warning"],
+            "min_z": warning_threshold_z,
+            "requires_rising_trend": True,
+            "requires_sst_above_normal": True,
+        },
+    ]
+    site_alerts = _sample_site_alerts(
+        analysis,
+        monitoring_sites=monitoring_sites,
+        level_definitions=level_definitions,
+        scale_m=effective_resolution_m,
+    )
+    analysis_metadata = {
+        "version": 2,
+        "levels": level_definitions,
+        "trend": {
+            "window_days": trend_window_days,
+            "min_distinct_dates": min_trend_observations,
+            "slope_units": "ndci_per_day",
+            "rising_rule": "slope_per_day > 0",
+        },
+        "sst": {
+            "collection_id": MODIS_SST_COLLECTION_ID,
+            "search_window_days": sst_search_window_days,
+            "climatology_window_days": sst_climatology_window_days,
+            "resolution_m": sst_resolution_m,
+            "above_normal_rule": "current_sst > seasonal_sst",
+        },
+        "masks": {
+            "water_mask": WATCH_WATER_MASK_LABEL,
+            "water_occurrence_pct": water_occurrence_pct,
+            "scl_water_class": 6,
+            "qa60_cloud_bit": 10,
+            "qa60_cirrus_bit": 11,
+        },
+        "resolutions": {
+            "output_grid_m": output_scale_m,
+            "ndci_m": effective_resolution_m,
+            "trend_m": effective_resolution_m,
+            "sst_m": sst_resolution_m,
+        },
+        "newest_sentinel_scene_date": newest_scene_date,
+        "newest_sst_scene_date": newest_sst_scene_date,
+        "mosaic_caveat": "Sentinel-2 and SST mosaic pixels may come from different dates.",
+        "site_alerts": site_alerts,
+    }
+    styled = analysis.select("level_code").visualize(
+        min=1,
+        max=3,
+        palette=[
+            level_colors["elevated"].lstrip("#"),
+            level_colors["watch"].lstrip("#"),
+            level_colors["warning"].lstrip("#"),
+        ],
     )
     map_info = styled.getMapId({})
     return {
@@ -370,6 +716,7 @@ def build_ndci_watch_overlay(
         "water_mask": WATCH_WATER_MASK_LABEL,
         "output_grid_m": output_scale_m,
         "effective_resolution_m": effective_resolution_m,
-        "color": color,
+        "color": level_colors["watch"],
         "caveat": WATCH_CAVEAT,
+        "analysis_metadata": analysis_metadata,
     }

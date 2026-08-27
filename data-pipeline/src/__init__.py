@@ -42,6 +42,7 @@ from .watch_overlay import (
     NoWatchOverlayImageryError,
     build_ndci_watch_overlay,
     seasonal_windows,
+    sst_seasonal_windows,
 )
 from .watch_rules import (
     LEVEL_ELEVATED,
@@ -68,6 +69,7 @@ __all__ = [
     "STUDY_AREA_POLYGON_LATLNG",
     "UPPER_GULF_SCAN_POLYGON_LATLNG",
     "seasonal_windows",
+    "sst_seasonal_windows",
     "build_ndci_watch_overlay",
     "NoWatchOverlayImageryError",
     "LEVEL_NONE",
