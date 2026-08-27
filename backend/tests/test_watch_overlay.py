@@ -443,7 +443,11 @@ def test_first_no_imagery_refresh_records_configured_no_tile_metadata(client, mo
         "water_occurrence_pct": 50.0,
         "output_scale_m": 10,
         "effective_resolution_m": 20,
-        "color": "#FF9F0A",
+        "level_colors": {
+            "elevated": "#34C759",
+            "watch": "#FF9F0A",
+            "warning": "#FF3B30",
+        },
     }
 
     def no_imagery(_target_date, _monitoring_sites):
@@ -484,7 +488,11 @@ def test_first_unexpected_refresh_records_single_error_row_and_reuses_no_tile_si
         "water_occurrence_pct": 50.0,
         "output_scale_m": 10,
         "effective_resolution_m": 20,
-        "color": "#FF9F0A",
+        "level_colors": {
+            "elevated": "#34C759",
+            "watch": "#FF9F0A",
+            "warning": "#FF3B30",
+        },
     }
 
     def unexpected(_target_date, _monitoring_sites):

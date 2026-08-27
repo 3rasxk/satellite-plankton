@@ -324,7 +324,11 @@ def refresh_watch_overlay(db: Session, target_date: str, sites=None) -> None:
                     water_mask="gulf_connected_historical_surface_water",
                     output_grid_m=config["output_scale_m"],
                     effective_resolution_m=config["effective_resolution_m"],
-                    color=config["color"],
+                    color=(
+                        config["level_colors"]["watch"]
+                        if "level_colors" in config
+                        else config["color"]
+                    ),
                 )
             except Exception as config_exc:  # noqa: BLE001 -- persist minimal state
                 logger.error(

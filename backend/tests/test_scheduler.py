@@ -190,7 +190,11 @@ def test_refresh_grid_records_overlay_failure_after_all_site_refreshes(client, m
         "water_occurrence_pct": 50.0,
         "output_scale_m": 10,
         "effective_resolution_m": 20,
-        "color": "#FF9F0A",
+        "level_colors": {
+            "elevated": "#34C759",
+            "watch": "#FF9F0A",
+            "warning": "#FF3B30",
+        },
     }
 
     def fail_overlay(target_date, monitoring_sites):
@@ -217,8 +221,19 @@ def test_refresh_grid_records_overlay_failure_after_all_site_refreshes(client, m
                 item["site_id"] for item in MONITORED_GRID
             ]
             assert row.status == "error"
+            assert row.threshold_z == 1.5
+            assert row.baseline_years == 5
+            assert row.seasonal_window_days == 15
+            assert row.min_baseline_observations == 5
+            assert row.water_occurrence_pct == 50.0
+            assert row.water_mask == "gulf_connected_historical_surface_water"
+            assert row.output_grid_m == 10
+            assert row.effective_resolution_m == 20
+            assert row.color == "#FF9F0A"
+            assert row.analysis_metadata is None
             assert row.stale is True
             assert "RuntimeError" in row.error
+            assert "configuration metadata unavailable" not in row.error
     finally:
         with SessionLocal() as db:
             row = db.get(WatchOverlayCache, 1)
