@@ -41,4 +41,10 @@ Tables (`src/db_models.py`):
 
 ## Endpoints
 
+### NDCI Watch overlay
+
+`GET /watch-overlay` is cache-only. The scheduler refreshes one whole-upper-Gulf Sentinel-2 overlay per cycle and stores its tile URL plus source-window, newest-scene, resolution, threshold, stale, and error metadata. A browser reload never calls Earth Engine. Failed refreshes preserve the last-good tile as stale; no usable imagery returns no tile and an explicit status.
+
+This indicative NDCI watch signal (`z >= 1.5`) is not bloom confirmation, salinity measurement, species inference, concentration estimation, or a validated forecast. It uses a 30-day latest clear-image window, five prior seasonal years at ±15 days, cloud/SCL filtering, Gulf-connected historical surface water, and no 14-day trend. Only orange qualifying pixels are opaque; everything else is transparent. The output grid is 10 m, with 20 m effective NDCI source resolution, and a mosaic may contain pixels from different dates.
+
 See `.claude/agents/backend-api.md` and `docs/FRONTEND_PLAN.md` §3 for the contract. Every response model carries a `disclaimer` field (enforced via Pydantic, visible in `/docs`). Detection (`detect()`) and prediction (`risk_level()`) fields are always kept in separate parts of the response shape — never merged into one score.

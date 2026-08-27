@@ -59,7 +59,14 @@ A related, smaller version of the same class of bug: CHIRPS rainfall extraction 
 
 ## What this means, plainly
 
+
 - **Trust the detection layer's presence/absence signal at face value, within the resolution/cloud/turbidity limits above** — this is standard remote sensing, not a novel or fragile technique.
 - **Do not trust the specific threshold values in `config.yaml` as calibrated to Thai conditions.** They are defensible literature defaults, explicitly marked as such, pending real coordinate data for the 14 documented events (or new events with usable coordinates).
 - **Do not read any per-event result in `detection/reports/event_table.md` or the `/validation` endpoint as a hit/miss rate.** With 0 of 14 events currently matchable, there is no rate to report, and none is reported anywhere in this codebase — every validation claim is per-event, by design.
 - **Treat the prediction layer's output as a legible, inspectable set of triggered rules, not a probability.** `triggered_rules` tells you exactly which conditions fired; nothing in this system computes or displays a confidence percentage for that outcome.
+
+## NDCI watch signal (z >= 1.5)
+
+Watch mode scans the supplied upper-Gulf quadrilateral and retains only pixels connected to the Gulf through historical surface water. This is not a salinity mask and does not infer species. It uses the latest clear Sentinel-2 imagery in a 30-day window, Sentinel-2 SCL cloud/shadow filtering, and five prior seasonal years with ±15-day windows. It deliberately does not use a 14-day trend, SST, rainfall, or cell-density estimate.
+
+Only pixels with NDCI anomaly `z >= 1.5`, at least five baseline observations, and usable non-zero baseline variance are rendered. They are orange; all other pixels remain transparent. The output grid is 10 m, while NDCI's effective source resolution is 20 m because it uses B5. This is an indicative rule-based watch signal, not bloom confirmation, a concentration estimate, or a validated forecast. The cached mosaic can contain pixels from different dates. Failed refreshes preserve the last-good tile as stale; an empty cache is not a normal reading, and browser reloads do not make live Earth Engine requests.
