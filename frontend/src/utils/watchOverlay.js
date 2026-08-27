@@ -1,5 +1,26 @@
+const ALERT_LEVELS = new Set(['elevated', 'watch', 'warning'])
+const ALERT_MODES = new Set(['true_color', 'watch'])
+
 export function canRenderWatchTiles(mode, overlay) {
   return mode === 'watch' && Boolean(overlay?.tile_url)
+}
+
+export function getVisibleSiteAlerts(mode, overlay) {
+  if (!ALERT_MODES.has(mode) || !overlay?.tile_url) return []
+  const metadata = overlay?.analysis_metadata
+  if (metadata?.version !== 2 || !Array.isArray(metadata.site_alerts)) return []
+  return metadata.site_alerts.filter((item) => (
+    ALERT_LEVELS.has(item?.level)
+    && Number.isFinite(item?.lat)
+    && Number.isFinite(item?.lng)
+  ))
+}
+
+export function getOverlayLegendLevels(mode, overlay) {
+  if (!ALERT_MODES.has(mode)) return []
+  const metadata = overlay?.analysis_metadata
+  if (metadata?.version !== 2 || !Array.isArray(metadata.levels)) return []
+  return metadata.levels.filter((item) => ALERT_LEVELS.has(item?.code))
 }
 
 export function getWatchOverlayMessage(overlay, requestError = null) {
