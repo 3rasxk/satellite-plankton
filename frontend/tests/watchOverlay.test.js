@@ -17,12 +17,16 @@ const overlay = {
       { code: 'elevated', class_code: 1, label_th: 'เริ่มผิดปกติ', color: '#34C759' },
       { code: 'watch', class_code: 2, label_th: 'เฝ้าระวัง', color: '#FF9F0A' },
       { code: 'warning', class_code: 3, label_th: 'เตือนภัย', color: '#FF3B30' },
+      { code: 'no_data', class_code: 0, label_th: 'ไม่มีข้อมูล', color: '#8E8E93' },
+      { code: 'legacy', class_code: 4, label_th: 'รูปแบบเดิม', color: '#AF52DE' },
     ],
     site_alerts: [
       { site_id: 'normal', level: 'normal', lat: 13, lng: 100 },
       { site_id: 'elevated', level: 'elevated', lat: 13.1, lng: 100.1, color: '#34C759' },
       { site_id: 'warning', level: 'warning', lat: 13.2, lng: 100.2, color: '#FF3B30' },
       { site_id: 'bad-coordinates', level: 'watch', lat: null, lng: 100.3, color: '#FF9F0A' },
+      { site_id: 'no-data', level: 'no_data', lat: 13.3, lng: 100.4, color: '#8E8E93' },
+      { site_id: 'legacy', level: 'legacy', lat: 13.4, lng: 100.5, color: '#AF52DE' },
     ],
   },
 }
@@ -64,6 +68,10 @@ test('requires a version-two metadata shape and a tile for pins', () => {
   assert.deepEqual(getVisibleSiteAlerts('watch', {
     ...overlay,
     analysis_metadata: { ...overlay.analysis_metadata, site_alerts: {} },
+  }), [])
+  assert.deepEqual(getOverlayLegendLevels('watch', {
+    ...overlay,
+    analysis_metadata: { ...overlay.analysis_metadata, levels: {} },
   }), [])
 })
 
