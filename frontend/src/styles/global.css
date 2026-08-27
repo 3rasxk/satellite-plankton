@@ -1039,6 +1039,7 @@ table.events-table td.mono {
   display: inline-flex;
   align-items: center;
   gap: 7px;
+  white-space: nowrap;
 }
 
 .watch-overlay-state {
@@ -1058,7 +1059,7 @@ table.events-table td.mono {
 
 .watch-overlay-retry {
   align-self: flex-start;
-  min-height: 32px;
+  min-height: 44px;
   padding: 4px 8px;
   border: 1px solid var(--accent);
   border-radius: var(--radius);
@@ -1075,11 +1076,15 @@ table.events-table td.mono {
 
 .risk-legend {
   position: absolute;
-  z-index: 500;
+  z-index: 1100;
   padding: 10px 12px;
   cursor: grab;
   max-width: 190px;
+  touch-action: none;
+  user-select: none;
 }
+
+.risk-legend:active { cursor: grabbing; }
 
 .risk-legend .legend-row {
   margin-bottom: 4px;
@@ -1099,19 +1104,36 @@ table.events-table td.mono {
   line-height: 1.4;
 }
 
-.watch-site-popup > strong,
-.watch-site-level {
-  display: block;
-}
-
 .watch-site-popup > strong {
+  display: block;
   font-size: var(--fs-14);
   overflow-wrap: anywhere;
 }
 
 .watch-site-level {
+  align-items: center;
+  color: var(--text);
+  display: flex;
+  gap: 6px;
   margin-top: 2px;
   font-weight: 600;
+}
+
+.watch-site-level-swatch {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  border: 1px solid rgba(0, 0, 0, 0.4);
+  border-radius: 50%;
+}
+
+.watch-site-hit-target:focus-visible {
+  outline: none;
+  stroke: var(--accent);
+  stroke-width: 3px;
+  stroke-opacity: 1;
+  fill: rgba(var(--accent-rgb), 0.1);
+  fill-opacity: 1;
 }
 
 .watch-site-popup dl {
@@ -1143,11 +1165,26 @@ table.events-table td.mono {
   .map-segmented-control {
     top: 8px;
     left: 8px;
-    max-width: calc(100% - 16px);
+    right: 58px;
+    max-width: none;
   }
 
   .map-segmented-control button {
     font-size: 11px;
+  }
+
+  .map-date-pill {
+    top: 66px;
+    right: auto;
+    left: 8px;
+    max-width: calc(100% - 16px);
+  }
+
+  .watch-overlay-state {
+    top: 106px;
+    right: 8px;
+    left: 8px;
+    max-width: none;
   }
 }
 

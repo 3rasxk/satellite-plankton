@@ -1,5 +1,11 @@
 const ALERT_LEVELS = new Set(['elevated', 'watch', 'warning'])
 const ALERT_MODES = new Set(['true_color', 'watch'])
+const DEFAULT_LEVEL_COLORS = {
+  elevated: '#34C759',
+  watch: '#FF9F0A',
+  warning: '#FF3B30',
+}
+const HEX_COLOR = /^#[0-9a-f]{6}$/i
 
 export function canRenderWatchTiles(mode, overlay) {
   return mode === 'watch' && Boolean(overlay?.tile_url)
@@ -21,6 +27,11 @@ export function getOverlayLegendLevels(mode, overlay) {
   const metadata = overlay?.analysis_metadata
   if (metadata?.version !== 2 || !Array.isArray(metadata.levels)) return []
   return metadata.levels.filter((item) => ALERT_LEVELS.has(item?.code))
+}
+
+export function getSafeWatchColor(color, level) {
+  if (typeof color === 'string' && HEX_COLOR.test(color)) return color
+  return DEFAULT_LEVEL_COLORS[level] ?? DEFAULT_LEVEL_COLORS.watch
 }
 
 export function getWatchOverlayMessage(overlay, requestError = null) {

@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import {
   canRenderWatchTiles,
   getOverlayLegendLevels,
+  getSafeWatchColor,
   getVisibleSiteAlerts,
   getWatchOverlayMessage,
 } from '../src/utils/watchOverlay.js'
@@ -79,4 +80,11 @@ test('requires a version-two metadata shape and a tile for pins', () => {
 
 test('legend contains only the three approved abnormal levels', () => {
   assert.deepEqual(getOverlayLegendLevels('true_color', overlay).map((item) => item.code), ['elevated', 'watch', 'warning'])
+})
+
+test('accepts only complete hex colors and falls back by approved level', () => {
+  assert.equal(getSafeWatchColor('#1a2B3c', 'warning'), '#1a2B3c')
+  assert.equal(getSafeWatchColor('red; background:url(javascript:bad)', 'elevated'), '#34C759')
+  assert.equal(getSafeWatchColor('#123', 'watch'), '#FF9F0A')
+  assert.equal(getSafeWatchColor(null, 'warning'), '#FF3B30')
 })

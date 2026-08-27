@@ -1,5 +1,6 @@
-import { useRef, useState, useCallback } from 'react'
-import { getOverlayLegendLevels } from '../utils/watchOverlay.js'
+import { useRef, useState, useCallback, useEffect } from 'react'
+import { clampOverlayPosition, getDraggedOverlayPosition } from '../utils/mapOverlay.js'
+import { getOverlayLegendLevels, getSafeWatchColor } from '../utils/watchOverlay.js'
 
 /**
  * Draggable explanatory legend for the two non-basemap map modes. The
@@ -7,41 +8,108 @@ import { getOverlayLegendLevels } from '../utils/watchOverlay.js'
  */
 export default function RiskLegend({ mode = 'true_color', watchOverlay = null }) {
   const [pos, setPos] = useState({ x: 16, y: 16 })
+  const legendRef = useRef(null)
   const dragRef = useRef(null)
   const levels = getOverlayLegendLevels(mode, watchOverlay)
   const resolutions = watchOverlay?.analysis_metadata?.resolutions
 
-  const onPointerDown = useCallback((e) => {
-    const start = { x: e.clientX, y: e.clientY, origin: pos }
-    dragRef.current = start
-    const onMove = (ev) => {
-      const dx = ev.clientX - start.x
-      const dy = ev.clientY - start.y
-      setPos({ x: start.origin.x + dx, y: start.origin.y + dy })
+  const clampToMap = useCallback((position) => {
+    const element = legendRef.current
+    const container = element?.parentElement
+    if (!element || !container) return position
+
+    const containerRect = container.getBoundingClientRect()
+    const legendRect = element.getBoundingClientRect()
+    return clampOverlayPosition(
+      position,
+      { width: containerRect.width, height: containerRect.height },
+      { width: legendRect.width, height: legendRect.height },
+    )
+  }, [])
+
+  useEffect(() => {
+    const keepInsideMap = () => setPos((current) => clampToMap(current))
+    keepInsideMap()
+    window.addEventListener('resize', keepInsideMap)
+    return () => window.removeEventListener('resize', keepInsideMap)
+  }, [clampToMap, mode, watchOverlay])
+
+  useEffect(() => () => {
+    const drag = dragRef.current
+    const element = legendRef.current
+    if (drag && element?.hasPointerCapture(drag.pointerId)) {
+      element.releasePointerCapture(drag.pointerId)
     }
-    const onUp = () => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
+    dragRef.current = null
+  }, [])
+
+  const onPointerDown = useCallback((event) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return
+    event.currentTarget.focus({ preventScroll: true })
+    event.currentTarget.setPointerCapture(event.pointerId)
+    dragRef.current = {
+      pointerId: event.pointerId,
+      start: { x: event.clientX, y: event.clientY },
+      origin: pos,
     }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    event.preventDefault()
   }, [pos])
+
+  const onPointerMove = useCallback((event) => {
+    const drag = dragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    const next = getDraggedOverlayPosition(
+      drag.origin,
+      drag.start,
+      { x: event.clientX, y: event.clientY },
+    )
+    setPos(clampToMap(next))
+  }, [clampToMap])
+
+  const finishDrag = useCallback((event) => {
+    const drag = dragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    dragRef.current = null
+  }, [])
+
+  const onKeyDown = useCallback((event) => {
+    const deltas = {
+      ArrowLeft: { x: -8, y: 0 },
+      ArrowRight: { x: 8, y: 0 },
+      ArrowUp: { x: 0, y: 8 },
+      ArrowDown: { x: 0, y: -8 },
+    }
+    const delta = deltas[event.key]
+    if (!delta) return
+    event.preventDefault()
+    setPos((current) => clampToMap({ x: current.x + delta.x, y: current.y + delta.y }))
+  }, [clampToMap])
 
   if (mode !== 'ndci' && levels.length !== 3) return null
 
   return (
     <div
+      ref={legendRef}
       className="risk-legend glass"
       style={{ left: pos.x, bottom: pos.y }}
+      role="region"
+      tabIndex={0}
+      aria-label="คำอธิบายแผนที่ ใช้ปุ่มลูกศรหรือลากเพื่อย้าย"
       onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={finishDrag}
+      onPointerCancel={finishDrag}
+      onKeyDown={onKeyDown}
     >
       {mode === 'true_color' || mode === 'watch' ? (
         <>
           <h3>สัญญาณ NDCI (3 ระดับ)</h3>
           {levels.map((level) => (
             <div className="legend-row" key={level.code}>
-              <span className="legend-swatch" style={{ background: level.color }} />
+              <span className="legend-swatch" style={{ backgroundColor: getSafeWatchColor(level.color, level.code) }} aria-hidden="true" />
               <span className="legend-label">{level.label_th}</span>
             </div>
           ))}

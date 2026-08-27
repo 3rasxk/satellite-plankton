@@ -1,14 +1,20 @@
+import { getSafeWatchColor } from '../utils/watchOverlay.js'
+
 function valueOrDash(value, digits = 2) {
   return Number.isFinite(value) ? value.toFixed(digits) : '—'
 }
 
 export default function WatchSitePopup({ alert }) {
   const siteAlert = alert ?? {}
+  const levelColor = getSafeWatchColor(siteAlert.color, siteAlert.level)
 
   return (
     <div className="watch-site-popup">
       <strong>{siteAlert.name || '—'}</strong>
-      <span className="watch-site-level" style={{ color: siteAlert.color }}>{siteAlert.label_th || '—'}</span>
+      <span className="watch-site-level">
+        <span className="watch-site-level-swatch" style={{ backgroundColor: levelColor }} aria-hidden="true" />
+        {siteAlert.label_th || '—'}
+      </span>
       <dl>
         <dt>NDCI z-score</dt><dd>{valueOrDash(siteAlert.ndci_z)}</dd>
         <dt>เทรนด์ 14 วัน</dt><dd>{siteAlert.trend_rising ? 'เพิ่มขึ้น' : 'ข้อมูลไม่พอ/ไม่เพิ่มขึ้น'}</dd>
