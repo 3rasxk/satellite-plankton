@@ -43,6 +43,15 @@ from .watch_overlay import (
     build_ndci_watch_overlay,
     seasonal_windows,
 )
+from .watch_rules import (
+    LEVEL_ELEVATED,
+    LEVEL_NONE,
+    LEVEL_WARNING,
+    LEVEL_WATCH,
+    classify_levels,
+    linear_daily_trend,
+    qa60_clear,
+)
 
 __all__ = [
     "GEEAuthError",
@@ -61,4 +70,11 @@ __all__ = [
     "seasonal_windows",
     "build_ndci_watch_overlay",
     "NoWatchOverlayImageryError",
+    "LEVEL_NONE",
+    "LEVEL_ELEVATED",
+    "LEVEL_WATCH",
+    "LEVEL_WARNING",
+    "classify_levels",
+    "linear_daily_trend",
+    "qa60_clear",
 ]
