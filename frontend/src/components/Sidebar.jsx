@@ -1,39 +1,24 @@
 import { NavLink } from 'react-router-dom'
-import { useApi } from '../hooks/useApi.js'
-import { getMeta } from '../api/client.js'
+import Icon from './Icon.jsx'
 
 const NAV_ITEMS = [
-  { to: '/', label: 'ภาพรวม/แผนที่', icon: '🗺️', end: true },
-  { to: '/ndci', label: 'Sentinel-2 NDCI', icon: '📡' },
-  { to: '/anomaly', label: 'ความผิดปกติตามฤดูกาล', icon: '📈' },
-  { to: '/aquaculture', label: 'พื้นที่เพาะเลี้ยงสัตว์น้ำ', icon: '🐟' },
-  { to: '/reports', label: 'รายงานและการส่งออก', icon: '📄' },
+  { to: '/', label: 'ภาพรวม/แผนที่', icon: 'map', end: true },
+  { to: '/ndci', label: 'Sentinel-2 NDCI', icon: 'satellite' },
+  { to: '/anomaly', label: 'ความผิดปกติตามฤดูกาล', icon: 'trend' },
+  { to: '/aquaculture', label: 'พื้นที่เพาะเลี้ยงสัตว์น้ำ', icon: 'fish' },
+  { to: '/reports', label: 'รายงานและการส่งออก', icon: 'file' },
 ]
 
-/**
- * Sidebar nav shell (HAB Sentinel design spec, docs/superpowers/specs/
- * 2026-08-26-hab-sentinel-dashboard-design.md). The connectivity pill is a
- * real signal, not decoration: it fires GET / (backend/src/main.py's meta
- * route) once on mount and reflects whether that call actually succeeded —
- * never a hardcoded "connected" claim (CLAUDE.md: never fabricate).
- */
+/** Sidebar nav shell (HAB Sentinel design spec). */
 export default function Sidebar() {
-  const { data, error } = useApi(getMeta, [])
-  const connected = !!data && !error
-
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
-        <span className="sidebar-logo" aria-hidden="true">🛰️</span>
+        <span className="sidebar-logo" aria-hidden="true"><Icon name="satellite" size={17} /></span>
         <div>
           <div className="sidebar-title">HAB Sentinel</div>
           <div className="sidebar-subtitle">อ่าวไทยตอนบน</div>
         </div>
-      </div>
-
-      <div className={`sidebar-status-pill${connected ? '' : ' offline'}`}>
-        <span className="dot" />
-        {connected ? 'ระบบทำงานปกติ' : 'เชื่อมต่อ API ไม่ได้'}
       </div>
 
       <nav className="sidebar-nav">
@@ -44,21 +29,12 @@ export default function Sidebar() {
             end={item.end}
             className={({ isActive }) => `sidebar-nav-item${isActive ? ' active' : ''}`}
           >
-            <span className="sidebar-nav-icon" aria-hidden="true">{item.icon}</span>
+            <span className="sidebar-nav-icon" aria-hidden="true"><Icon name={item.icon} /></span>
             {item.label}
           </NavLink>
         ))}
       </nav>
 
-      <div className="sidebar-footer">
-        <div className={`sidebar-pill outline${connected ? '' : ' offline'}`}>
-          <span className="dot" />
-          GEE API {connected ? 'Connected' : 'Unreachable'}
-        </div>
-        <button type="button" className="sidebar-settings-btn">
-          <span aria-hidden="true">⚙️</span> ตั้งค่าระบบ
-        </button>
-      </div>
     </aside>
   )
 }

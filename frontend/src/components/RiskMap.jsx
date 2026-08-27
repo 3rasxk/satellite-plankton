@@ -1,6 +1,7 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import { MapContainer, TileLayer, CircleMarker, ZoomControl, useMap } from 'react-leaflet'
 import { RISK_COLOR_HEX, NO_DATA_HEX, NO_DATA_LINE_HEX, STATUS_LABEL, NO_DATA_STATUS } from '../constants.js'
+import { MAP_BOUNDS, syncMinimumBoundsZoom } from '../utils/mapBounds.js'
 import NdciRasterOverlay from './NdciRasterOverlay.jsx'
 
 const UPPER_GULF_CENTER = [12.9, 100.75]
@@ -22,6 +23,20 @@ const TRUE_COLOR_TILE_URL =
   'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
 const TRUE_COLOR_ATTRIBUTION =
   'Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community'
+
+function BoundsZoomLock() {
+  const map = useMap()
+
+  useEffect(() => {
+    const syncZoom = () => syncMinimumBoundsZoom(map)
+    syncZoom()
+    map.on('resize', syncZoom)
+
+    return () => map.off('resize', syncZoom)
+  }, [map])
+
+  return null
+}
 
 function FitToFeatures({ features }) {
   const map = useMap()
@@ -61,7 +76,7 @@ function makeAccessible(layer, label, onActivate) {
   })
 }
 
-export default function RiskMap({ featureCollection, onSelectSite, mode = 'risk' }) {
+export default function RiskMap({ featureCollection, onSelectSite = () => {}, mode = 'risk' }) {
   const features = featureCollection?.features || []
 
   return (
@@ -69,10 +84,14 @@ export default function RiskMap({ featureCollection, onSelectSite, mode = 'risk'
       className="leaflet-map"
       center={UPPER_GULF_CENTER}
       zoom={UPPER_GULF_ZOOM}
+      maxZoom={12}
+      maxBounds={MAP_BOUNDS}
+      maxBoundsViscosity={1}
       scrollWheelZoom
       attributionControl
       zoomControl={false}
     >
+      <BoundsZoomLock />
       <ZoomControl position="topright" />
       <TileLayer
         url={mode === 'true_color' ? TRUE_COLOR_TILE_URL : TILE_URL}

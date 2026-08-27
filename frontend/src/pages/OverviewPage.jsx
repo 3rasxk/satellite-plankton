@@ -4,13 +4,12 @@ import { getRiskMap } from '../api/client.js'
 import RiskMap from '../components/RiskMap.jsx'
 import RiskLegend from '../components/RiskLegend.jsx'
 import MapControls from '../components/MapControls.jsx'
-import SitePanel from '../components/SitePanel.jsx'
 import { formatRelativeTime } from '../constants.js'
+import Icon from '../components/Icon.jsx'
 
 export default function OverviewPage() {
   const { data, loading, error, refetch } = useApi(getRiskMap, [])
-  const [selected, setSelected] = useState(null)
-  const [mode, setMode] = useState('risk')
+  const [mode, setMode] = useState('true_color')
 
   const newestFetch = useMemo(() => {
     if (!data) return null
@@ -30,20 +29,15 @@ export default function OverviewPage() {
         )}
         {data && data.features.length > 0 && (
           <>
-            <RiskMap featureCollection={data} onSelectSite={setSelected} mode={mode} />
+            <RiskMap featureCollection={data} mode={mode} />
             <MapControls mode={mode} onModeChange={setMode} />
             <RiskLegend mode={mode} />
             <div className="map-date-pill glass">
-              📅 {newestFetch ? `อัปเดต ${formatRelativeTime(newestFetch)}` : 'Sentinel-2 + MODIS'} ⌄
+              <Icon name="calendar" size={15} />
+              {newestFetch ? `อัปเดต ${formatRelativeTime(newestFetch)}` : 'Sentinel-2 + MODIS'}
+              <Icon name="chevronDown" size={14} />
             </div>
           </>
-        )}
-      </div>
-      <div className="overview-side-panel">
-        {selected ? (
-          <SitePanel site={selected} onClose={() => setSelected(null)} />
-        ) : (
-          <div className="state-panel"><h3>เลือกจุดตรวจวัดบนแผนที่</h3></div>
         )}
       </div>
     </div>

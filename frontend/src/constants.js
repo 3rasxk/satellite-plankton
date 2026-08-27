@@ -3,13 +3,6 @@
 // and to human copy, per docs/FRONTEND_PLAN.md §6 (interface words are
 // design material, write from the reader's side).
 
-// Verbatim truth-boundary text, matches backend/src/schemas.py
-// DISCLAIMER_TEXT exactly. Used as the persistent banner default so it is
-// visible even before any fetch resolves — never dropped, never tied to
-// load state.
-export const DISCLAIMER_TEXT =
-  'Detection is at satellite-pixel resolution. Small or scattered blooms may not be visible. Presence and absence are the reliable signal — concentration estimates are approximate.'
-
 // risk_level enum -> risk-ramp colour. Four published tiers map onto the
 // four risk tokens 1:1 — see docs/FRONTEND_PLAN.md §4. Apple-palette
 // redesign: normal is a neutral grey (kept off the accent blue, which is

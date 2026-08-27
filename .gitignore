@@ -17,6 +17,9 @@ __pycache__/
 # OS
 .DS_Store
 
+# Local isolated implementation worktrees
+.worktrees/
+
 # Large / generated data
 *.tif
 *.nc

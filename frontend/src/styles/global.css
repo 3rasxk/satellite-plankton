@@ -58,24 +58,6 @@ button {
 }
 
 /* ---------------------------------------------------------------------- */
-/* Disclaimer banner — persistent, verbatim, never dropped                */
-/* ---------------------------------------------------------------------- */
-
-.disclaimer {
-  border-top: var(--hairline);
-  background: var(--surface);
-  padding: 12px 28px;
-}
-
-.disclaimer p {
-  margin: 0;
-  font-family: var(--font-body);
-  font-size: var(--fs-12);
-  color: var(--text-secondary);
-  max-width: 1200px;
-}
-
-/* ---------------------------------------------------------------------- */
 /* Generic page / state chrome                                            */
 /* ---------------------------------------------------------------------- */
 
@@ -958,6 +940,11 @@ table.events-table td.mono {
   font-size: 15px;
 }
 
+.icon {
+  display: block;
+  flex-shrink: 0;
+}
+
 .sidebar-title {
   font-family: var(--font-display);
   font-weight: 600;
@@ -968,34 +955,6 @@ table.events-table td.mono {
 .sidebar-subtitle {
   font-size: 12px;
   color: var(--text-secondary);
-}
-
-.sidebar-status-pill,
-.sidebar-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 10px;
-  border-radius: var(--radius-pill);
-  font-size: 12px;
-  width: fit-content;
-}
-
-.sidebar-status-pill {
-  background: rgba(52, 199, 89, 0.1);
-  color: var(--status-ok);
-}
-.sidebar-status-pill.offline {
-  background: rgba(255, 59, 48, 0.1);
-  color: var(--status-error);
-}
-
-.sidebar-status-pill .dot,
-.sidebar-pill .dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
 }
 
 .sidebar-nav {
@@ -1021,42 +980,6 @@ table.events-table td.mono {
   background: rgba(var(--accent-rgb), 0.1);
   color: var(--accent);
   font-weight: 500;
-}
-
-.sidebar-footer {
-  margin-top: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.sidebar-pill.outline {
-  border: 1px solid var(--divider);
-  color: var(--text-secondary);
-  background: none;
-}
-.sidebar-pill.outline .dot {
-  background: var(--status-ok);
-}
-.sidebar-pill.outline.offline .dot {
-  background: var(--status-error);
-}
-
-.sidebar-settings-btn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border-radius: var(--radius-control);
-  border: none;
-  background: none;
-  color: var(--text-secondary);
-  font-size: var(--fs-14);
-  cursor: pointer;
-  text-align: left;
-}
-.sidebar-settings-btn:hover {
-  background: var(--divider-soft);
 }
 
 /* ---- Overview page: map + side panel ---- */
@@ -1118,14 +1041,27 @@ table.events-table td.mono {
   padding: 7px 14px;
   font-size: 13px;
   color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
 }
 
 .risk-legend {
   position: absolute;
   z-index: 500;
-  padding: 12px 14px;
+  padding: 10px 12px;
   cursor: grab;
-  max-width: 220px;
+  max-width: 190px;
+}
+
+.risk-legend .legend-row {
+  margin-bottom: 4px;
+  font-size: 11px;
+}
+
+.risk-legend .legend-meaning {
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .ndci-gradient-bar {
@@ -1145,5 +1081,454 @@ table.events-table td.mono {
   justify-content: space-between;
   font-size: 11px;
   font-family: var(--font-mono);
+  color: var(--text-secondary);
+}
+
+/* ---------------------------------------------------------------------- */
+/* Status badge — reusable dot + label pill                               */
+/* ---------------------------------------------------------------------- */
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  font-family: var(--font-body);
+  font-weight: 500;
+  font-size: 12px;
+  border: 1px solid var(--divider);
+  white-space: nowrap;
+}
+
+.status-badge .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-badge.no-data .dot {
+  background: var(--no-data);
+  border: 1px dashed var(--no-data-line);
+}
+
+.status-badge.no-data {
+  color: var(--text-secondary);
+  border-style: dashed;
+  border-color: var(--no-data-line);
+}
+
+.status-badge.inline {
+  padding: 2px 8px;
+  font-size: 11px;
+}
+
+.no-data-text {
+  color: var(--text-secondary);
+  font-style: italic;
+  font-size: var(--fs-14);
+}
+
+/* ---------------------------------------------------------------------- */
+/* NDCI page — index definition cards                                     */
+/* ---------------------------------------------------------------------- */
+
+.ndci-index-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
+}
+
+.index-def-card {
+  border: var(--hairline);
+  border-radius: var(--radius-lg);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-card);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: box-shadow var(--motion-fast);
+}
+
+.index-def-card:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.index-def-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.index-def-name {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: var(--fs-20);
+  color: var(--text);
+}
+
+.index-def-fullname {
+  font-size: 12px;
+  color: var(--text-secondary);
+  letter-spacing: 0.02em;
+}
+
+.index-def-formula {
+  font-family: var(--font-mono);
+  font-size: var(--fs-16);
+  color: var(--accent);
+  padding: 10px 14px;
+  background: rgba(var(--accent-rgb), 0.05);
+  border-radius: var(--radius);
+  border: 1px solid rgba(var(--accent-rgb), 0.12);
+}
+
+.index-def-desc {
+  font-size: var(--fs-14);
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin: 0;
+}
+
+/* NDCI table additions */
+.ndci-table td {
+  vertical-align: middle;
+}
+
+.ndci-site-name {
+  font-weight: 500;
+  font-size: var(--fs-14);
+}
+
+.ndci-site-coords {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+.table-date {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* ---------------------------------------------------------------------- */
+/* Anomaly page — per-site rows                                           */
+/* ---------------------------------------------------------------------- */
+
+.anomaly-stat-row {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.anomaly-site-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.anomaly-site-row {
+  border: var(--hairline);
+  border-radius: var(--radius-lg);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-card);
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: box-shadow var(--motion-fast);
+}
+
+.anomaly-site-row:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.anomaly-site-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.anomaly-site-name {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: var(--fs-16);
+  color: var(--text);
+}
+
+.anomaly-site-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.anomaly-z-value {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.anomaly-site-strip {
+  flex: 1;
+}
+
+@media (max-width: 720px) {
+  .anomaly-stat-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+/* Aquaculture page — zone cards + disclosure                              */
+/* ---------------------------------------------------------------------- */
+
+.aquaculture-disclosure {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 18px;
+  border-radius: var(--radius-lg);
+  border: 1.5px solid var(--risk-watch);
+  background: rgba(var(--risk-watch-rgb), 0.06);
+}
+
+.aquaculture-disclosure-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.aquaculture-disclosure strong {
+  display: block;
+  font-size: var(--fs-14);
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.aquaculture-disclosure p {
+  margin: 0;
+  font-size: var(--fs-14);
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.aquaculture-zone-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
+}
+
+.zone-card {
+  border: var(--hairline);
+  border-radius: var(--radius-lg);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-card);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  transition: box-shadow var(--motion-fast);
+}
+
+.zone-card:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.zone-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.zone-card-name {
+  font-family: var(--font-display);
+  font-size: var(--fs-16);
+  font-weight: 600;
+  color: var(--text);
+  margin: 0;
+}
+
+.zone-card-details {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 14px;
+  font-size: var(--fs-14);
+  margin: 0;
+}
+
+.zone-card-details dt {
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  align-self: center;
+}
+
+.zone-card-details dd {
+  margin: 0;
+  color: var(--text);
+}
+
+/* ---------------------------------------------------------------------- */
+/* Reports page — export items, service status, scan history               */
+/* ---------------------------------------------------------------------- */
+
+.export-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: var(--hairline);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.export-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  background: var(--surface-card);
+  transition: background var(--motion-fast);
+}
+
+.export-item:not(:last-child) {
+  border-bottom: 1px solid var(--divider-soft);
+}
+
+.export-item:hover {
+  background: var(--surface);
+}
+
+.export-item-icon {
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.export-item-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.export-item-title {
+  font-weight: 500;
+  font-size: var(--fs-14);
+  color: var(--text);
+}
+
+.export-item-detail {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+.export-item-btn {
+  font-family: var(--font-body);
+  font-weight: 500;
+  font-size: 12px;
+  padding: 7px 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--motion-fast), color var(--motion-fast);
+}
+
+.export-item-btn:hover:not(:disabled) {
+  background: rgba(var(--accent-rgb), 0.08);
+}
+
+.export-item-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  border-color: var(--divider);
+  color: var(--text-secondary);
+}
+
+.reports-two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+@media (max-width: 720px) {
+  .reports-two-col {
+    grid-template-columns: 1fr;
+  }
+}
+
+.service-status-card {
+  border: var(--hairline);
+  border-radius: var(--radius-lg);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-card);
+  padding: 4px 0;
+}
+
+.service-status-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 18px;
+}
+
+.service-status-row:not(:last-child) {
+  border-bottom: 1px solid var(--divider-soft);
+}
+
+.service-status-row .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.service-name {
+  font-weight: 500;
+  font-size: var(--fs-14);
+  color: var(--text);
+  flex: 1;
+}
+
+.service-label {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.scan-history-card {
+  border: var(--hairline);
+  border-radius: var(--radius-lg);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-card);
+  padding: 16px 18px;
+}
+
+.scan-history-entry {
+  display: flex;
+  gap: 12px;
+  padding: 8px 0;
+  font-size: var(--fs-14);
+}
+
+.scan-history-entry:not(:last-child) {
+  border-bottom: 1px solid var(--divider-soft);
+}
+
+.scan-time {
+  font-size: 12px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  min-width: 50px;
+}
+
+.scan-message {
   color: var(--text-secondary);
 }
