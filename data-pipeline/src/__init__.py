@@ -38,7 +38,11 @@ from .study_area import (
     UPPER_GULF_SCAN_POLYGON_LATLNG,
     check_point_in_study_area,
 )
-from .watch_overlay import seasonal_windows
+from .watch_overlay import (
+    NoWatchOverlayImageryError,
+    build_ndci_watch_overlay,
+    seasonal_windows,
+)
 
 __all__ = [
     "GEEAuthError",
@@ -55,4 +59,6 @@ __all__ = [
     "STUDY_AREA_POLYGON_LATLNG",
     "UPPER_GULF_SCAN_POLYGON_LATLNG",
     "seasonal_windows",
+    "build_ndci_watch_overlay",
+    "NoWatchOverlayImageryError",
 ]
