@@ -39,6 +39,28 @@ STUDY_AREA_POLYGON_LATLNG: tuple[tuple[float, float], ...] = (
     (12.5046552, 99.9359575),
 )
 
+UPPER_GULF_SCAN_POLYGON_LATLNG: tuple[tuple[float, float], ...] = (
+    (13.92257500, 99.29500833),
+    (13.92548889, 102.57514444),
+    (12.06813056, 102.57761667),
+    (12.10439444, 99.31681111),
+)
+
+
+def upper_gulf_scan_geojson_polygon() -> dict:
+    """Return the independent whole-upper-Gulf scan polygon as GeoJSON."""
+    ring = [[lng, lat] for lat, lng in UPPER_GULF_SCAN_POLYGON_LATLNG]
+    ring.append(ring[0])
+    return {"type": "Polygon", "coordinates": [ring]}
+
+
+def upper_gulf_scan_ee_polygon():
+    """Return the independent whole-upper-Gulf scan polygon for Earth Engine."""
+    import ee
+
+    ring = [[lng, lat] for lat, lng in UPPER_GULF_SCAN_POLYGON_LATLNG]
+    return ee.Geometry.Polygon([ring])
+
 
 def study_area_geojson_polygon() -> dict:
     """The study area as a GeoJSON Polygon dict.

@@ -33,7 +33,12 @@ from .sentinel2 import (
     NoWaterPixelsError,
     get_sentinel2_bands,
 )
-from .study_area import STUDY_AREA_POLYGON_LATLNG, check_point_in_study_area
+from .study_area import (
+    STUDY_AREA_POLYGON_LATLNG,
+    UPPER_GULF_SCAN_POLYGON_LATLNG,
+    check_point_in_study_area,
+)
+from .watch_overlay import seasonal_windows
 
 __all__ = [
     "GEEAuthError",
@@ -48,4 +53,6 @@ __all__ = [
     "NoWaterPixelsError",
     "check_point_in_study_area",
     "STUDY_AREA_POLYGON_LATLNG",
+    "UPPER_GULF_SCAN_POLYGON_LATLNG",
+    "seasonal_windows",
 ]

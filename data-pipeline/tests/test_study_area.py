@@ -10,10 +10,28 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.study_area import (
     STUDY_AREA_POLYGON_LATLNG,
+    UPPER_GULF_SCAN_POLYGON_LATLNG,
     check_point_in_study_area,
     point_in_polygon,
     study_area_geojson_polygon,
+    upper_gulf_scan_geojson_polygon,
 )
+
+
+def test_scan_polygon_preserves_supplied_vertices_without_replacing_study_area():
+    assert UPPER_GULF_SCAN_POLYGON_LATLNG == (
+        (13.92257500, 99.29500833),
+        (13.92548889, 102.57514444),
+        (12.06813056, 102.57761667),
+        (12.10439444, 99.31681111),
+    )
+    assert UPPER_GULF_SCAN_POLYGON_LATLNG != STUDY_AREA_POLYGON_LATLNG
+
+
+def test_scan_geojson_is_closed_and_uses_lng_lat_order():
+    ring = upper_gulf_scan_geojson_polygon()["coordinates"][0]
+    assert ring[0] == [99.29500833, 13.922575]
+    assert ring[-1] == ring[0]
 
 
 def test_polygon_has_four_vertices_not_repeated():
