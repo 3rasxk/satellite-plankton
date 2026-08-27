@@ -17,6 +17,108 @@ from src.schemas import WATCH_OVERLAY_CAVEAT
 from src.scheduler import refresh_watch_overlay
 
 
+def analysis_metadata_payload() -> dict:
+    return {
+        "version": 2,
+        "levels": [
+            {
+                "code": "elevated",
+                "class_code": 1,
+                "label_th": "เริ่มผิดปกติ",
+                "color": "#34C759",
+                "min_z": 1.5,
+                "requires_rising_trend": False,
+                "requires_sst_above_normal": False,
+            },
+            {
+                "code": "watch",
+                "class_code": 2,
+                "label_th": "เฝ้าระวัง",
+                "color": "#FF9F0A",
+                "min_z": 1.5,
+                "requires_rising_trend": True,
+                "requires_sst_above_normal": False,
+            },
+            {
+                "code": "warning",
+                "class_code": 3,
+                "label_th": "เตือนภัย",
+                "color": "#FF3B30",
+                "min_z": 2.0,
+                "requires_rising_trend": True,
+                "requires_sst_above_normal": True,
+            },
+        ],
+        "trend": {
+            "window_days": 14,
+            "min_distinct_dates": 2,
+            "slope_units": "ndci_per_day",
+            "rising_rule": "slope_per_day > 0",
+        },
+        "sst": {
+            "collection_id": "NASA/OCEANDATA/MODIS-Aqua/L3SMI",
+            "search_window_days": 5,
+            "climatology_window_days": 7,
+            "resolution_m": 4638,
+            "above_normal_rule": "current_sst > seasonal_sst",
+        },
+        "masks": {
+            "water_mask": "gulf_connected_historical_surface_water",
+            "water_occurrence_pct": 50.0,
+            "scl_water_class": 6,
+            "qa60_cloud_bit": 10,
+            "qa60_cirrus_bit": 11,
+        },
+        "resolutions": {
+            "output_grid_m": 10,
+            "ndci_m": 20,
+            "trend_m": 20,
+            "sst_m": 4638,
+        },
+        "newest_sentinel_scene_date": "2026-08-26",
+        "newest_sst_scene_date": "2026-08-25",
+        "mosaic_caveat": "Sentinel-2 and SST mosaic pixels may come from different dates.",
+        "site_alerts": [
+            {
+                "site_id": "chaophraya_mouth",
+                "name": "Chao Phraya River mouth, Samut Prakan",
+                "lat": 13.45,
+                "lng": 100.65,
+                "level": "elevated",
+                "label_th": "เริ่มผิดปกติ",
+                "color": "#34C759",
+                "ndci_z": 1.7,
+                "latest_scene_date": "2026-08-26",
+                "trend_slope_per_day": None,
+                "trend_observations": 1,
+                "trend_rising": False,
+                "current_sst": None,
+                "seasonal_sst": None,
+                "sst_date": None,
+                "sst_above_normal": False,
+            },
+            {
+                "site_id": "bangpakong_mouth",
+                "name": "Bang Pakong River mouth, Chachoengsao",
+                "lat": 13.47,
+                "lng": 100.98,
+                "level": "warning",
+                "label_th": "เตือนภัย",
+                "color": "#FF3B30",
+                "ndci_z": 2.4,
+                "latest_scene_date": "2026-08-26",
+                "trend_slope_per_day": 0.01,
+                "trend_observations": 3,
+                "trend_rising": True,
+                "current_sst": 30.2,
+                "seasonal_sst": 29.8,
+                "sst_date": "2026-08-25",
+                "sst_above_normal": True,
+            },
+        ],
+    }
+
+
 def successful_overlay_payload(target_date: str) -> dict:
     return {
         "status": "ok",
@@ -117,6 +219,7 @@ def test_watch_overlay_returns_cached_run_without_calling_gee(client, monkeypatc
                 output_grid_m=10,
                 effective_resolution_m=20,
                 color="ff0000",
+                analysis_metadata=analysis_metadata_payload(),
                 stale=True,
                 error="Scheduler refresh failed after this cached run.",
                 caveat="Obsolete scheduler-owned caveat text.",
@@ -147,6 +250,37 @@ def test_watch_overlay_returns_cached_run_without_calling_gee(client, monkeypatc
     assert body["stale"] is True
     assert body["error"] == "Scheduler refresh failed after this cached run."
     assert body["caveat"] == WATCH_OVERLAY_CAVEAT
+    assert body["analysis_metadata"]["version"] == 2
+    assert [
+        item["level"] for item in body["analysis_metadata"]["site_alerts"]
+    ] == ["elevated", "warning"]
+    assert all(
+        item["level"] != "normal"
+        for item in body["analysis_metadata"]["site_alerts"]
+    )
+    assert "map_id" not in body
+
+
+def test_watch_overlay_legacy_cached_run_returns_null_analysis_metadata(client):
+    db = SessionLocal()
+    try:
+        db.add(
+            WatchOverlayCache(
+                id=1,
+                status="ok",
+                tile_url="https://earthengine.example/tiles/{z}/{x}/{y}",
+                map_id="scheduler-internal-map-id",
+                stale=False,
+                caveat="Obsolete scheduler-owned caveat text.",
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    body = client.get("/watch-overlay").json()
+
+    assert body["analysis_metadata"] is None
     assert "map_id" not in body
 
 

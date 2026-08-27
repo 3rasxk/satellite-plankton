@@ -119,7 +119,10 @@ def test_openapi_schema_never_declares_a_percentage_or_ratio_field(client):
     banned_fragments = ("percent", "pct", "accuracy", "success_rate", "hit_rate", "recall")
     schemas = schema.get("components", {}).get("schemas", {})
     assert schemas, "OpenAPI schema unexpectedly has no component schemas"
-    allowed_fields = {"WatchOverlayResponse.water_occurrence_pct"}
+    allowed_fields = {
+        "WatchMaskMetadata.water_occurrence_pct",
+        "WatchOverlayResponse.water_occurrence_pct",
+    }
 
     offending = []
     for model_name, model_def in schemas.items():

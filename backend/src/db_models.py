@@ -160,6 +160,7 @@ class WatchOverlayCache(Base):
     status: Mapped[str] = mapped_column(String)
     tile_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     map_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    analysis_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     target_date: Mapped[str | None] = mapped_column(String, nullable=True)
     source_window_start: Mapped[str | None] = mapped_column(String, nullable=True)

@@ -7,6 +7,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from . import config
+from .migrations import ensure_watch_overlay_analysis_metadata_column
 
 _connect_args = {"check_same_thread": False} if config.DATABASE_URL.startswith("sqlite") else {}
 
@@ -33,3 +34,4 @@ def init_db() -> None:
     from . import db_models  # noqa: F401  (registers models on Base.metadata)
 
     Base.metadata.create_all(bind=engine)
+    ensure_watch_overlay_analysis_metadata_column(engine)

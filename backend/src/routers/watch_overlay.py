@@ -49,6 +49,7 @@ def get_watch_overlay(db: Session = Depends(get_db)) -> WatchOverlayResponse:
         output_grid_m=row.output_grid_m,
         effective_resolution_m=row.effective_resolution_m,
         color=row.color,
+        analysis_metadata=row.analysis_metadata,
         stale=row.stale,
         error=row.error,
         caveat=WATCH_OVERLAY_CAVEAT,

@@ -65,6 +65,78 @@ class DisclaimerMixin(BaseModel):
 # --------------------------------------------------------------------------
 
 
+class WatchLevelDefinition(BaseModel):
+    code: Literal["elevated", "watch", "warning"]
+    class_code: Literal[1, 2, 3]
+    label_th: str
+    color: str
+    min_z: float
+    requires_rising_trend: bool
+    requires_sst_above_normal: bool
+
+
+class WatchSiteAlert(BaseModel):
+    site_id: str
+    name: str
+    lat: float
+    lng: float
+    level: Literal["elevated", "watch", "warning"]
+    label_th: str
+    color: str
+    ndci_z: float
+    latest_scene_date: str | None = None
+    trend_slope_per_day: float | None = None
+    trend_observations: int
+    trend_rising: bool
+    current_sst: float | None = None
+    seasonal_sst: float | None = None
+    sst_date: str | None = None
+    sst_above_normal: bool
+
+
+class WatchTrendMetadata(BaseModel):
+    window_days: int
+    min_distinct_dates: int
+    slope_units: Literal["ndci_per_day"]
+    rising_rule: Literal["slope_per_day > 0"]
+
+
+class WatchSstMetadata(BaseModel):
+    collection_id: str
+    search_window_days: int
+    climatology_window_days: int
+    resolution_m: int
+    above_normal_rule: Literal["current_sst > seasonal_sst"]
+
+
+class WatchMaskMetadata(BaseModel):
+    water_mask: str
+    water_occurrence_pct: float
+    scl_water_class: Literal[6]
+    qa60_cloud_bit: Literal[10]
+    qa60_cirrus_bit: Literal[11]
+
+
+class WatchResolutionMetadata(BaseModel):
+    output_grid_m: int
+    ndci_m: int
+    trend_m: int
+    sst_m: int
+
+
+class WatchAnalysisMetadata(BaseModel):
+    version: Literal[2]
+    levels: list[WatchLevelDefinition]
+    trend: WatchTrendMetadata
+    sst: WatchSstMetadata
+    masks: WatchMaskMetadata
+    resolutions: WatchResolutionMetadata
+    newest_sentinel_scene_date: str | None = None
+    newest_sst_scene_date: str | None = None
+    mosaic_caveat: str
+    site_alerts: list[WatchSiteAlert]
+
+
 class WatchOverlayResponse(DisclaimerMixin):
     status: Literal["ok", "no_imagery", "error"]
     tile_url: str | None = None
@@ -83,6 +155,7 @@ class WatchOverlayResponse(DisclaimerMixin):
     output_grid_m: int | None = None
     effective_resolution_m: int | None = None
     color: str | None = None
+    analysis_metadata: WatchAnalysisMetadata | None = None
     stale: bool
     error: str | None = None
     caveat: str
