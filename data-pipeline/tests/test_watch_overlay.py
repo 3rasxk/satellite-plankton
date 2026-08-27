@@ -77,6 +77,105 @@ def test_current_and_baseline_use_identical_masked_ndci_builder():
     assert all(call[2:] == ("scan-region", "connected-water", 10) for call in calls)
 
 
+def test_gulf_connectivity_cost_and_seed_share_the_jrc_water_grid(monkeypatch):
+    """Fails if cumulative cost can fall back to a default-grid raster."""
+    class FakeImage:
+        def __init__(self, name, graph):
+            self.name = name
+            self.graph = graph
+            self.self_masked = False
+            self.reprojected_to = None
+
+        def select(self, band):
+            assert band == "occurrence"
+            return self
+
+        def clip(self, region):
+            assert region == "scan-region"
+            return self
+
+        def gte(self, threshold):
+            assert threshold == 50.0
+            return FakeImage("persistent-water", self.graph)
+
+        def byte(self):
+            return self
+
+        def paint(self, features, value):
+            assert features == [("feature", (100.0, 13.0))]
+            assert value == 1
+            return self
+
+        def selfMask(self):
+            self.self_masked = True
+            return self
+
+        def projection(self):
+            return f"{self.name}-projection"
+
+        def reproject(self, *, crs):
+            self.reprojected_to = crs
+            return self
+
+        def cumulativeCost(self, *, source, maxDistance, geodeticDistance):
+            self.graph.cumulative_cost = {
+                "cost": self,
+                "source": source,
+                "max_distance": maxDistance,
+                "geodetic_distance": geodeticDistance,
+            }
+            return FakeImage("reached", self.graph)
+
+        def mask(self):
+            return self
+
+        def updateMask(self, mask):
+            return self
+
+        def rename(self, name):
+            assert name == "gulf_connected_water"
+            return self
+
+    class FakeImageFactory:
+        def __init__(self, graph):
+            self.graph = graph
+
+        def __call__(self, value):
+            return FakeImage("occurrence" if isinstance(value, str) else "seed", self.graph)
+
+        def constant(self, value):
+            return FakeImage("constant", self.graph)
+
+    class FakeEE:
+        def __init__(self):
+            self.cumulative_cost = None
+            self.Image = FakeImageFactory(self)
+            self.Geometry = type(
+                "Geometry", (), {"Point": staticmethod(lambda coordinates: tuple(coordinates))}
+            )
+
+        @staticmethod
+        def Feature(geometry):
+            return ("feature", geometry)
+
+        @staticmethod
+        def FeatureCollection(features):
+            return features
+
+    fake_ee = FakeEE()
+    monkeypatch.setattr(watch_overlay, "ee", fake_ee)
+
+    watch_overlay._build_gulf_connected_water_mask(
+        "scan-region",
+        water_occurrence_pct=50.0,
+        gulf_seed_points=[[13.0, 100.0]],
+    )
+
+    assert fake_ee.cumulative_cost["cost"].name == "persistent-water"
+    assert fake_ee.cumulative_cost["cost"].self_masked
+    assert fake_ee.cumulative_cost["source"].reprojected_to == "persistent-water-projection"
+
+
 def test_watch_tile_metadata_reports_grid_resolution_water_mask_and_caveat(monkeypatch):
     """Fails if the returned tile contract misstates its scientific limits."""
     class FakeValue:

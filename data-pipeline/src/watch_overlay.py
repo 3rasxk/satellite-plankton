@@ -88,6 +88,9 @@ def _build_gulf_connected_water_mask(
         ee.Image("JRC/GSW1_4/GlobalSurfaceWater").select("occurrence").clip(region)
     )
     persistent_water = occurrence.gte(water_occurrence_pct).clip(region)
+    # Deriving cost from JRC water retains its native grid. The painted seeds
+    # have no matching native grid, so align them before connectivity tracing.
+    water_cost = persistent_water.selfMask().clip(region)
     seed_features = [
         ee.Feature(ee.Geometry.Point([lng, lat])) for lat, lng in gulf_seed_points
     ]
@@ -97,8 +100,8 @@ def _build_gulf_connected_water_mask(
         .paint(ee.FeatureCollection(seed_features), 1)
         .selfMask()
         .clip(region)
+        .reproject(crs=water_cost.projection())
     )
-    water_cost = ee.Image.constant(1).updateMask(persistent_water).clip(region)
     # 500 km exceeds the scan polygon's longest span: it is a traversal
     # ceiling for connectivity, not a bloom or anomaly threshold.
     reached = water_cost.cumulativeCost(
