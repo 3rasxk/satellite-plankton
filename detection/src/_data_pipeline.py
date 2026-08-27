@@ -24,8 +24,9 @@ from `.claude/agents/bloom-detection.md`, done without needing a
 have one and is out of scope to add here).
 
 No data-pipeline logic is duplicated or reimplemented here — every name
-below is the exact object from `data-pipeline/src`, just re-exported
-under a name `detection/` code can import without a path collision.
+below, including the three-tier NDCI trend/SST overlay builder, is the exact
+object from `data-pipeline/src`, just re-exported under a name `detection/`
+code can import without a path collision.
 
 Environment: GEE needs `EE_PROJECT_ID` set (see `data-pipeline/src/auth.py`).
 `detection/.env` carries the same value as `data-pipeline/.env` (see

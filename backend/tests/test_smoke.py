@@ -5,6 +5,8 @@ tests below rely on it."""
 
 from __future__ import annotations
 
+import inspect
+
 
 def test_root_ok(client):
     resp = client.get("/")
@@ -14,8 +16,11 @@ def test_root_ok(client):
 
 
 def test_detection_bridge_exposes_configured_watch_overlay():
-    from src import _detection
+    from src import _detection as bridge
 
-    assert callable(_detection.build_configured_ndci_watch_overlay)
-    assert callable(_detection.load_watch_overlay_config)
-    assert isinstance(_detection.NoWatchOverlayImageryError, type)
+    assert callable(bridge.build_configured_ndci_watch_overlay)
+    parameters = inspect.signature(bridge.build_configured_ndci_watch_overlay).parameters
+    assert "target_date" in parameters
+    assert "monitoring_sites" in parameters
+    assert callable(bridge.load_watch_overlay_config)
+    assert isinstance(bridge.NoWatchOverlayImageryError, type)

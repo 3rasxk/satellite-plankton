@@ -34,9 +34,10 @@ collide with, and CLAUDE.md's "detection/ and backend/ are separate
 projects" boundary is easiest to keep obvious if `backend/` never lets
 another project's modules masquerade under undecorated names.
 
-No detection/prediction logic is duplicated or reimplemented here --
-every name below is the exact object from `detection/src`, just
-re-exported under names `backend/` code can import without ambiguity.
+No detection/prediction or regional overlay logic is duplicated or
+reimplemented here -- every name below is the exact object from
+`detection/src`, just re-exported under names `backend/` code can import
+without ambiguity.
 
 Environment: GEE needs `EE_PROJECT_ID` set. This bridge does not load any
 .env itself -- `detection/src/_data_pipeline.py` (loaded transitively,

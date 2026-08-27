@@ -2,7 +2,8 @@
 
 Data source: the raw Earth Engine operation is re-exported through
 ``_data_pipeline.py``. Limitations: config.yaml holds uncalibrated product
-defaults; this wrapper adds no trend or prediction interpretation.
+defaults for the regional Sentinel-2 trend and raster-SST overlay; it does
+not alter the separate point-prediction pipeline.
 """
 
 from __future__ import annotations
@@ -28,20 +29,20 @@ def load_watch_overlay_config() -> dict:
 
 
 def build_configured_ndci_watch_overlay(
-    target_date: str, config: dict | None = None
+    target_date: str,
+    monitoring_sites: list[dict],
+    config: dict | None = None,
 ) -> dict:
-    """Build the NDCI watch overlay with config.yaml's approved defaults."""
+    """Build the regional NDCI overlay with every approved operating value."""
     values = config or load_watch_overlay_config()
     return build_ndci_watch_overlay(
         target_date,
-        threshold_z=values["threshold_z"],
-        latest_window_days=values["latest_window_days"],
-        baseline_years=values["baseline_years"],
-        seasonal_window_days=values["seasonal_window_days"],
-        min_baseline_observations=values["min_baseline_observations"],
-        water_occurrence_pct=values["water_occurrence_pct"],
-        gulf_seed_points=values["gulf_seed_points"],
-        output_scale_m=values["output_scale_m"],
-        effective_resolution_m=values["effective_resolution_m"],
-        color=values["color"],
+        monitoring_sites=monitoring_sites,
+        **{key: values[key] for key in (
+            "threshold_z", "warning_threshold_z", "latest_window_days",
+            "baseline_years", "seasonal_window_days", "min_baseline_observations",
+            "trend_window_days", "min_trend_observations", "sst_search_window_days",
+            "sst_climatology_window_days", "sst_resolution_m", "water_occurrence_pct",
+            "gulf_seed_points", "output_scale_m", "effective_resolution_m", "level_colors",
+        )},
     )
