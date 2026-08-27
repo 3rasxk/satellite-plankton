@@ -15,7 +15,7 @@ export default function Sidebar() {
     <aside className="sidebar">
       <div className="sidebar-header">
         <span className="sidebar-logo" aria-hidden="true"><Icon name="satellite" size={17} /></span>
-        <div>
+        <div className="sidebar-brand-copy">
           <div className="sidebar-title">HAB Sentinel</div>
           <div className="sidebar-subtitle">อ่าวไทยตอนบน</div>
         </div>
@@ -28,9 +28,10 @@ export default function Sidebar() {
             to={item.to}
             end={item.end}
             className={({ isActive }) => `sidebar-nav-item${isActive ? ' active' : ''}`}
+            title={item.label}
           >
             <span className="sidebar-nav-icon" aria-hidden="true"><Icon name={item.icon} /></span>
-            {item.label}
+            <span className="sidebar-nav-label">{item.label}</span>
           </NavLink>
         ))}
       </nav>

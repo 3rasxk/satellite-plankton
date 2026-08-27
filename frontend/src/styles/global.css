@@ -1162,6 +1162,46 @@ table.events-table td.mono {
 }
 
 @media (max-width: 420px) {
+  .sidebar {
+    width: 56px;
+    padding: 12px 6px;
+    gap: 12px;
+  }
+
+  .sidebar-header {
+    justify-content: center;
+    min-height: 44px;
+  }
+
+  .sidebar-brand-copy {
+    display: none;
+  }
+
+  .sidebar-nav {
+    align-items: center;
+    gap: 4px;
+  }
+
+  .sidebar-nav-item {
+    width: 44px;
+    height: 44px;
+    justify-content: center;
+    gap: 0;
+    padding: 0;
+  }
+
+  .sidebar-nav-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
   .map-segmented-control {
     top: 8px;
     left: 8px;
@@ -1171,17 +1211,18 @@ table.events-table td.mono {
 
   .map-segmented-control button {
     font-size: 11px;
+    min-height: 52px;
   }
 
   .map-date-pill {
-    top: 66px;
+    top: 74px;
     right: auto;
     left: 8px;
     max-width: calc(100% - 16px);
   }
 
   .watch-overlay-state {
-    top: 106px;
+    top: 116px;
     right: 8px;
     left: 8px;
     max-width: none;
