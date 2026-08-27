@@ -1,12 +1,8 @@
-import { useEffect, useMemo } from 'react'
-import { MapContainer, TileLayer, CircleMarker, ZoomControl, useMap } from 'react-leaflet'
-import { RISK_COLOR_HEX, NO_DATA_HEX, NO_DATA_LINE_HEX, STATUS_LABEL, NO_DATA_STATUS } from '../constants.js'
+import { useEffect } from 'react'
+import { MapContainer, TileLayer, ZoomControl, useMap } from 'react-leaflet'
 import { MAP_BOUNDS, syncMinimumBoundsZoom } from '../utils/mapBounds.js'
 import NdciRasterOverlay from './NdciRasterOverlay.jsx'
 import { canRenderWatchTiles } from '../utils/watchOverlay.js'
-
-const UPPER_GULF_CENTER = [12.9, 100.75]
-const UPPER_GULF_ZOOM = 9
 
 // CartoDB Positron — light, muted basemap for the Apple-style light theme
 // (docs/FRONTEND_PLAN.md §4). Same tile scheme/attribution as the old
@@ -39,62 +35,31 @@ function BoundsZoomLock() {
   return null
 }
 
-function FitToFeatures({ features }) {
+function ScanBoundsView() {
   const map = useMap()
-  useMemo(() => {
-    if (!features || features.length === 0) return
-    const bounds = features.map((f) => [f.geometry.coordinates[1], f.geometry.coordinates[0]])
-    if (bounds.length === 1) {
-      map.setView(bounds[0], UPPER_GULF_ZOOM)
-    } else {
-      map.fitBounds(bounds, { padding: [60, 60] })
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [features])
-  return null
-}
 
-function WatchModeView({ active }) {
-  const map = useMap()
   useEffect(() => {
-    if (active) map.setView(UPPER_GULF_CENTER, UPPER_GULF_ZOOM)
-  }, [active, map])
+    const fitScanBounds = () => map.fitBounds(MAP_BOUNDS, {
+      padding: [12, 12],
+      animate: false,
+    })
+    fitScanBounds()
+    map.on('resize', fitScanBounds)
+
+    return () => map.off('resize', fitScanBounds)
+  }, [map])
+
   return null
 }
 
-/**
- * Makes a Leaflet vector layer keyboard-reachable: Leaflet renders
- * CircleMarker as an SVG <path>, which isn't in the tab order or
- * keypress-able by default. Setting tabindex + a keydown listener on the
- * rendered element is the standard workaround (react-leaflet doesn't
- * expose this itself) — see .claude/agents/frontend-dashboard.md
- * acceptance criteria: "cells clickable and keyboard-reachable."
- */
-function makeAccessible(layer, label, onActivate) {
-  const el = layer.getElement?.()
-  if (!el) return
-  el.setAttribute('tabindex', '0')
-  el.setAttribute('role', 'button')
-  el.setAttribute('aria-label', label)
-  el.classList.add('risk-marker')
-  el.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault()
-      onActivate()
-    }
-  })
-}
-
-export default function RiskMap({ featureCollection, onSelectSite = () => {}, mode = 'risk', watchOverlay = null }) {
-  const features = featureCollection?.features || []
-  const visibleFeatures = mode === 'watch' ? [] : features
+export default function RiskMap({ mode = 'true_color', watchOverlay = null }) {
   const usesTrueColorBase = mode === 'true_color' || mode === 'watch'
 
   return (
     <MapContainer
       className="leaflet-map"
-      center={UPPER_GULF_CENTER}
-      zoom={UPPER_GULF_ZOOM}
+      bounds={MAP_BOUNDS}
+      boundsOptions={{ padding: [12, 12] }}
       maxZoom={12}
       maxBounds={MAP_BOUNDS}
       maxBoundsViscosity={1}
@@ -103,7 +68,7 @@ export default function RiskMap({ featureCollection, onSelectSite = () => {}, mo
       zoomControl={false}
     >
       <BoundsZoomLock />
-      <WatchModeView active={mode === 'watch'} />
+      <ScanBoundsView />
       <ZoomControl position="topright" />
       <TileLayer
         url={usesTrueColorBase ? TRUE_COLOR_TILE_URL : TILE_URL}
@@ -111,42 +76,6 @@ export default function RiskMap({ featureCollection, onSelectSite = () => {}, mo
       />
       {mode === 'ndci' && <NdciRasterOverlay />}
       {canRenderWatchTiles(mode, watchOverlay) && <TileLayer key={watchOverlay.tile_url} url={watchOverlay.tile_url} opacity={0.9} zIndex={450} />}
-      <FitToFeatures features={visibleFeatures} />
-      {visibleFeatures.map((feature) => {
-        const [lng, lat] = feature.geometry.coordinates
-        const props = feature.properties
-        const isNoData = NO_DATA_STATUS.has(props.status)
-        const colorHex = !isNoData ? RISK_COLOR_HEX[props.risk_level] : null
-        const label = `${props.name}: ${isNoData ? STATUS_LABEL[props.status] || 'no reading' : props.risk_level}`
-
-        return (
-          <CircleMarker
-            key={props.site_id}
-            center={[lat, lng]}
-            radius={12}
-            pathOptions={
-              isNoData
-                ? {
-                    color: NO_DATA_LINE_HEX,
-                    weight: 1.5,
-                    dashArray: '3,3',
-                    fillColor: NO_DATA_HEX,
-                    fillOpacity: 0.55,
-                  }
-                : {
-                    color: colorHex,
-                    weight: 1.5,
-                    fillColor: colorHex,
-                    fillOpacity: 0.75,
-                  }
-            }
-            eventHandlers={{
-              add: (e) => makeAccessible(e.target, label, () => onSelectSite({ lat, lng, ...props })),
-              click: () => onSelectSite({ lat, lng, ...props }),
-            }}
-          />
-        )
-      })}
     </MapContainer>
   )
 }

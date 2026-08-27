@@ -999,6 +999,8 @@ git commit -m "feat(frontend): add watch overlay state"
 - Modify: `frontend/src/components/MapControls.jsx`
 - Modify: `frontend/src/components/RiskLegend.jsx`
 - Modify: `frontend/src/styles/global.css`
+- Modify: `frontend/src/utils/mapBounds.js`
+- Modify: `frontend/tests/mapBounds.test.js`
 
 - [ ] **Step 1: Fetch the cache independently of the existing six-site cache**
 
@@ -1013,7 +1015,7 @@ const {
 } = useApi(getWatchOverlay, [])
 ```
 
-Pass `watchOverlay` into `RiskMap` and `RiskLegend`. The map must still render when the watch request fails; failure of `/watch-overlay` must not blank the True Color basemap.
+Pass `watchOverlay` into `RiskMap` and `RiskLegend`. Render the map shell independently of whether `/risk-map` has returned features; `/risk-map` may still supply the existing update timestamp, but its six point features are no longer map inputs. The map must still render when either data request fails; failure of `/watch-overlay` must not blank the True Color basemap.
 
 - [ ] **Step 2: Rename only the third tab and preserve the first-tab reload default**
 
@@ -1046,24 +1048,39 @@ Update `RiskMap` to accept `watchOverlay`. Place the server tile above the basem
 
 Keep `NdciRasterOverlay` restricted to `mode === 'ndci'`.
 
-- [ ] **Step 4: Suppress point markers and feature fitting in watch mode**
+- [ ] **Step 4: Remove the legacy point markers and fit the supplied scan bounds in every mode**
 
-Define one list and use it in both existing operations:
+Delete `FitToFeatures`, `CircleMarker`, `makeAccessible`, the risk-marker imports, and the feature mapping from `RiskMap.jsx`. The six old monitoring points must not render in True Color, illustrative NDCI, or Watch mode.
 
-```jsx
-const visibleFeatures = mode === 'watch' ? [] : features
-
-<FitToFeatures features={visibleFeatures} />
-{visibleFeatures.map((feature) => {
-```
-
-Keep the current body of the `features.map` callback byte-for-byte from the destructuring of `[lng, lat]` through the closing `CircleMarker`. Only its source array changes from `features` to `visibleFeatures`:
+Add a small bounds controller that always fits the complete supplied scan rectangle on mount and responsive resize:
 
 ```jsx
-      })}
+function ScanBoundsView() {
+  const map = useMap()
+
+  useEffect(() => {
+    const fitScanBounds = () => map.fitBounds(MAP_BOUNDS, {
+      padding: [12, 12],
+      animate: false,
+    })
+    fitScanBounds()
+    map.on('resize', fitScanBounds)
+    return () => map.off('resize', fitScanBounds)
+  }, [map])
+
+  return null
+}
 ```
 
-When switching to watch mode, set the map view to the established upper-Gulf center and bounds-compatible zoom so the regional scan is centered without adding a right-side panel. Implement this with a small `WatchModeView` component using `useMap()` and `useEffect()`, not by remounting the whole map.
+Render `<ScanBoundsView />` inside the map. Keep `maxBounds={MAP_BOUNDS}` and `maxBoundsViscosity={1}`.
+
+Change `syncMinimumBoundsZoom` to call `map.getBoundsZoom(bounds, false)`, because `inside=true` chooses the zoom where the viewport fits inside the bounds and crops the wide scan rectangle. Update the focused Node test to expect `inside === false`. This preserves the minimum zoom-out lock while allowing the entire scan bounding box to be visible.
+
+The initial/reload mode remains True Color and must show the complete rectangle:
+
+```jsx
+<MapContainer bounds={MAP_BOUNDS} boundsOptions={{ padding: [12, 12] }}>
+```
 
 - [ ] **Step 5: Replace the four-tier legend only in watch mode**
 
@@ -1091,7 +1108,7 @@ In `RiskLegend.jsx`, add a `mode === 'watch'` branch before the current NDCI/ris
 </>
 ```
 
-Do not append the existing “ไม่มีค่าอ่าน” row below this branch; its dotted marker symbol belongs to point data and would misdescribe raster transparency.
+Do not append the existing “ไม่มีค่าอ่าน” row below this branch; its dotted marker symbol belongs to deleted point data and would misdescribe raster transparency. Return `null` from `RiskLegend` in True Color mode so the old four-tier risk box is not shown over a basemap with no point-risk layer. Keep only the illustrative gradient in `ndci` mode and the orange/transparent explanation in `watch` mode.
 
 - [ ] **Step 6: Show compact loading/stale/error/source-window state**
 
@@ -1116,7 +1133,7 @@ Expected: all PASS.
 - [ ] **Step 9: Commit the map UI**
 
 ```bash
-git add frontend/src/pages/OverviewPage.jsx frontend/src/components/RiskMap.jsx frontend/src/components/MapControls.jsx frontend/src/components/RiskLegend.jsx frontend/src/styles/global.css
+git add frontend/src/pages/OverviewPage.jsx frontend/src/components/RiskMap.jsx frontend/src/components/MapControls.jsx frontend/src/components/RiskLegend.jsx frontend/src/styles/global.css frontend/src/utils/mapBounds.js frontend/tests/mapBounds.test.js
 git commit -m "feat(frontend): render NDCI watch tiles"
 ```
 

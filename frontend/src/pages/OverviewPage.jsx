@@ -35,7 +35,7 @@ function WatchOverlayState({ loading, overlay, error, onRetry }) {
 }
 
 export default function OverviewPage() {
-  const { data: riskData, loading: riskLoading, error: riskError, refetch } = useApi(getRiskMap, [])
+  const { data: riskData } = useApi(getRiskMap, [])
   const {
     data: watchOverlay,
     loading: watchLoading,
@@ -45,34 +45,22 @@ export default function OverviewPage() {
   const [mode, setMode] = useState('true_color')
 
   const newestFetch = useMemo(() => {
-    if (!riskData) return null
-    const times = riskData.features.map((f) => f.properties.fetched_at).filter(Boolean).sort()
+    const times = (riskData?.features || []).map((f) => f.properties.fetched_at).filter(Boolean).sort()
     return times.length ? times[times.length - 1] : null
   }, [riskData])
 
   return (
     <div className="overview-page">
       <div className="overview-map-area">
-        {riskLoading && <div className="state-panel" style={{ margin: 24 }}><h3>Loading the monitored grid…</h3></div>}
-        {riskError && (
-          <div className="state-panel error" style={{ margin: 24 }}>
-            <h3>Couldn&apos;t reach the data service.</h3>
-            <button type="button" className="retry-btn" onClick={refetch}>Retry</button>
-          </div>
-        )}
-        {riskData && riskData.features.length > 0 && (
-          <>
-            <RiskMap featureCollection={riskData} mode={mode} watchOverlay={watchOverlay} />
-            <MapControls mode={mode} onModeChange={setMode} />
-            <RiskLegend mode={mode} watchOverlay={watchOverlay} />
-            <div className="map-date-pill glass">
-              <Icon name="calendar" size={15} />
-              {newestFetch ? `อัปเดต ${formatRelativeTime(newestFetch)}` : 'Sentinel-2 + MODIS'}
-              <Icon name="chevronDown" size={14} />
-            </div>
-            {mode === 'watch' && <WatchOverlayState loading={watchLoading} overlay={watchOverlay} error={watchError} onRetry={refetchWatch} />}
-          </>
-        )}
+        <RiskMap mode={mode} watchOverlay={watchOverlay} />
+        <MapControls mode={mode} onModeChange={setMode} />
+        <RiskLegend mode={mode} watchOverlay={watchOverlay} />
+        <div className="map-date-pill glass">
+          <Icon name="calendar" size={15} />
+          {newestFetch ? `อัปเดต ${formatRelativeTime(newestFetch)}` : 'Sentinel-2 + MODIS'}
+          <Icon name="chevronDown" size={14} />
+        </div>
+        {mode === 'watch' && <WatchOverlayState loading={watchLoading} overlay={watchOverlay} error={watchError} onRetry={refetchWatch} />}
       </div>
     </div>
   )

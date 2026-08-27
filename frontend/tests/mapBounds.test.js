@@ -12,7 +12,7 @@ test('locks the minimum zoom to the supplied Gulf boundary', () => {
   const map = {
     getBoundsZoom(bounds, inside) {
       assert.deepEqual(bounds, expectedBounds)
-      assert.equal(inside, true)
+      assert.equal(inside, false)
       return 8
     },
     setMinZoom(zoom) {

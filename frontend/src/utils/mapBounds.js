@@ -5,9 +5,9 @@ export const MAP_BOUNDS = [
   [13.92548889, 102.57761667],
 ]
 
-/** Keep the full viewport inside MAP_BOUNDS at every responsive size. */
+/** Prevent zooming farther out than the full MAP_BOUNDS scan area. */
 export function syncMinimumBoundsZoom(map, bounds = MAP_BOUNDS) {
-  const minZoom = map.getBoundsZoom(bounds, true)
+  const minZoom = map.getBoundsZoom(bounds, false)
   map.setMinZoom(minZoom)
 
   if (map.getZoom() < minZoom) {

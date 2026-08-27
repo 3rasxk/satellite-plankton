@@ -152,10 +152,6 @@ button {
   font-family: var(--font-body);
 }
 
-.risk-marker {
-  transition: opacity var(--motion-fast);
-}
-
 .risk-legend {
   position: absolute;
   left: 12px;
@@ -884,8 +880,7 @@ table.events-table td.mono {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .site-panel,
-  .risk-marker {
+  .site-panel {
     animation: none !important;
     transition: none !important;
   }
