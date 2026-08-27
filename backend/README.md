@@ -47,4 +47,10 @@ Tables (`src/db_models.py`):
 
 This indicative NDCI watch signal (`z >= 1.5`) is not bloom confirmation, salinity measurement, species inference, concentration estimation, or a validated forecast. It uses a 30-day latest clear-image window, five prior seasonal years at ±15 days, cloud/SCL filtering, Gulf-connected historical surface water, and no 14-day trend. Only orange qualifying pixels are opaque; everything else is transparent. The output grid is 10 m, with 20 m effective NDCI source resolution, and a mosaic may contain pixels from different dates.
 
+The response includes `status`, `tile_url`, `generated_at`, `target_date`, `source_window_start`, `source_window_end`, `newest_scene_date`, `baseline_periods`, `threshold_z`, `baseline_years`, `seasonal_window_days`, `min_baseline_observations`, `output_grid_m`, `effective_resolution_m`, `water_mask`, `stale`, `error`, `disclaimer`, and `caveat`. For example:
+
+```json
+{"status":"ok","tile_url":"https://earthengine.googleapis.com/...","source_window_start":"2026-07-29","source_window_end":"2026-08-28","newest_scene_date":"2026-08-24","threshold_z":1.5,"output_grid_m":10,"effective_resolution_m":20,"water_mask":"gulf_connected_historical_surface_water","stale":false,"error":null,"disclaimer":"...","caveat":"NDCI watch signal, not bloom confirmation or a forecast..."}
+```
+
 See `.claude/agents/backend-api.md` and `docs/FRONTEND_PLAN.md` §3 for the contract. Every response model carries a `disclaimer` field (enforced via Pydantic, visible in `/docs`). Detection (`detect()`) and prediction (`risk_level()`) fields are always kept in separate parts of the response shape — never merged into one score.
