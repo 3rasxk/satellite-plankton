@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime, timezone
 
 import pytest
@@ -44,6 +45,17 @@ def successful_overlay_payload(target_date: str) -> dict:
         "color": "#FF9F0A",
         "caveat": WATCH_OVERLAY_CAVEAT,
     }
+
+
+def persisted_overlay_values(row: WatchOverlayCache) -> dict:
+    """Snapshot every database column, normalizing SQLite timestamps."""
+    values = {
+        column.name: deepcopy(getattr(row, column.name))
+        for column in WatchOverlayCache.__table__.columns
+    }
+    if values["generated_at"] is not None:
+        values["generated_at"] = as_aware_utc(values["generated_at"])
+    return values
 
 
 def _clear_watch_overlay_cache() -> None:
@@ -171,7 +183,7 @@ def test_refresh_watch_overlay_writes_singleton_success(client, monkeypatch):
         assert row.error is None
 
 
-def test_refresh_failure_preserves_last_good_tile_and_timestamp(client, monkeypatch):
+def test_refresh_failure_preserves_every_last_good_field_except_freshness(client, monkeypatch):
     successful = successful_overlay_payload("2026-08-27")
     monkeypatch.setattr(
         scheduler_module.bridge,
@@ -180,8 +192,8 @@ def test_refresh_failure_preserves_last_good_tile_and_timestamp(client, monkeypa
     )
     with SessionLocal() as db:
         refresh_watch_overlay(db, "2026-08-27")
-        original_tile_url = db.get(WatchOverlayCache, 1).tile_url
-        original_generated_at = as_aware_utc(db.get(WatchOverlayCache, 1).generated_at)
+        db.expire_all()
+        original = persisted_overlay_values(db.get(WatchOverlayCache, 1))
 
     def fail(_target_date):
         raise scheduler_module.bridge.GEEAuthError("forced auth failure")
@@ -189,12 +201,95 @@ def test_refresh_failure_preserves_last_good_tile_and_timestamp(client, monkeypa
     monkeypatch.setattr(scheduler_module.bridge, "build_configured_ndci_watch_overlay", fail)
     with SessionLocal() as db:
         refresh_watch_overlay(db, "2026-08-28")
+        refreshed = persisted_overlay_values(db.get(WatchOverlayCache, 1))
+
+    assert {
+        field: value
+        for field, value in refreshed.items()
+        if field not in {"stale", "error"}
+    } == {
+        field: value
+        for field, value in original.items()
+        if field not in {"stale", "error"}
+    }
+    assert refreshed["stale"] is True
+    assert "GEEAuthError" in refreshed["error"]
+
+
+def test_refresh_commit_failure_rolls_back_and_preserves_last_good_row(client, monkeypatch):
+    monkeypatch.setattr(
+        scheduler_module.bridge,
+        "build_configured_ndci_watch_overlay",
+        lambda target_date: successful_overlay_payload(target_date),
+    )
+    with SessionLocal() as db:
+        refresh_watch_overlay(db, "2026-08-27")
+        db.expire_all()
+        original = persisted_overlay_values(db.get(WatchOverlayCache, 1))
+
+    invalid = successful_overlay_payload("2026-08-28")
+    invalid["status"] = None
+    monkeypatch.setattr(
+        scheduler_module.bridge,
+        "build_configured_ndci_watch_overlay",
+        lambda _target_date: invalid,
+    )
+
+    with SessionLocal() as db:
+        refresh_watch_overlay(db, "2026-08-28")
+        refreshed = persisted_overlay_values(db.get(WatchOverlayCache, 1))
+
+    assert {
+        field: value
+        for field, value in refreshed.items()
+        if field not in {"stale", "error"}
+    } == {
+        field: value
+        for field, value in original.items()
+        if field not in {"stale", "error"}
+    }
+    assert refreshed["stale"] is True
+    assert "IntegrityError" in refreshed["error"]
+
+
+def test_malformed_config_records_minimal_error_singleton_without_duplication(client, monkeypatch):
+    def malformed_config(*_args, **_kwargs):
+        raise KeyError("ndci_watch_overlay")
+
+    monkeypatch.setattr(
+        scheduler_module.bridge,
+        "build_configured_ndci_watch_overlay",
+        malformed_config,
+    )
+    monkeypatch.setattr(
+        scheduler_module.bridge,
+        "load_watch_overlay_config",
+        malformed_config,
+    )
+
+    with SessionLocal() as db:
+        refresh_watch_overlay(db, "2026-08-27")
+        refresh_watch_overlay(db, "2026-08-28")
         row = db.get(WatchOverlayCache, 1)
-        assert row.tile_url == original_tile_url
-        assert as_aware_utc(row.generated_at) == original_generated_at
-        assert row.target_date == "2026-08-27"
+        assert db.scalar(select(func.count()).select_from(WatchOverlayCache)) == 1
+        assert row.status == "error"
+        assert row.tile_url is None
+        assert row.map_id is None
+        assert row.generated_at is None
+        assert row.target_date == "2026-08-28"
+        assert row.threshold_z is None
+        assert row.baseline_years is None
+        assert row.seasonal_window_days is None
+        assert row.min_baseline_observations is None
+        assert row.water_occurrence_pct is None
+        assert row.water_mask is None
+        assert row.output_grid_m is None
+        assert row.effective_resolution_m is None
+        assert row.color is None
         assert row.stale is True
-        assert "GEEAuthError" in row.error
+        assert "KeyError" in row.error
+        assert "configuration metadata unavailable" in row.error
+        assert row.caveat == WATCH_OVERLAY_CAVEAT
 
 
 def test_first_no_imagery_refresh_records_configured_no_tile_metadata(client, monkeypatch):

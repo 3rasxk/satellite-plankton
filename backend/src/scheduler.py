@@ -281,16 +281,58 @@ def refresh_watch_overlay(db: Session, target_date: str) -> None:
 
     except Exception as exc:  # noqa: BLE001 -- scheduler records every overlay failure
         logger.error("scheduler: watch overlay refresh failed: %s: %s", type(exc).__name__, exc)
+        error = f"{type(exc).__name__}: {exc}"
+
+        # A success-path flush may have failed after mutating the in-session
+        # singleton. Restore a usable transaction and reload the persisted row
+        # before writing failure state, so last-good data comes from the DB.
+        db.rollback()
+        existing = db.get(WatchOverlayCache, 1)
+
         if existing is not None and existing.tile_url:
             existing.stale = True
-            existing.error = f"{type(exc).__name__}: {exc}"
+            existing.error = error
         else:
-            config = bridge.load_watch_overlay_config()
             status = (
                 "no_imagery"
                 if isinstance(exc, bridge.NoWatchOverlayImageryError)
                 else "error"
             )
+            try:
+                config = bridge.load_watch_overlay_config()
+                config_fields = dict(
+                    threshold_z=config["threshold_z"],
+                    baseline_years=config["baseline_years"],
+                    seasonal_window_days=config["seasonal_window_days"],
+                    min_baseline_observations=config["min_baseline_observations"],
+                    water_occurrence_pct=config["water_occurrence_pct"],
+                    water_mask="gulf_connected_historical_surface_water",
+                    output_grid_m=config["output_scale_m"],
+                    effective_resolution_m=config["effective_resolution_m"],
+                    color=config["color"],
+                )
+            except Exception as config_exc:  # noqa: BLE001 -- persist minimal state
+                logger.error(
+                    "scheduler: watch overlay config unavailable while recording failure: %s: %s",
+                    type(config_exc).__name__, config_exc,
+                )
+                status = "error"
+                error = (
+                    f"{error}; configuration metadata unavailable: "
+                    f"{type(config_exc).__name__}: {config_exc}"
+                )
+                config_fields = dict(
+                    threshold_z=None,
+                    baseline_years=None,
+                    seasonal_window_days=None,
+                    min_baseline_observations=None,
+                    water_occurrence_pct=None,
+                    water_mask=None,
+                    output_grid_m=None,
+                    effective_resolution_m=None,
+                    color=None,
+                )
+
             row = existing or WatchOverlayCache(id=1)
             if existing is None:
                 db.add(row)
@@ -299,17 +341,14 @@ def refresh_watch_overlay(db: Session, target_date: str) -> None:
             row.map_id = None
             row.generated_at = None
             row.target_date = target_date
-            row.threshold_z = config["threshold_z"]
-            row.baseline_years = config["baseline_years"]
-            row.seasonal_window_days = config["seasonal_window_days"]
-            row.min_baseline_observations = config["min_baseline_observations"]
-            row.water_occurrence_pct = config["water_occurrence_pct"]
-            row.water_mask = "gulf_connected_historical_surface_water"
-            row.output_grid_m = config["output_scale_m"]
-            row.effective_resolution_m = config["effective_resolution_m"]
-            row.color = config["color"]
+            row.source_window_start = None
+            row.source_window_end = None
+            row.newest_scene_date = None
+            row.baseline_periods = None
+            for key, value in config_fields.items():
+                setattr(row, key, value)
             row.stale = status == "error"
-            row.error = f"{type(exc).__name__}: {exc}"
+            row.error = error
             row.caveat = WATCH_OVERLAY_CAVEAT
         db.commit()
 
