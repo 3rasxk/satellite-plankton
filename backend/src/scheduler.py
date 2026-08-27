@@ -236,7 +236,15 @@ def refresh_one_site(db: Session, site: MonitoredSite, target_date: str) -> None
             db.commit()
 
 
-def refresh_watch_overlay(db: Session, target_date: str) -> None:
+def _overlay_site_payloads(sites) -> list[dict]:
+    """Normalize monitored sites at the scheduler-to-overlay boundary."""
+    return [
+        {"site_id": site.site_id, "name": site.name, "lat": site.lat, "lng": site.lng}
+        for site in sites
+    ]
+
+
+def refresh_watch_overlay(db: Session, target_date: str, sites=None) -> None:
     """Refresh the regional watch-overlay singleton without disrupting sites.
 
     A failed refresh preserves a prior tile exactly as the last known-good
@@ -245,9 +253,15 @@ def refresh_watch_overlay(db: Session, target_date: str) -> None:
     no-imagery or error state.
     """
     existing = db.get(WatchOverlayCache, 1)
+    if sites is None:
+        sites = db.execute(
+            select(MonitoredSite).order_by(MonitoredSite.site_id)
+        ).scalars().all()
 
     try:
-        overlay = bridge.build_configured_ndci_watch_overlay(target_date)
+        overlay = bridge.build_configured_ndci_watch_overlay(
+            target_date, _overlay_site_payloads(sites)
+        )
         fields = dict(
             status=overlay["status"],
             tile_url=overlay["tile_url"],
@@ -267,6 +281,7 @@ def refresh_watch_overlay(db: Session, target_date: str) -> None:
             output_grid_m=overlay["output_grid_m"],
             effective_resolution_m=overlay["effective_resolution_m"],
             color=overlay["color"],
+            analysis_metadata=overlay["analysis_metadata"],
             stale=False,
             error=None,
             caveat=WATCH_OVERLAY_CAVEAT,
@@ -345,6 +360,7 @@ def refresh_watch_overlay(db: Session, target_date: str) -> None:
             row.source_window_end = None
             row.newest_scene_date = None
             row.baseline_periods = None
+            row.analysis_metadata = None
             for key, value in config_fields.items():
                 setattr(row, key, value)
             row.stale = status == "error"
@@ -360,9 +376,11 @@ def refresh_grid() -> None:
     db = SessionLocal()
     try:
         sites = db.execute(select(MonitoredSite)).scalars().all()
+        grid_order = {item["site_id"]: index for index, item in enumerate(MONITORED_GRID)}
+        sites.sort(key=lambda site: (grid_order.get(site.site_id, len(grid_order)), site.site_id))
         for site in sites:
             refresh_one_site(db, site, target_date)
-        refresh_watch_overlay(db, target_date)
+        refresh_watch_overlay(db, target_date, sites)
     finally:
         db.close()
     logger.info("scheduler: refresh_grid done")

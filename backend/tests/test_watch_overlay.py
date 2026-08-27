@@ -12,7 +12,8 @@ from src import main as main_module
 from src import scheduler as scheduler_module
 from src.config import as_aware_utc
 from src.db import SessionLocal, init_db
-from src.db_models import WatchOverlayCache
+from src.db_models import MonitoredSite, WatchOverlayCache
+from src.grid import MONITORED_GRID
 from src.schemas import WATCH_OVERLAY_CAVEAT
 from src.scheduler import refresh_watch_overlay
 
@@ -146,6 +147,7 @@ def successful_overlay_payload(target_date: str) -> dict:
         "effective_resolution_m": 20,
         "color": "#FF9F0A",
         "caveat": WATCH_OVERLAY_CAVEAT,
+        "analysis_metadata": analysis_metadata_payload(),
     }
 
 
@@ -229,7 +231,7 @@ def test_watch_overlay_returns_cached_run_without_calling_gee(client, monkeypatc
     finally:
         db.close()
 
-    def forbidden(*args, **kwargs):
+    def forbidden(_target_date, _monitoring_sites):
         raise AssertionError("request path must not call Earth Engine")
 
     monkeypatch.setattr(main_module.bridge, "build_configured_ndci_watch_overlay", forbidden)
@@ -288,7 +290,7 @@ def test_refresh_watch_overlay_writes_singleton_success(client, monkeypatch):
     monkeypatch.setattr(
         scheduler_module.bridge,
         "build_configured_ndci_watch_overlay",
-        lambda target_date: successful_overlay_payload(target_date),
+        lambda target_date, monitoring_sites: successful_overlay_payload(target_date),
     )
 
     with SessionLocal() as db:
@@ -312,6 +314,8 @@ def test_refresh_watch_overlay_writes_singleton_success(client, monkeypatch):
         assert row.output_grid_m == 10
         assert row.effective_resolution_m == 20
         assert row.color == "#FF9F0A"
+        assert row.analysis_metadata == successful_overlay_payload("2026-08-27")["analysis_metadata"]
+        assert all(item["level"] != "normal" for item in row.analysis_metadata["site_alerts"])
         assert row.caveat == WATCH_OVERLAY_CAVEAT
         assert row.stale is False
         assert row.error is None
@@ -322,14 +326,14 @@ def test_refresh_failure_preserves_every_last_good_field_except_freshness(client
     monkeypatch.setattr(
         scheduler_module.bridge,
         "build_configured_ndci_watch_overlay",
-        lambda target_date: successful,
+        lambda target_date, monitoring_sites: successful,
     )
     with SessionLocal() as db:
         refresh_watch_overlay(db, "2026-08-27")
         db.expire_all()
         original = persisted_overlay_values(db.get(WatchOverlayCache, 1))
 
-    def fail(_target_date):
+    def fail(_target_date, _monitoring_sites):
         raise scheduler_module.bridge.GEEAuthError("forced auth failure")
 
     monkeypatch.setattr(scheduler_module.bridge, "build_configured_ndci_watch_overlay", fail)
@@ -354,7 +358,7 @@ def test_refresh_commit_failure_rolls_back_and_preserves_last_good_row(client, m
     monkeypatch.setattr(
         scheduler_module.bridge,
         "build_configured_ndci_watch_overlay",
-        lambda target_date: successful_overlay_payload(target_date),
+        lambda target_date, monitoring_sites: successful_overlay_payload(target_date),
     )
     with SessionLocal() as db:
         refresh_watch_overlay(db, "2026-08-27")
@@ -366,7 +370,7 @@ def test_refresh_commit_failure_rolls_back_and_preserves_last_good_row(client, m
     monkeypatch.setattr(
         scheduler_module.bridge,
         "build_configured_ndci_watch_overlay",
-        lambda _target_date: invalid,
+        lambda _target_date, _monitoring_sites: invalid,
     )
 
     with SessionLocal() as db:
@@ -387,13 +391,16 @@ def test_refresh_commit_failure_rolls_back_and_preserves_last_good_row(client, m
 
 
 def test_malformed_config_records_minimal_error_singleton_without_duplication(client, monkeypatch):
-    def malformed_config(*_args, **_kwargs):
+    def malformed_builder(_target_date, _monitoring_sites):
+        raise KeyError("ndci_watch_overlay")
+
+    def malformed_config():
         raise KeyError("ndci_watch_overlay")
 
     monkeypatch.setattr(
         scheduler_module.bridge,
         "build_configured_ndci_watch_overlay",
-        malformed_config,
+        malformed_builder,
     )
     monkeypatch.setattr(
         scheduler_module.bridge,
@@ -420,6 +427,7 @@ def test_malformed_config_records_minimal_error_singleton_without_duplication(cl
         assert row.output_grid_m is None
         assert row.effective_resolution_m is None
         assert row.color is None
+        assert row.analysis_metadata is None
         assert row.stale is True
         assert "KeyError" in row.error
         assert "configuration metadata unavailable" in row.error
@@ -438,7 +446,7 @@ def test_first_no_imagery_refresh_records_configured_no_tile_metadata(client, mo
         "color": "#FF9F0A",
     }
 
-    def no_imagery(_target_date):
+    def no_imagery(_target_date, _monitoring_sites):
         raise scheduler_module.bridge.NoWatchOverlayImageryError("no configured current imagery")
 
     monkeypatch.setattr(scheduler_module.bridge, "build_configured_ndci_watch_overlay", no_imagery)
@@ -462,6 +470,7 @@ def test_first_no_imagery_refresh_records_configured_no_tile_metadata(client, mo
         assert row.effective_resolution_m == 20
         assert row.color == "#FF9F0A"
         assert row.caveat == WATCH_OVERLAY_CAVEAT
+        assert row.analysis_metadata is None
         assert row.stale is False
         assert "NoWatchOverlayImageryError" in row.error
 
@@ -478,7 +487,7 @@ def test_first_unexpected_refresh_records_single_error_row_and_reuses_no_tile_si
         "color": "#FF9F0A",
     }
 
-    def unexpected(_target_date):
+    def unexpected(_target_date, _monitoring_sites):
         raise RuntimeError("forced unexpected failure")
 
     monkeypatch.setattr(scheduler_module.bridge, "build_configured_ndci_watch_overlay", unexpected)
@@ -496,3 +505,55 @@ def test_first_unexpected_refresh_records_single_error_row_and_reuses_no_tile_si
         assert row.target_date == "2026-08-28"
         assert row.stale is True
         assert "RuntimeError" in row.error
+        assert row.analysis_metadata is None
+
+
+def test_refresh_watch_overlay_passes_supplied_sites_in_their_existing_order(client, monkeypatch):
+    """The builder receives exactly one normalized payload in refresh-grid order."""
+    supplied_sites = [
+        MonitoredSite(site_id="second", name="Second", lat=13.2, lng=100.2),
+        MonitoredSite(site_id="first", name="First", lat=13.1, lng=100.1),
+    ]
+    builder_calls = []
+    monkeypatch.setattr(
+        scheduler_module.bridge,
+        "build_configured_ndci_watch_overlay",
+        lambda target_date, monitoring_sites: builder_calls.append(
+            (target_date, monitoring_sites)
+        ) or successful_overlay_payload(target_date),
+    )
+
+    with SessionLocal() as db:
+        refresh_watch_overlay(db, "2026-08-27", supplied_sites)
+
+    assert builder_calls == [
+        (
+            "2026-08-27",
+            [
+                {"site_id": "second", "name": "Second", "lat": 13.2, "lng": 100.2},
+                {"site_id": "first", "name": "First", "lat": 13.1, "lng": 100.1},
+            ],
+        )
+    ]
+
+
+def test_refresh_watch_overlay_queries_sites_by_site_id_when_not_supplied(client, monkeypatch):
+    """Ad-hoc overlay refreshes use a deterministic database ordering."""
+    builder_calls = []
+    monkeypatch.setattr(
+        scheduler_module.bridge,
+        "build_configured_ndci_watch_overlay",
+        lambda target_date, monitoring_sites: builder_calls.append(
+            (target_date, monitoring_sites)
+        ) or successful_overlay_payload(target_date),
+    )
+
+    with SessionLocal() as db:
+        refresh_watch_overlay(db, "2026-08-27")
+
+    assert builder_calls == [
+        (
+            "2026-08-27",
+            sorted(MONITORED_GRID, key=lambda site: site["site_id"]),
+        )
+    ]

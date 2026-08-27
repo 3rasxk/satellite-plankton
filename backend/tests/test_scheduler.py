@@ -17,6 +17,7 @@ from src import scheduler as scheduler_module
 from src.config import as_aware_utc
 from src.db import SessionLocal
 from src.db_models import DetectionCache, MonitoredSite, WatchOverlayCache
+from src.grid import MONITORED_GRID
 from src.scheduler import refresh_grid, refresh_one_site
 
 _TEST_SITE_ID = "pytest_scheduler_failure_site"
@@ -162,18 +163,25 @@ def test_refresh_grid_refreshes_watch_overlay_once_after_all_six_sites(client, m
     monkeypatch.setattr(
         scheduler_module,
         "refresh_watch_overlay",
-        lambda _db, target_date: refresh_order.append(("overlay", target_date)),
+        lambda _db, target_date, sites: refresh_order.append(
+            ("overlay", target_date, [site.site_id for site in sites])
+        ),
     )
 
     refresh_grid()
 
     assert len(refresh_order) == 7
     assert [entry[0] for entry in refresh_order] == ["site"] * 6 + ["overlay"]
-    assert refresh_order[-1] == ("overlay", "2026-08-27")
+    assert refresh_order[-1] == (
+        "overlay",
+        "2026-08-27",
+        [item["site_id"] for item in MONITORED_GRID],
+    )
 
 
 def test_refresh_grid_records_overlay_failure_after_all_site_refreshes(client, monkeypatch):
     refreshed_site_ids = []
+    overlay_calls = []
     config = {
         "threshold_z": 1.5,
         "baseline_years": 5,
@@ -185,7 +193,8 @@ def test_refresh_grid_records_overlay_failure_after_all_site_refreshes(client, m
         "color": "#FF9F0A",
     }
 
-    def fail_overlay(_target_date):
+    def fail_overlay(target_date, monitoring_sites):
+        overlay_calls.append((target_date, monitoring_sites))
         raise RuntimeError("forced overlay failure")
 
     monkeypatch.setattr(scheduler_module, "today_str", lambda: "2026-08-27")
@@ -202,6 +211,11 @@ def test_refresh_grid_records_overlay_failure_after_all_site_refreshes(client, m
         with SessionLocal() as db:
             row = db.get(WatchOverlayCache, 1)
             assert len(refreshed_site_ids) == 6
+            assert len(overlay_calls) == 1
+            assert overlay_calls[0][0] == "2026-08-27"
+            assert [site["site_id"] for site in overlay_calls[0][1]] == [
+                item["site_id"] for item in MONITORED_GRID
+            ]
             assert row.status == "error"
             assert row.stale is True
             assert "RuntimeError" in row.error
