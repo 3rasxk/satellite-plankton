@@ -9,6 +9,8 @@ and other non-bloom effects.
 
 from datetime import date, timedelta
 from datetime import datetime, timezone
+from math import isfinite
+from numbers import Real
 from typing import Any
 
 import ee
@@ -95,11 +97,14 @@ def _parse_site_alerts(sampled, *, level_definitions: list[dict]) -> list[dict]:
     for input_order, feature in enumerate(sampled):
         properties = feature.get("properties", {})
         raw_level = properties.get("level_code")
-        try:
-            level_code = int(raw_level)
-        except (TypeError, ValueError):
+        if (
+            isinstance(raw_level, (bool, np.bool_))
+            or not isinstance(raw_level, Real)
+            or not isfinite(raw_level)
+            or raw_level != round(raw_level)
+        ):
             continue
-        definition = levels_by_class.get(level_code)
+        definition = levels_by_class.get(raw_level)
         if definition is None:
             continue
         slope = _nullable_sample_value(properties, "ndci_slope_per_day")
@@ -399,6 +404,14 @@ def _build_sst_images(
         current_start.isoformat(), current_end_exclusive.isoformat()
     )
 
+    def fully_masked_band(name):
+        return (
+            ee.Image.constant(0)
+            .rename(name)
+            .updateMask(ee.Image.constant(0))
+            .clip(region)
+        )
+
     def add_quality(image):
         sst = image.select("sst").rename("current_sst").clip(region)
         acquired_ms = ee.Number(image.get("system:time_start"))
@@ -418,13 +431,26 @@ def _build_sst_images(
         )
         return sst.addBands(acquired).addBands(quality)
 
-    current_mosaic = current_source.map(add_quality).qualityMosaic("sst_quality")
+    has_current_sst = current_source.size().gt(0)
+    current_mosaic = ee.Image(
+        ee.Algorithms.If(
+            has_current_sst,
+            current_source.map(add_quality).qualityMosaic("sst_quality"),
+            fully_masked_band("current_sst").addBands(
+                fully_masked_band("sst_acquired_ms")
+            ),
+        )
+    )
     current_sst = (
         current_mosaic.select("current_sst")
         .clip(region)
         .set(
             "newest_sst_scene_ms",
-            current_source.aggregate_max("system:time_start"),
+            ee.Algorithms.If(
+                has_current_sst,
+                current_source.aggregate_max("system:time_start"),
+                None,
+            ),
         )
     )
     sst_acquired_ms = current_mosaic.select("sst_acquired_ms").clip(region)

@@ -316,6 +316,41 @@ def test_parse_site_alerts_restores_masked_support_values_to_none():
     assert alert["sst_above_normal"] is False
 
 
+def test_parse_site_alerts_rejects_non_integral_or_non_finite_class_codes():
+    sampled = [
+        {
+            "properties": {
+                "site_id": "valid",
+                "name": "Valid",
+                "lat": 13.0,
+                "lng": 100.7,
+                "level_code": 2.0,
+            }
+        },
+        *[
+            {
+                "properties": {
+                    "site_id": f"invalid-{index}",
+                    "name": "Invalid",
+                    "lat": 13.0,
+                    "lng": 100.7,
+                    "level_code": value,
+                }
+            }
+            for index, value in enumerate(
+                [1.5, float("inf"), float("nan"), True, "3", 4]
+            )
+        ],
+    ]
+
+    alerts = watch_overlay._parse_site_alerts(
+        sampled, level_definitions=LEVEL_DEFINITIONS
+    )
+
+    assert [alert["site_id"] for alert in alerts] == ["valid"]
+    assert [alert["level"] for alert in alerts] == ["watch"]
+
+
 def test_compute_watch_mask_keeps_only_valid_z_at_or_above_threshold():
     mask = compute_watch_mask(
         latest=[0.40, 0.40, 0.40, 0.40, np.nan],
@@ -867,6 +902,10 @@ def test_sst_images_use_nearest_pixel_quality_and_mask_empty_climatology(
             scored = function(FakeImage("source", self.graph))
             return FakeMappedCollection(self.graph, scored)
 
+        @staticmethod
+        def size():
+            return type("NonEmptySize", (), {"gt": staticmethod(lambda value: True)})()
+
         def select(self, name):
             assert name == "sst"
             return self
@@ -899,6 +938,9 @@ def test_sst_images_use_nearest_pixel_quality_and_mask_empty_climatology(
         def __init__(self, graph):
             self.graph = graph
 
+        def __call__(self, image):
+            return image
+
         def constant(self, value):
             expression = value.expression if isinstance(value, FakeExpression) else value
             image = FakeImage("constant", self.graph, expression)
@@ -927,6 +969,9 @@ def test_sst_images_use_nearest_pixel_quality_and_mask_empty_climatology(
                 else None
             ),
             "Number": staticmethod(lambda value: value),
+            "Algorithms": type(
+                "Algorithms", (), {"If": staticmethod(lambda condition, true_value, false_value: true_value)}
+            ),
         },
     )()
     monkeypatch.setattr(watch_overlay, "ee", fake_ee)
@@ -965,6 +1010,160 @@ def test_sst_images_use_nearest_pixel_quality_and_mask_empty_climatology(
     assert seasonal.name == "seasonal_sst"
     assert seasonal.mask_expression == ("gt", ("count", "sst"), 0)
     assert seasonal_count.name == "seasonal_sst_count"
+
+
+def test_empty_current_sst_uses_masked_evidence_without_warning_escalation(
+    monkeypatch,
+):
+    """Fails if an empty current SST collection produces no bands or a warning."""
+    class FakeImage:
+        def __init__(self, name, *, fully_masked=False, value=None):
+            self.name = name
+            self.fully_masked = fully_masked
+            self.value = value
+            self.properties = {}
+            self.bands = [name]
+
+        def select(self, name):
+            if self.name == "no-current-sst-bands":
+                raise AssertionError("empty current SST mosaic must not be selected")
+            return FakeImage(name, fully_masked=self.fully_masked)
+
+        def rename(self, name):
+            self.name = name
+            self.bands = [name]
+            return self
+
+        def updateMask(self, mask):
+            self.fully_masked = self.fully_masked or mask.fully_masked or mask.value == 0
+            return self
+
+        def addBands(self, other):
+            self.bands.extend(other.bands)
+            return self
+
+        def clip(self, region):
+            assert region == "scan-region"
+            return self
+
+        def set(self, name, value):
+            self.properties[name] = value
+            return self
+
+        def mask(self):
+            return FakeImage(f"{self.name}-mask", fully_masked=self.fully_masked)
+
+        def gt(self, value):
+            return FakeImage("seasonal-count-mask")
+
+    class EmptyCurrentSst:
+        @staticmethod
+        def size():
+            return type("EmptySize", (), {"gt": staticmethod(lambda value: False)})()
+
+        @staticmethod
+        def map(function):
+            return type(
+                "NoBandMosaic",
+                (), {
+                    "qualityMosaic": staticmethod(
+                        lambda band: FakeImage("no-current-sst-bands")
+                    )
+                },
+            )()
+
+        @staticmethod
+        def aggregate_max(property_name):
+            assert property_name == "system:time_start"
+            return None
+
+    class SeasonalSst:
+        @staticmethod
+        def select(name):
+            assert name == "sst"
+            return SeasonalSst()
+
+        @staticmethod
+        def merge(other):
+            return SeasonalSst()
+
+        @staticmethod
+        def count():
+            return FakeImage("seasonal_sst_count")
+
+        @staticmethod
+        def mean():
+            return FakeImage("seasonal_sst")
+
+    class Source:
+        def __init__(self):
+            self.filter_count = 0
+
+        @staticmethod
+        def filterBounds(region):
+            assert region == "scan-region"
+            return source
+
+        def filterDate(self, start, end):
+            self.filter_count += 1
+            return EmptyCurrentSst() if self.filter_count == 1 else SeasonalSst()
+
+    source = Source()
+    fake_ee = type(
+        "FakeEE",
+        (),
+        {
+            "Image": type(
+                "Image",
+                (),
+                {
+                    "__call__": staticmethod(lambda image: image),
+                    "constant": staticmethod(
+                        lambda value: FakeImage("constant", value=value)
+                    ),
+                },
+            )(),
+            "ImageCollection": staticmethod(
+                lambda collection_id: source
+                if collection_id == watch_overlay.MODIS_SST_COLLECTION_ID
+                else None
+            ),
+            "Number": staticmethod(lambda value: value),
+            "Algorithms": type(
+                "Algorithms", (), {"If": staticmethod(lambda condition, true_value, false_value: false_value)}
+            ),
+        },
+    )()
+    monkeypatch.setattr(watch_overlay, "ee", fake_ee)
+
+    current_sst, sst_acquired_ms, _seasonal_sst, _seasonal_count = (
+        watch_overlay._build_sst_images(
+            "2005-01-03",
+            region="scan-region",
+            search_window_days=5,
+            climatology_window_days=7,
+        )
+    )
+
+    assert current_sst.name == "current_sst"
+    assert current_sst.fully_masked
+    assert current_sst.properties["newest_sst_scene_ms"] is None
+    assert sst_acquired_ms.name == "sst_acquired_ms"
+    assert sst_acquired_ms.fully_masked
+
+    from src.watch_rules import LEVEL_WATCH, classify_levels
+
+    levels = classify_levels(
+        z=[2.2],
+        slope_per_day=[0.01],
+        trend_observations=[2],
+        current_sst=[np.nan],
+        seasonal_sst=[29.8],
+        elevated_z=1.5,
+        warning_z=2.0,
+        min_trend_observations=2,
+    )
+    assert levels.tolist() == [LEVEL_WATCH]
 
 
 def test_sample_site_alerts_uses_final_analysis_image_at_twenty_metres(monkeypatch):

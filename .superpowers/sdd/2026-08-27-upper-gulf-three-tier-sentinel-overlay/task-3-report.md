@@ -60,3 +60,21 @@ Pre-existing untracked virtual-environment symlinks were ignored.
 - The final `level_code` stays masked outside elevated pixels. Support bands use an internal `-9999` sample no-data value so `sampleRegions` does not drop an elevated site when trend or SST evidence is masked; the parser converts that value back to `None`.
 - Sentinel and SST pixels can carry different dates, as stated in metadata. The fake graph verifies construction but cannot validate credentialed collection availability, native-projection behavior, or tile latency.
 - There is no live-GEE fallback test for an entirely empty current SST collection; MODIS-Aqua coverage is expected in the configured archive/search period, but this remains the main runtime concern.
+
+## Fix Round 1
+
+- Added a schema-stable, fully masked current-SST fallback for an empty MODIS-Aqua collection. Its newest-scene metadata is nullable, so missing SST cannot escalate class 1 or 2 to class 3.
+- Made site-alert class parsing strict: only finite, exact numeric classes 1, 2, and 3 are accepted; fractional values, booleans, NaN/infinity, strings, and out-of-range values are rejected.
+
+Changed files:
+
+- `data-pipeline/src/watch_overlay.py`
+- `data-pipeline/tests/test_watch_overlay.py`
+- `.superpowers/sdd/2026-08-27-upper-gulf-three-tier-sentinel-overlay/task-3-report.md`
+
+Verification:
+
+- RED: `./venv/bin/python -m pytest tests/test_watch_overlay.py -q` — `2 failed, 16 passed` (expected regressions).
+- `./venv/bin/python -m pytest tests/test_watch_overlay.py tests/test_watch_rules.py -q` — `22 passed in 0.35s`.
+- `./venv/bin/python -m pytest tests/ -q` — `83 passed in 3.08s`.
+- `git diff --check` — clean.
