@@ -182,6 +182,25 @@ leave_one_out_clusters:
 historical_low_weight_events: [th_012, th_013, th_014]
 
 # ---------------------------------------------------------------------
+# NDCI watch-overlay operating defaults. These uncalibrated product
+# defaults are independent of escalation_rules; the overlay uses no trend
+# or prediction input.
+# ---------------------------------------------------------------------
+ndci_watch_overlay:
+  threshold_z: 1.5
+  latest_window_days: 30
+  baseline_years: 5
+  seasonal_window_days: 15
+  min_baseline_observations: 5
+  water_occurrence_pct: 50.0
+  gulf_seed_points:
+    - [13.00, 100.70]
+    - [13.15, 100.82]
+  output_scale_m: 10
+  effective_resolution_m: 20
+  color: "#FF9F0A"
+
+# ---------------------------------------------------------------------
 # Prediction layer -- rule-based risk escalation (docs/DETECTION_PLAN.md
 # §3). Every rule below is readable as a sentence; src/prediction.py
 # evaluates each rule's condition list and reports which fired in

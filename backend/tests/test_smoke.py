@@ -11,3 +11,11 @@ def test_root_ok(client):
     assert resp.status_code == 200
     body = resp.json()
     assert body["service"].startswith("Gulf of Thailand")
+
+
+def test_detection_bridge_exposes_configured_watch_overlay():
+    from src import _detection
+
+    assert callable(_detection.build_configured_ndci_watch_overlay)
+    assert callable(_detection.load_watch_overlay_config)
+    assert isinstance(_detection.NoWatchOverlayImageryError, type)

@@ -84,6 +84,7 @@ def _load_detection_module(filename: str, module_name: str):
 
 _prediction = _load_detection_module("prediction.py", "detection_src_prediction")
 _thresholds = _load_detection_module("thresholds.py", "detection_src_thresholds")
+_watch_overlay = _load_detection_module("watch_overlay.py", "detection_src_watch_overlay")
 
 # `prediction.py`'s own header (`from _data_pipeline import ...`, `from
 # climatology import ...`) already imported these as bare-named modules
@@ -103,6 +104,12 @@ _climatology_bridge = sys.modules["climatology"]
 detect = _prediction.detect
 risk_level = _prediction.risk_level
 load_prediction_config = _prediction.load_config
+
+# --- Configured NDCI watch overlay ----------------------------------------
+# The separate loose module reads only its own config section and reuses the
+# already-loaded bare `_data_pipeline` bridge; prediction.py is not reloaded.
+build_configured_ndci_watch_overlay = _watch_overlay.build_configured_ndci_watch_overlay
+load_watch_overlay_config = _watch_overlay.load_watch_overlay_config
 
 # --- Validation / calibration (Phase 2 reporting API) ----------------------
 # Re-exported, unmodified, from detection/src/thresholds.py. Used by the
@@ -126,6 +133,7 @@ load_events = _thresholds.load_events
 GEEAuthError = _data_pipeline_bridge.GEEAuthError
 NoCloudFreeImageryError = _data_pipeline_bridge.NoCloudFreeImageryError
 NoWaterPixelsError = _data_pipeline_bridge.NoWaterPixelsError
+NoWatchOverlayImageryError = _data_pipeline_bridge.NoWatchOverlayImageryError
 get_sentinel2_bands = _data_pipeline_bridge.get_sentinel2_bands
 get_modis_chlorophyll_history = _data_pipeline_bridge.get_modis_chlorophyll_history
 day_of_year_climatology = _data_pipeline_bridge.day_of_year_climatology
@@ -153,11 +161,14 @@ __all__ = [
     "detect",
     "risk_level",
     "load_prediction_config",
+    "build_configured_ndci_watch_overlay",
+    "load_watch_overlay_config",
     "threshold_run",
     "load_events",
     "GEEAuthError",
     "NoCloudFreeImageryError",
     "NoWaterPixelsError",
+    "NoWatchOverlayImageryError",
     "get_sentinel2_bands",
     "get_modis_chlorophyll_history",
     "day_of_year_climatology",

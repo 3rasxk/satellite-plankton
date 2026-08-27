@@ -112,6 +112,8 @@ get_rainfall_proxy = _dp.get_rainfall_proxy
 # fourth, parallel path into data-pipeline/src.
 get_true_color_image = _dp.get_true_color_image
 get_ndci_heatmap = _dp.get_ndci_heatmap
+build_ndci_watch_overlay = _dp.build_ndci_watch_overlay
+NoWatchOverlayImageryError = _dp.NoWatchOverlayImageryError
 
 # Study-area boundary check (data-pipeline/src/study_area.py) -- pure, no
 # GEE call. Re-exported for the same pass-through reason as the image
@@ -144,5 +146,7 @@ __all__ = [
     "NoWaterPixelsError",
     "get_true_color_image",
     "get_ndci_heatmap",
+    "build_ndci_watch_overlay",
+    "NoWatchOverlayImageryError",
     "check_point_in_study_area",
 ]
