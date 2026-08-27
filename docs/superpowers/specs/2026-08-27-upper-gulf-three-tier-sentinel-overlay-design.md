@@ -1,7 +1,7 @@
 # Upper Gulf Three-Tier Sentinel-2 Overlay Design
 
 **Date:** 2026-08-27  
-**Status:** Approved in chat; pending written-spec review  
+**Status:** Approved in chat and self-reviewed
 **Supersedes for the regional overlay:** the orange-only presentation in
 `2026-08-27-upper-gulf-ndci-watch-overlay-design.md`. The earlier document remains
 the implementation history for the existing cached overlay.
@@ -68,13 +68,13 @@ A Sentinel-2 pixel is usable only when all of these are true:
 2. SCL equals 6 (`water`);
 3. SCL is not defective, cloud shadow, medium/high cloud, cirrus, or snow/ice;
 4. QA60 cloud bit 10 and cirrus bit 11 are both clear;
-5. B2 through B6 are finite and within the physically usable scaled-reflectance
-   range accepted by the implementation;
-6. the B5+B4 NDCI denominator is safely above a numerical epsilon.
+5. the source masks for B2 through B6 are valid;
+6. the absolute B5+B4 NDCI denominator is safely above a numerical epsilon.
 
 B4 and B5 determine NDCI. B2, B3, and B6 are retained for quality diagnostics
-and validity checks, but they do not add an uncalibrated risk score or override
-the approved NDCI/trend/SST rules. No spectral turbidity threshold is invented.
+and source-mask validity, but they do not add an uncalibrated risk score or
+override the approved NDCI/trend/SST rules. No reflectance-range or spectral
+turbidity threshold is invented.
 
 NDCI is:
 
@@ -112,8 +112,9 @@ The trend window is the 14 calendar days ending on the target date. Apply the
 same B2-B6, SCL, QA60, and water masks used by the current NDCI path.
 
 Overlapping Sentinel-2 tiles from the same UTC acquisition date are first
-reduced to one per-pixel daily NDCI observation so tile overlap cannot satisfy
-the observation minimum. A pixel needs at least two distinct usable dates.
+reduced with a per-pixel median to one daily NDCI observation so tile overlap
+cannot satisfy the observation minimum. A pixel needs at least two distinct
+usable dates.
 
 Fit NDCI against elapsed days using a per-pixel linear regression:
 
@@ -131,6 +132,7 @@ Use NASA MODIS-Aqua Level-3 mapped SST from
 `NASA/OCEANDATA/MODIS-Aqua/L3SMI`.
 
 - current SST: nearest valid daily SST within five days of the target date;
+  if two observations are equally near, use the later one;
 - seasonal normal: mean SST from prior archive years within +/-7 day-of-year;
 - warning condition: current SST is strictly greater than the seasonal mean;
 - missing current or baseline SST: SST condition is false, never fabricated.
@@ -232,7 +234,8 @@ nullable `analysis_metadata` object. The endpoint remains a database-only read.
 Keep True Color selected on reload, retain the complete scan bounds and zoom-out
 lock, and do not restore the removed right-side panel.
 
-The scan tab renders the single three-color tile. Its compact legend contains
+The scan tab renders the single three-color tile. True Color and the scan tab
+use the same compact alert legend because both can show alert pins. It contains
 only:
 
 - green: เริ่มผิดปกติ;
