@@ -180,7 +180,16 @@ def _daily_ndci_collection(collection, start: str, end: str):
         next_day = day + timedelta(days=1)
         daily = collection.filterDate(day.isoformat(), next_day.isoformat())
         daily_ndci = daily.select("ndci").median().rename("ndci")
-        elapsed_days = ee.Image.constant(offset).rename("elapsed_days").toFloat()
+        empty_ndci = ee.Image.constant(0).rename("ndci").updateMask(ee.Image.constant(0))
+        daily_ndci = ee.Image(
+            ee.Algorithms.If(daily.size().gt(0), daily_ndci, empty_ndci)
+        )
+        elapsed_days = (
+            ee.Image.constant(offset)
+            .rename("elapsed_days")
+            .toFloat()
+            .updateMask(daily_ndci.mask())
+        )
         images.append(
             daily_ndci.addBands(elapsed_days).set("observation_date", day.isoformat())
         )

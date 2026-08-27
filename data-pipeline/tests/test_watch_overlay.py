@@ -25,24 +25,27 @@ class OperationGraph:
 
 
 class FakeMaskValue:
-    def __init__(self, graph, name):
+    def __init__(self, graph, name, expression=None):
         self.graph = graph
         self.name = name
+        self.expression = name if expression is None else expression
 
     def eq(self, value):
         self.graph.operations.append(("eq", self.name, value))
-        return FakeMaskValue(self.graph, self.name)
+        return FakeMaskValue(self.graph, self.name, ("eq", self.expression, value))
 
     def bitwiseAnd(self, value):
         self.graph.operations.append(("bitwiseAnd", self.name, value))
-        return FakeMaskValue(self.graph, self.name)
+        return FakeMaskValue(
+            self.graph, self.name, ("bitwiseAnd", self.expression, value)
+        )
 
     def And(self, other):
-        if self.name == "connected-water" or getattr(other, "name", other) == "connected-water":
-            self.graph.combined_with_connected_water = True
-            self.graph.final_mask = self
-            return self
-        return FakeMaskValue(self.graph, self.name)
+        expression = ("And", self.expression, other.expression)
+        result = FakeMaskValue(self.graph, "combined-mask", expression)
+        self.graph.combined_with_connected_water = "connected-water" in str(expression)
+        self.graph.final_mask = result
+        return result
 
     def mask(self):
         return self
@@ -83,6 +86,13 @@ class FakeDailyImage:
         self.graph.operations.append(("toFloat", self.name))
         return self
 
+    def mask(self):
+        return FakeDailyImage(self.graph, f"{self.name}-mask")
+
+    def updateMask(self, mask):
+        self.graph.operations.append(("updateMask", self.name, mask.name))
+        return self
+
     def addBands(self, other):
         self.graph.operations.append(("addBands", self.name, other.name))
         return self
@@ -103,6 +113,20 @@ class FakeDailyCollection:
     def select(self, bands):
         self.graph.selected.append(bands)
         return FakeDailyImage(self.graph, "ndci")
+
+    def size(self):
+        return type("FakeSize", (), {"gt": staticmethod(lambda value: True)})()
+
+
+class FakeDailyImageFactory:
+    def __init__(self, graph):
+        self.graph = graph
+
+    def __call__(self, image):
+        return image
+
+    def constant(self, value):
+        return FakeDailyImage(self.graph, str(value))
 
 
 class FakeTrendCount(FakeDailyImage):
@@ -186,6 +210,23 @@ def test_usable_water_mask_requires_scl_water_and_clear_qa60(monkeypatch):
     assert ("bitwiseAnd", "QA60", 1 << 11) in graph.operations
     assert graph.combined_with_connected_water
     assert result is graph.final_mask
+    assert result.expression == (
+        "And",
+        (
+            "And",
+            (
+                "And",
+                "connected-water",
+                ("eq", "SCL", 6),
+            ),
+            (
+                "And",
+                ("eq", ("bitwiseAnd", "QA60", 1 << 10), 0),
+                ("eq", ("bitwiseAnd", "QA60", 1 << 11), 0),
+            ),
+        ),
+        "source-valid",
+    )
 
 
 def test_trend_window_is_fourteen_calendar_days_ending_on_target():
@@ -207,8 +248,12 @@ def test_daily_medians_and_trend_fit_use_observed_days_only(monkeypatch):
                 "ImageCollection", (), {"fromImages": staticmethod(lambda images: images)}
             ),
             "Reducer": type("Reducer", (), {"linearFit": staticmethod(lambda: "linear-fit")}),
+            "Algorithms": type(
+                "Algorithms", (), {"If": staticmethod(lambda condition, true_value, false_value: true_value)}
+            ),
         },
     )()
+    daily_ee.Image = FakeDailyImageFactory(graph)
     monkeypatch.setattr(watch_overlay, "ee", daily_ee)
 
     daily_images = watch_overlay._daily_ndci_collection(
@@ -228,6 +273,118 @@ def test_daily_medians_and_trend_fit_use_observed_days_only(monkeypatch):
     assert ("gte", "trend_observation_count", 2) in graph.operations
     assert daily_images
     assert trend.name == "ndci_slope_per_day"
+
+
+def test_empty_daily_ndci_is_masked_before_trend_count(monkeypatch):
+    """Fails if an empty UTC date can contribute elapsed days or trend count."""
+    graph = type("Graph", (), {"trend_counts": []})()
+
+    class FakeImage:
+        def __init__(self, name, *, value=None, fully_masked=False):
+            self.name = name
+            self.value = value
+            self.fully_masked = fully_masked
+            self.bands = []
+
+        def rename(self, name):
+            self.name = name
+            return self
+
+        def updateMask(self, mask):
+            self.fully_masked = mask.fully_masked or mask.value == 0
+            return self
+
+        def mask(self):
+            return FakeImage(f"{self.name}-mask", fully_masked=self.fully_masked)
+
+        def toFloat(self):
+            return self
+
+        def addBands(self, other):
+            self.bands.append(other)
+            return self
+
+        def set(self, name, value):
+            return self
+
+        def count(self):
+            graph.trend_counts.append(
+                sum(not image.fully_masked for image in graph.daily_images)
+            )
+            return FakeImage("trend_observation_count", value=graph.trend_counts[-1])
+
+        def gte(self, value):
+            return FakeImage("count-mask")
+
+        def reduce(self, reducer):
+            assert reducer == "linear-fit"
+            return FakeImage("linear-fit")
+
+        def select(self, band):
+            assert band == "scale"
+            return FakeImage("scale")
+
+    class EmptyDaily:
+        def size(self):
+            return type("EmptySize", (), {"gt": staticmethod(lambda value: False)})()
+
+        def select(self, band):
+            assert band == "ndci"
+            return type(
+                "EmptyNDCI",
+                (), {"median": staticmethod(lambda: FakeImage("empty-median"))},
+            )()
+
+    class EmptyCollection:
+        def filterDate(self, start, end):
+            return EmptyDaily()
+
+    class TrendCollection:
+        def select(self, bands):
+            if bands == "ndci":
+                return FakeImage("ndci")
+            assert bands == ["elapsed_days", "ndci"]
+            return FakeImage("fit-input")
+
+    class ImageFactory:
+        def __call__(self, image):
+            return image
+
+        @staticmethod
+        def constant(value):
+            return FakeImage("constant", value=value)
+
+    class ImageCollectionFactory:
+        @staticmethod
+        def fromImages(images):
+            graph.daily_images = images
+            return TrendCollection()
+
+    fake_ee = type(
+        "FakeEE",
+        (),
+        {
+            "Image": ImageFactory(),
+            "ImageCollection": ImageCollectionFactory(),
+            "Algorithms": type(
+                "Algorithms", (), {"If": staticmethod(lambda condition, true_value, false_value: false_value)}
+            ),
+            "Reducer": type("Reducer", (), {"linearFit": staticmethod(lambda: "linear-fit")}),
+        },
+    )()
+    monkeypatch.setattr(watch_overlay, "ee", fake_ee)
+
+    daily_collection = watch_overlay._daily_ndci_collection(
+        EmptyCollection(), "2026-08-14", "2026-08-15"
+    )
+    watch_overlay._build_trend_image(daily_collection, min_observations=2)
+
+    empty_day = graph.daily_images[0]
+    assert empty_day.name == "ndci"
+    assert empty_day.fully_masked
+    assert empty_day.bands[0].name == "elapsed_days"
+    assert empty_day.bands[0].fully_masked
+    assert graph.trend_counts == [0]
 
 
 class FakeCollection:
