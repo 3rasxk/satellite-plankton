@@ -41,6 +41,11 @@ export async function getValidation() {
   return data
 }
 
+export async function getWatchOverlay() {
+  const { data } = await client.get('/watch-overlay')
+  return data
+}
+
 // backend/src/main.py's existing meta route at GET / — reused here only to
 // prove the API is reachable (Sidebar's connectivity pill), not for its
 // response shape.
