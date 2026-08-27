@@ -291,6 +291,16 @@ def test_risk_map_keeps_detection_and_prediction_as_separate_fields_through_sche
             "fetch_satellite_meta",
             lambda *a, **k: {"cloud_fraction": 0.08, "actual_date": "2024-03-14"},
         )
+        monkeypatch.setattr(
+            scheduler_module,
+            "_refresh_images",
+            lambda *a, **k: {
+                "true_color_png": b"pytest-true-color",
+                "ndci_heatmap_png": b"pytest-ndci-heatmap",
+                "image_status": "ok",
+                "image_error": None,
+            },
+        )
 
         refresh_one_site(db, site, "2024-03-15")
         db.commit()

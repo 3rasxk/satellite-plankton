@@ -65,9 +65,10 @@ from sqlalchemy.orm import Session
 from . import _detection as bridge
 from .config import SCHEDULER_INTERVAL_MINUTES, today_str
 from .db import SessionLocal
-from .db_models import DetectionCache, MonitoredSite
+from .db_models import DetectionCache, MonitoredSite, WatchOverlayCache
 from .grid import MONITORED_GRID
 from .satellite_meta import fetch_satellite_meta
+from .schemas import WATCH_OVERLAY_CAVEAT
 
 logger = logging.getLogger("backend.scheduler")
 
@@ -235,6 +236,84 @@ def refresh_one_site(db: Session, site: MonitoredSite, target_date: str) -> None
             db.commit()
 
 
+def refresh_watch_overlay(db: Session, target_date: str) -> None:
+    """Refresh the regional watch-overlay singleton without disrupting sites.
+
+    A failed refresh preserves a prior tile exactly as the last known-good
+    snapshot, marking only its freshness/error fields. Before any tile exists,
+    the configured metadata is still stored so the API can report a truthful
+    no-imagery or error state.
+    """
+    existing = db.get(WatchOverlayCache, 1)
+
+    try:
+        overlay = bridge.build_configured_ndci_watch_overlay(target_date)
+        fields = dict(
+            status=overlay["status"],
+            tile_url=overlay["tile_url"],
+            map_id=overlay["map_id"],
+            generated_at=datetime.fromisoformat(overlay["generated_at"]),
+            target_date=overlay["target_date"],
+            source_window_start=overlay["source_window_start"],
+            source_window_end=overlay["source_window_end"],
+            newest_scene_date=overlay["newest_scene_date"],
+            baseline_periods=overlay["baseline_periods"],
+            threshold_z=overlay["threshold_z"],
+            baseline_years=overlay["baseline_years"],
+            seasonal_window_days=overlay["seasonal_window_days"],
+            min_baseline_observations=overlay["min_baseline_observations"],
+            water_occurrence_pct=overlay["water_occurrence_pct"],
+            water_mask=overlay["water_mask"],
+            output_grid_m=overlay["output_grid_m"],
+            effective_resolution_m=overlay["effective_resolution_m"],
+            color=overlay["color"],
+            stale=False,
+            error=None,
+            caveat=WATCH_OVERLAY_CAVEAT,
+        )
+        if existing is None:
+            db.add(WatchOverlayCache(id=1, **fields))
+        else:
+            for key, value in fields.items():
+                setattr(existing, key, value)
+        db.commit()
+        logger.info("scheduler: refreshed watch overlay -> status=%s", overlay["status"])
+
+    except Exception as exc:  # noqa: BLE001 -- scheduler records every overlay failure
+        logger.error("scheduler: watch overlay refresh failed: %s: %s", type(exc).__name__, exc)
+        if existing is not None and existing.tile_url:
+            existing.stale = True
+            existing.error = f"{type(exc).__name__}: {exc}"
+        else:
+            config = bridge.load_watch_overlay_config()
+            status = (
+                "no_imagery"
+                if isinstance(exc, bridge.NoWatchOverlayImageryError)
+                else "error"
+            )
+            row = existing or WatchOverlayCache(id=1)
+            if existing is None:
+                db.add(row)
+            row.status = status
+            row.tile_url = None
+            row.map_id = None
+            row.generated_at = None
+            row.target_date = target_date
+            row.threshold_z = config["threshold_z"]
+            row.baseline_years = config["baseline_years"]
+            row.seasonal_window_days = config["seasonal_window_days"]
+            row.min_baseline_observations = config["min_baseline_observations"]
+            row.water_occurrence_pct = config["water_occurrence_pct"]
+            row.water_mask = "gulf_connected_historical_surface_water"
+            row.output_grid_m = config["output_scale_m"]
+            row.effective_resolution_m = config["effective_resolution_m"]
+            row.color = config["color"]
+            row.stale = status == "error"
+            row.error = f"{type(exc).__name__}: {exc}"
+            row.caveat = WATCH_OVERLAY_CAVEAT
+        db.commit()
+
+
 def refresh_grid() -> None:
     """The scheduled job: refresh every monitored site's cache once."""
     target_date = today_str()
@@ -244,6 +323,7 @@ def refresh_grid() -> None:
         sites = db.execute(select(MonitoredSite)).scalars().all()
         for site in sites:
             refresh_one_site(db, site, target_date)
+        refresh_watch_overlay(db, target_date)
     finally:
         db.close()
     logger.info("scheduler: refresh_grid done")

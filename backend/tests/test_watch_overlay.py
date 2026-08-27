@@ -5,11 +5,45 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 import pytest
+from sqlalchemy import func, select
 
 from src import main as main_module
+from src import scheduler as scheduler_module
+from src.config import as_aware_utc
 from src.db import SessionLocal, init_db
 from src.db_models import WatchOverlayCache
 from src.schemas import WATCH_OVERLAY_CAVEAT
+from src.scheduler import refresh_watch_overlay
+
+
+def successful_overlay_payload(target_date: str) -> dict:
+    return {
+        "status": "ok",
+        "tile_url": "https://tiles.example/{z}/{x}/{y}",
+        "map_id": "pytest-map-id",
+        "generated_at": "2026-08-27T02:00:00+00:00",
+        "target_date": target_date,
+        "source_window_start": "2026-07-29",
+        "source_window_end": target_date,
+        "newest_scene_date": "2026-08-26",
+        "baseline_periods": [
+            {"start": "2025-08-12", "end_exclusive": "2025-09-12"},
+            {"start": "2024-08-12", "end_exclusive": "2024-09-12"},
+            {"start": "2023-08-12", "end_exclusive": "2023-09-12"},
+            {"start": "2022-08-12", "end_exclusive": "2022-09-12"},
+            {"start": "2021-08-12", "end_exclusive": "2021-09-12"},
+        ],
+        "threshold_z": 1.5,
+        "baseline_years": 5,
+        "seasonal_window_days": 15,
+        "min_baseline_observations": 5,
+        "water_occurrence_pct": 50.0,
+        "water_mask": "gulf_connected_historical_surface_water",
+        "output_grid_m": 10,
+        "effective_resolution_m": 20,
+        "color": "#FF9F0A",
+        "caveat": WATCH_OVERLAY_CAVEAT,
+    }
 
 
 def _clear_watch_overlay_cache() -> None:
@@ -102,3 +136,134 @@ def test_watch_overlay_returns_cached_run_without_calling_gee(client, monkeypatc
     assert body["error"] == "Scheduler refresh failed after this cached run."
     assert body["caveat"] == WATCH_OVERLAY_CAVEAT
     assert "map_id" not in body
+
+
+def test_refresh_watch_overlay_writes_singleton_success(client, monkeypatch):
+    monkeypatch.setattr(
+        scheduler_module.bridge,
+        "build_configured_ndci_watch_overlay",
+        lambda target_date: successful_overlay_payload(target_date),
+    )
+
+    with SessionLocal() as db:
+        refresh_watch_overlay(db, "2026-08-27")
+        row = db.get(WatchOverlayCache, 1)
+        assert row.status == "ok"
+        assert row.tile_url.endswith("/{z}/{x}/{y}")
+        assert row.map_id == "pytest-map-id"
+        assert as_aware_utc(row.generated_at) == datetime(2026, 8, 27, 2, tzinfo=timezone.utc)
+        assert row.target_date == "2026-08-27"
+        assert row.source_window_start == "2026-07-29"
+        assert row.source_window_end == "2026-08-27"
+        assert row.newest_scene_date == "2026-08-26"
+        assert row.baseline_periods == successful_overlay_payload("2026-08-27")["baseline_periods"]
+        assert row.threshold_z == 1.5
+        assert row.baseline_years == 5
+        assert row.seasonal_window_days == 15
+        assert row.min_baseline_observations == 5
+        assert row.water_occurrence_pct == 50.0
+        assert row.water_mask == "gulf_connected_historical_surface_water"
+        assert row.output_grid_m == 10
+        assert row.effective_resolution_m == 20
+        assert row.color == "#FF9F0A"
+        assert row.caveat == WATCH_OVERLAY_CAVEAT
+        assert row.stale is False
+        assert row.error is None
+
+
+def test_refresh_failure_preserves_last_good_tile_and_timestamp(client, monkeypatch):
+    successful = successful_overlay_payload("2026-08-27")
+    monkeypatch.setattr(
+        scheduler_module.bridge,
+        "build_configured_ndci_watch_overlay",
+        lambda target_date: successful,
+    )
+    with SessionLocal() as db:
+        refresh_watch_overlay(db, "2026-08-27")
+        original_tile_url = db.get(WatchOverlayCache, 1).tile_url
+        original_generated_at = as_aware_utc(db.get(WatchOverlayCache, 1).generated_at)
+
+    def fail(_target_date):
+        raise scheduler_module.bridge.GEEAuthError("forced auth failure")
+
+    monkeypatch.setattr(scheduler_module.bridge, "build_configured_ndci_watch_overlay", fail)
+    with SessionLocal() as db:
+        refresh_watch_overlay(db, "2026-08-28")
+        row = db.get(WatchOverlayCache, 1)
+        assert row.tile_url == original_tile_url
+        assert as_aware_utc(row.generated_at) == original_generated_at
+        assert row.target_date == "2026-08-27"
+        assert row.stale is True
+        assert "GEEAuthError" in row.error
+
+
+def test_first_no_imagery_refresh_records_configured_no_tile_metadata(client, monkeypatch):
+    config = {
+        "threshold_z": 1.5,
+        "baseline_years": 5,
+        "seasonal_window_days": 15,
+        "min_baseline_observations": 5,
+        "water_occurrence_pct": 50.0,
+        "output_scale_m": 10,
+        "effective_resolution_m": 20,
+        "color": "#FF9F0A",
+    }
+
+    def no_imagery(_target_date):
+        raise scheduler_module.bridge.NoWatchOverlayImageryError("no configured current imagery")
+
+    monkeypatch.setattr(scheduler_module.bridge, "build_configured_ndci_watch_overlay", no_imagery)
+    monkeypatch.setattr(scheduler_module.bridge, "load_watch_overlay_config", lambda: config)
+
+    with SessionLocal() as db:
+        refresh_watch_overlay(db, "2026-08-27")
+        row = db.get(WatchOverlayCache, 1)
+        assert row.status == "no_imagery"
+        assert row.tile_url is None
+        assert row.map_id is None
+        assert row.generated_at is None
+        assert row.target_date == "2026-08-27"
+        assert row.threshold_z == 1.5
+        assert row.baseline_years == 5
+        assert row.seasonal_window_days == 15
+        assert row.min_baseline_observations == 5
+        assert row.water_occurrence_pct == 50.0
+        assert row.water_mask == "gulf_connected_historical_surface_water"
+        assert row.output_grid_m == 10
+        assert row.effective_resolution_m == 20
+        assert row.color == "#FF9F0A"
+        assert row.caveat == WATCH_OVERLAY_CAVEAT
+        assert row.stale is False
+        assert "NoWatchOverlayImageryError" in row.error
+
+
+def test_first_unexpected_refresh_records_single_error_row_and_reuses_no_tile_singleton(client, monkeypatch):
+    config = {
+        "threshold_z": 1.5,
+        "baseline_years": 5,
+        "seasonal_window_days": 15,
+        "min_baseline_observations": 5,
+        "water_occurrence_pct": 50.0,
+        "output_scale_m": 10,
+        "effective_resolution_m": 20,
+        "color": "#FF9F0A",
+    }
+
+    def unexpected(_target_date):
+        raise RuntimeError("forced unexpected failure")
+
+    monkeypatch.setattr(scheduler_module.bridge, "build_configured_ndci_watch_overlay", unexpected)
+    monkeypatch.setattr(scheduler_module.bridge, "load_watch_overlay_config", lambda: config)
+
+    with SessionLocal() as db:
+        refresh_watch_overlay(db, "2026-08-27")
+        refresh_watch_overlay(db, "2026-08-28")
+        row = db.get(WatchOverlayCache, 1)
+        assert db.scalar(select(func.count()).select_from(WatchOverlayCache)) == 1
+        assert row.status == "error"
+        assert row.tile_url is None
+        assert row.map_id is None
+        assert row.generated_at is None
+        assert row.target_date == "2026-08-28"
+        assert row.stale is True
+        assert "RuntimeError" in row.error

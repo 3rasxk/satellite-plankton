@@ -16,8 +16,8 @@ from sqlalchemy import delete, select
 from src import scheduler as scheduler_module
 from src.config import as_aware_utc
 from src.db import SessionLocal
-from src.db_models import DetectionCache, MonitoredSite
-from src.scheduler import refresh_one_site
+from src.db_models import DetectionCache, MonitoredSite, WatchOverlayCache
+from src.scheduler import refresh_grid, refresh_one_site
 
 _TEST_SITE_ID = "pytest_scheduler_failure_site"
 
@@ -148,3 +148,66 @@ def test_scheduler_inserts_stale_placeholder_when_no_prior_row_exists(client, mo
         db.execute(delete(MonitoredSite).where(MonitoredSite.site_id == _TEST_SITE_ID))
         db.commit()
         db.close()
+
+
+def test_refresh_grid_refreshes_watch_overlay_once_after_all_six_sites(client, monkeypatch):
+    refresh_order = []
+
+    monkeypatch.setattr(scheduler_module, "today_str", lambda: "2026-08-27")
+    monkeypatch.setattr(
+        scheduler_module,
+        "refresh_one_site",
+        lambda _db, site, target_date: refresh_order.append(("site", site.site_id, target_date)),
+    )
+    monkeypatch.setattr(
+        scheduler_module,
+        "refresh_watch_overlay",
+        lambda _db, target_date: refresh_order.append(("overlay", target_date)),
+    )
+
+    refresh_grid()
+
+    assert len(refresh_order) == 7
+    assert [entry[0] for entry in refresh_order] == ["site"] * 6 + ["overlay"]
+    assert refresh_order[-1] == ("overlay", "2026-08-27")
+
+
+def test_refresh_grid_records_overlay_failure_after_all_site_refreshes(client, monkeypatch):
+    refreshed_site_ids = []
+    config = {
+        "threshold_z": 1.5,
+        "baseline_years": 5,
+        "seasonal_window_days": 15,
+        "min_baseline_observations": 5,
+        "water_occurrence_pct": 50.0,
+        "output_scale_m": 10,
+        "effective_resolution_m": 20,
+        "color": "#FF9F0A",
+    }
+
+    def fail_overlay(_target_date):
+        raise RuntimeError("forced overlay failure")
+
+    monkeypatch.setattr(scheduler_module, "today_str", lambda: "2026-08-27")
+    monkeypatch.setattr(
+        scheduler_module,
+        "refresh_one_site",
+        lambda _db, site, _target_date: refreshed_site_ids.append(site.site_id),
+    )
+    monkeypatch.setattr(scheduler_module.bridge, "build_configured_ndci_watch_overlay", fail_overlay)
+    monkeypatch.setattr(scheduler_module.bridge, "load_watch_overlay_config", lambda: config)
+
+    try:
+        refresh_grid()
+        with SessionLocal() as db:
+            row = db.get(WatchOverlayCache, 1)
+            assert len(refreshed_site_ids) == 6
+            assert row.status == "error"
+            assert row.stale is True
+            assert "RuntimeError" in row.error
+    finally:
+        with SessionLocal() as db:
+            row = db.get(WatchOverlayCache, 1)
+            if row is not None:
+                db.delete(row)
+                db.commit()
