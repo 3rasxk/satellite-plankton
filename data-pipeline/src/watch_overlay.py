@@ -15,10 +15,10 @@ import ee
 import numpy as np
 
 from .auth import initialize_ee
-from .sentinel2 import DEFAULT_CLOUD_CLASSES
 from .study_area import upper_gulf_scan_ee_polygon
 
 NUMERICAL_STD_EPSILON = 1e-6
+NDCI_DENOMINATOR_EPSILON = 1e-6
 WATCH_WATER_MASK_LABEL = "gulf_connected_historical_surface_water"
 WATCH_CAVEAT = (
     "NDCI watch signal, not bloom confirmation or a forecast. Sediment, optically "
@@ -50,6 +50,15 @@ def seasonal_windows(
         end_exclusive = anchor + timedelta(days=window_days + 1)
         windows.append((start.isoformat(), end_exclusive.isoformat()))
     return windows
+
+
+def trend_window(target_date: str, window_days: int) -> tuple[str, str]:
+    """Return the inclusive UTC trend window and its exclusive end date."""
+    target = date.fromisoformat(target_date)
+    return (
+        (target - timedelta(days=window_days - 1)).isoformat(),
+        (target + timedelta(days=1)).isoformat(),
+    )
 
 
 def compute_watch_mask(
@@ -116,30 +125,74 @@ def _build_gulf_connected_water_mask(
     )
 
 
-def _clear_pixel_mask(image):
-    """Mask Sentinel-2 SCL classes shared with the point extraction path."""
-    scl = image.select("SCL")
-    clear = ee.Image.constant(1)
-    for scl_class in DEFAULT_CLOUD_CLASSES:
-        clear = clear.And(scl.neq(scl_class))
-    return clear
+def _usable_water_pixel_mask(image, connected_water):
+    """Keep connected water with Sentinel water classification and clear QA60."""
+    scl_water = image.select("SCL").eq(6)
+    qa60 = image.select("QA60")
+    qa_clear = qa60.bitwiseAnd(1 << 10).eq(0).And(
+        qa60.bitwiseAnd(1 << 11).eq(0)
+    )
+    source_valid = image.select(["B2", "B3", "B4", "B5", "B6"]).mask().reduce(
+        ee.Reducer.min()
+    )
+    return connected_water.And(scl_water).And(qa_clear).And(source_valid)
 
 
 def _masked_ndci_image(image, *, region, water_mask, output_scale_m: int):
-    """Build one cloud- and water-masked NDCI image on the output grid."""
-    b4 = image.select("B4").multiply(0.0001)
+    """Build one usable-water NDCI image with diagnostic source bands."""
+    reflectance = image.select(["B2", "B3", "B4", "B5", "B6"]).multiply(0.0001)
+    b2 = reflectance.select("B2")
+    b3 = reflectance.select("B3")
+    b4 = reflectance.select("B4")
     b5 = (
-        image.select("B5")
-        .multiply(0.0001)
+        reflectance.select("B5")
         .resample("bilinear")
         .reproject(crs=b4.projection(), scale=output_scale_m)
     )
-    ndci = b5.subtract(b4).divide(b5.add(b4)).rename("ndci")
-    ndci = ndci.updateMask(_clear_pixel_mask(image)).updateMask(water_mask).clip(region)
+    b6 = reflectance.select("B6")
+    denominator = b5.add(b4)
+    usable_water = _usable_water_pixel_mask(image, water_mask)
+    valid_ndci = usable_water.And(denominator.abs().gt(NDCI_DENOMINATOR_EPSILON))
+    ndci = b5.subtract(b4).divide(denominator).rename("ndci").updateMask(valid_ndci)
+    ndci = ndci.clip(region)
     ndci = ndci.setDefaultProjection(b4.projection().atScale(output_scale_m))
     acquired = ee.Image.constant(ee.Number(image.get("system:time_start")))
     acquired = acquired.rename("acquired_ms").updateMask(ndci.mask())
-    return ndci.addBands(acquired).copyProperties(image, ["system:time_start"])
+    acquired_day = ee.Image.constant(
+        ee.Number(image.get("system:time_start")).divide(86_400_000).floor()
+    )
+    acquired_day = acquired_day.rename("acquired_day").updateMask(ndci.mask())
+    diagnostics = b2.addBands(b3).addBands(b6).updateMask(valid_ndci).clip(region)
+    return (
+        ndci.addBands(acquired)
+        .addBands(acquired_day)
+        .addBands(diagnostics)
+        .copyProperties(image, ["system:time_start"])
+    )
+
+
+def _daily_ndci_collection(collection, start: str, end: str):
+    """Median valid scenes per UTC calendar date with elapsed-day predictors."""
+    day_count = (date.fromisoformat(end) - date.fromisoformat(start)).days
+    images = []
+    for offset in range(day_count):
+        day = date.fromisoformat(start) + timedelta(days=offset)
+        next_day = day + timedelta(days=1)
+        daily = collection.filterDate(day.isoformat(), next_day.isoformat())
+        daily_ndci = daily.select("ndci").median().rename("ndci")
+        elapsed_days = ee.Image.constant(offset).rename("elapsed_days").toFloat()
+        images.append(
+            daily_ndci.addBands(elapsed_days).set("observation_date", day.isoformat())
+        )
+    return ee.ImageCollection.fromImages(images)
+
+
+def _build_trend_image(daily_collection, *, min_observations: int):
+    """Fit daily NDCI slope where enough distinct valid UTC dates exist."""
+    count = daily_collection.select("ndci").count().rename("trend_observation_count")
+    fit = daily_collection.select(["elapsed_days", "ndci"]).reduce(ee.Reducer.linearFit())
+    slope = fit.select("scale").rename("ndci_slope_per_day")
+    return slope.updateMask(count.gte(min_observations)).addBands(count)
 
 
 def _build_masked_ndci_collection(

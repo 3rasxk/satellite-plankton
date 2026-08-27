@@ -16,6 +16,128 @@ from src.watch_overlay import (
 )
 
 
+class OperationGraph:
+    def __init__(self):
+        self.selected = []
+        self.operations = []
+        self.combined_with_connected_water = False
+        self.final_mask = None
+
+
+class FakeMaskValue:
+    def __init__(self, graph, name):
+        self.graph = graph
+        self.name = name
+
+    def eq(self, value):
+        self.graph.operations.append(("eq", self.name, value))
+        return FakeMaskValue(self.graph, self.name)
+
+    def bitwiseAnd(self, value):
+        self.graph.operations.append(("bitwiseAnd", self.name, value))
+        return FakeMaskValue(self.graph, self.name)
+
+    def And(self, other):
+        if self.name == "connected-water" or getattr(other, "name", other) == "connected-water":
+            self.graph.combined_with_connected_water = True
+            self.graph.final_mask = self
+            return self
+        return FakeMaskValue(self.graph, self.name)
+
+    def mask(self):
+        return self
+
+    def reduce(self, reducer):
+        assert reducer == "minimum"
+        return FakeMaskValue(self.graph, "source-valid")
+
+
+class FakeMaskImage:
+    def __init__(self, graph, bands):
+        self.graph = graph
+        self.bands = bands
+
+    def select(self, bands):
+        if isinstance(bands, str):
+            self.graph.selected.append(bands)
+            return FakeMaskValue(self.graph, bands)
+        assert bands == ["B2", "B3", "B4", "B5", "B6"]
+        return FakeMaskValue(self.graph, "source-bands")
+
+
+class FakeDailyImage:
+    def __init__(self, graph, name):
+        self.graph = graph
+        self.name = name
+
+    def median(self):
+        self.graph.operations.append(("median", self.name))
+        return FakeDailyImage(self.graph, "daily-ndci")
+
+    def rename(self, name):
+        self.graph.operations.append(("rename", self.name, name))
+        self.name = name
+        return self
+
+    def toFloat(self):
+        self.graph.operations.append(("toFloat", self.name))
+        return self
+
+    def addBands(self, other):
+        self.graph.operations.append(("addBands", self.name, other.name))
+        return self
+
+    def set(self, name, value):
+        self.graph.operations.append(("set", name, value))
+        return self
+
+
+class FakeDailyCollection:
+    def __init__(self, graph):
+        self.graph = graph
+
+    def filterDate(self, start, end):
+        self.graph.operations.append(("filterDate", start, end))
+        return self
+
+    def select(self, bands):
+        self.graph.selected.append(bands)
+        return FakeDailyImage(self.graph, "ndci")
+
+
+class FakeTrendCount(FakeDailyImage):
+    def gte(self, value):
+        self.graph.operations.append(("gte", self.name, value))
+        return FakeDailyImage(self.graph, "count-mask")
+
+
+class FakeTrendImage(FakeDailyImage):
+    def count(self):
+        self.graph.operations.append(("count", self.name))
+        return FakeTrendCount(self.graph, "trend_observation_count")
+
+    def reduce(self, reducer):
+        self.graph.operations.append(("reduce", self.name, reducer))
+        return FakeTrendImage(self.graph, "linear-fit")
+
+    def select(self, band):
+        assert band == "scale"
+        return FakeTrendImage(self.graph, "scale")
+
+    def updateMask(self, mask):
+        self.graph.operations.append(("updateMask", self.name, mask.name))
+        return self
+
+
+class FakeTrendCollection:
+    def __init__(self, graph):
+        self.graph = graph
+
+    def select(self, bands):
+        self.graph.selected.append(bands)
+        return FakeTrendImage(self.graph, "ndci" if bands == "ndci" else "fit-input")
+
+
 def test_seasonal_windows_use_five_prior_years_and_inclusive_plus_minus_15_days():
     assert seasonal_windows("2026-08-27", baseline_years=5, window_days=15) == [
         ("2025-08-12", "2025-09-12"),
@@ -45,6 +167,67 @@ def test_compute_watch_mask_keeps_only_valid_z_at_or_above_threshold():
         min_observations=5,
     )
     assert mask.tolist() == [True, True, False, False, False]
+
+
+def test_usable_water_mask_requires_scl_water_and_clear_qa60(monkeypatch):
+    """Fails if the Sentinel water, cloud, or source-validity mask is bypassed."""
+    graph = OperationGraph()
+    image = FakeMaskImage(graph, {"SCL": 6, "QA60": 0})
+    fake_ee = type("FakeEE", (), {"Reducer": type("Reducer", (), {"min": staticmethod(lambda: "minimum")})})()
+    monkeypatch.setattr(watch_overlay, "ee", fake_ee)
+
+    result = watch_overlay._usable_water_pixel_mask(
+        image, FakeMaskValue(graph, "connected-water")
+    )
+
+    assert graph.selected == ["SCL", "QA60"]
+    assert ("eq", "SCL", 6) in graph.operations
+    assert ("bitwiseAnd", "QA60", 1 << 10) in graph.operations
+    assert ("bitwiseAnd", "QA60", 1 << 11) in graph.operations
+    assert graph.combined_with_connected_water
+    assert result is graph.final_mask
+
+
+def test_trend_window_is_fourteen_calendar_days_ending_on_target():
+    assert watch_overlay.trend_window("2026-08-27", 14) == (
+        "2026-08-14",
+        "2026-08-28",
+    )
+
+
+def test_daily_medians_and_trend_fit_use_observed_days_only(monkeypatch):
+    """Fails if same-day scenes, count gating, or elapsed-day linear fit is bypassed."""
+    graph = OperationGraph()
+    daily_ee = type(
+        "FakeEE",
+        (),
+        {
+            "Image": type("Image", (), {"constant": staticmethod(lambda value: FakeDailyImage(graph, str(value)))}),
+            "ImageCollection": type(
+                "ImageCollection", (), {"fromImages": staticmethod(lambda images: images)}
+            ),
+            "Reducer": type("Reducer", (), {"linearFit": staticmethod(lambda: "linear-fit")}),
+        },
+    )()
+    monkeypatch.setattr(watch_overlay, "ee", daily_ee)
+
+    daily_images = watch_overlay._daily_ndci_collection(
+        FakeDailyCollection(graph), "2026-08-14", "2026-08-16"
+    )
+    trend = watch_overlay._build_trend_image(
+        FakeTrendCollection(graph), min_observations=2
+    )
+
+    assert [(op[1], op[2]) for op in graph.operations if op[0] == "filterDate"] == [
+        ("2026-08-14", "2026-08-15"),
+        ("2026-08-15", "2026-08-16"),
+    ]
+    assert len([op for op in graph.operations if op[0] == "median"]) == 2
+    assert graph.selected[-2:] == ["ndci", ["elapsed_days", "ndci"]]
+    assert ("reduce", "fit-input", "linear-fit") in graph.operations
+    assert ("gte", "trend_observation_count", 2) in graph.operations
+    assert daily_images
+    assert trend.name == "ndci_slope_per_day"
 
 
 class FakeCollection:
