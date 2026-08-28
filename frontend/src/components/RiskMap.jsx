@@ -1,18 +1,25 @@
-import { useEffect, useMemo } from 'react'
-import { MapContainer, TileLayer, CircleMarker, ZoomControl, useMap } from 'react-leaflet'
-import { RISK_COLOR_HEX, NO_DATA_HEX, NO_DATA_LINE_HEX, STATUS_LABEL, NO_DATA_STATUS } from '../constants.js'
+import { Fragment, useEffect, useMemo } from 'react'
+import { MapContainer, TileLayer, CircleMarker, ZoomControl, useMap, Tooltip } from 'react-leaflet'
+import { 
+  RISK_COLOR_HEX, 
+  NO_DATA_HEX, 
+  NO_DATA_LINE_HEX, 
+  STATUS_LABEL, 
+  NO_DATA_STATUS, 
+  RISK_LABEL_TH,
+  RISK_MEANING_TH,
+  formatSiteName,
+} from '../constants.js'
 import { MAP_BOUNDS, syncMinimumBoundsZoom } from '../utils/mapBounds.js'
-import NdciRasterOverlay from './NdciRasterOverlay.jsx'
 
-const UPPER_GULF_CENTER = [12.9, 100.75]
+const UPPER_GULF_CENTER = [13.1, 100.6]
 const UPPER_GULF_ZOOM = 9
 
-// CartoDB Positron — light, muted basemap for the Apple-style light theme
-// (docs/FRONTEND_PLAN.md §4). Same tile scheme/attribution as the old
-// dark_all basemap, just the light_all variant.
-const TILE_URL = 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
+// OpenStreetMap — free, no API key, no watermark. Used for standard map
+// and styled to pure-white monochrome in Risk Alert Map mode.
+const TILE_URL = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
 const TILE_ATTRIBUTION =
-  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
 
 // True-color satellite basemap for the "True Color (RGB)" view mode — this
 // is a general-purpose Esri imagery basemap, NOT the app's own Sentinel-2
@@ -77,14 +84,24 @@ function makeAccessible(layer, label, onActivate) {
 }
 
 export default function RiskMap({ featureCollection, onSelectSite = () => {}, mode = 'risk' }) {
-  const features = featureCollection?.features || []
+  // Render strictly active alert tiers: เริ่มผิดปกติ (elevated), เฝ้าระวัง (watch), and เตือนภัย (warning)
+  const features = useMemo(
+    () =>
+      (featureCollection?.features || []).filter(
+        (f) =>
+          f.properties.risk_level === 'elevated' ||
+          f.properties.risk_level === 'watch' ||
+          f.properties.risk_level === 'warning',
+      ),
+    [featureCollection],
+  )
 
   return (
     <MapContainer
-      className="leaflet-map"
+      className={`leaflet-map map-mode-${mode}`}
       center={UPPER_GULF_CENTER}
       zoom={UPPER_GULF_ZOOM}
-      maxZoom={12}
+      maxZoom={18}
       maxBounds={MAP_BOUNDS}
       maxBoundsViscosity={1}
       scrollWheelZoom
@@ -94,10 +111,12 @@ export default function RiskMap({ featureCollection, onSelectSite = () => {}, mo
       <BoundsZoomLock />
       <ZoomControl position="topright" />
       <TileLayer
+        key={mode}
         url={mode === 'true_color' ? TRUE_COLOR_TILE_URL : TILE_URL}
         attribution={mode === 'true_color' ? TRUE_COLOR_ATTRIBUTION : TILE_ATTRIBUTION}
+        maxNativeZoom={19}
+        maxZoom={18}
       />
-      {mode === 'ndci' && <NdciRasterOverlay />}
       <FitToFeatures features={features} />
       {features.map((feature) => {
         const [lng, lat] = feature.geometry.coordinates
@@ -107,31 +126,64 @@ export default function RiskMap({ featureCollection, onSelectSite = () => {}, mo
         const label = `${props.name}: ${isNoData ? STATUS_LABEL[props.status] || 'no reading' : props.risk_level}`
 
         return (
-          <CircleMarker
-            key={props.site_id}
-            center={[lat, lng]}
-            radius={12}
-            pathOptions={
-              isNoData
-                ? {
-                    color: NO_DATA_LINE_HEX,
-                    weight: 1.5,
-                    dashArray: '3,3',
-                    fillColor: NO_DATA_HEX,
-                    fillOpacity: 0.55,
-                  }
-                : {
-                    color: colorHex,
-                    weight: 1.5,
-                    fillColor: colorHex,
-                    fillOpacity: 0.75,
-                  }
-            }
-            eventHandlers={{
-              add: (e) => makeAccessible(e.target, label, () => onSelectSite({ lat, lng, ...props })),
-              click: () => onSelectSite({ lat, lng, ...props }),
-            }}
-          />
+          <Fragment key={props.site_id}>
+            {!isNoData && (
+              <CircleMarker
+                center={[lat, lng]}
+                radius={22}
+                pathOptions={{
+                  color: colorHex,
+                  weight: 1.5,
+                  fillColor: colorHex,
+                  fillOpacity: 0.18,
+                  className: 'marker-pulsing-circle',
+                }}
+                interactive={false}
+              />
+            )}
+            <CircleMarker
+              center={[lat, lng]}
+              radius={14}
+              pathOptions={
+                isNoData
+                  ? {
+                      color: NO_DATA_LINE_HEX,
+                      weight: 2,
+                      dashArray: '3,3',
+                      fillColor: NO_DATA_HEX,
+                      fillOpacity: 0.7,
+                      className: 'clickable-marker',
+                    }
+                  : {
+                      color: colorHex,
+                      weight: 2,
+                      fillColor: colorHex,
+                      fillOpacity: 0.85,
+                      className: 'clickable-marker',
+                    }
+              }
+              eventHandlers={{
+                add: (e) => makeAccessible(e.target, label, () => onSelectSite({ lat, lng, ...props })),
+                click: () => onSelectSite({ lat, lng, ...props }),
+              }}
+            >
+              <Tooltip direction="top" offset={[0, -10]} opacity={0.95}>
+                <div style={{ fontWeight: 600, fontSize: '13px' }}>{formatSiteName(props)}</div>
+                <div style={{ fontSize: '11.5px', marginTop: '2px', color: '#1d1d1f' }}>
+                  {isNoData ? (
+                    'ไม่มีค่าอ่าน'
+                  ) : (
+                    <>
+                      <span style={{ fontWeight: 600 }}>{RISK_LABEL_TH[props.risk_level] || props.risk_level}</span>
+                      {RISK_MEANING_TH[props.risk_level] ? (
+                        <span style={{ color: '#6e6e73' }}> · {RISK_MEANING_TH[props.risk_level]}</span>
+                      ) : null}
+                    </>
+                  )}
+                </div>
+              </Tooltip>
+            </CircleMarker>
+          </Fragment>
         )
       })}
     </MapContainer>

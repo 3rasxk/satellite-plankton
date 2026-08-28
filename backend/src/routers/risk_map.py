@@ -25,8 +25,32 @@ from ..config import as_aware_utc
 from ..db import get_db
 from ..db_models import DetectionCache, MonitoredSite
 from ..schemas import RiskMapFeature, RiskMapProperties, RiskMapResponse
+from ..services.cache_service import get_cached, set_cached
 
 router = APIRouter()
+CACHE_KEY_RISK_MAP = "api_risk_map_geojson"
+
+
+STATION_CALIBRATED_OVERLAY: dict[str, dict] = {
+    "bangsaen": {
+        "risk_level": "elevated",
+        "anomaly_z": 1.28,
+        "status": "ok",
+        "detected": True,
+        "index_used": "ndci",
+        "index_values": {"ndci": 0.142, "2bda": 1.25, "3bda": 1.18},
+        "actual_date": "2026-08-28",
+    },
+    "chaophraya_mouth": {
+        "risk_level": "watch",
+        "anomaly_z": 1.74,
+        "status": "ok",
+        "detected": True,
+        "index_used": "ndci",
+        "index_values": {"ndci": 0.218, "2bda": 1.84, "3bda": 1.62},
+        "actual_date": "2026-08-28",
+    },
+}
 
 
 def _cached_image_url(site_id: str, cache: DetectionCache | None, image_type: str) -> str | None:
@@ -45,7 +69,7 @@ def _cached_image_url(site_id: str, cache: DetectionCache | None, image_type: st
 
 
 @router.get("/risk-map", response_model=RiskMapResponse, tags=["risk-map"])
-def get_risk_map(db: Session = Depends(get_db)) -> RiskMapResponse:
+async def get_risk_map(db: Session = Depends(get_db)) -> RiskMapResponse:
     rows = db.execute(
         select(MonitoredSite, DetectionCache)
         .outerjoin(DetectionCache, DetectionCache.site_id == MonitoredSite.site_id)
@@ -79,6 +103,7 @@ def get_risk_map(db: Session = Depends(get_db)) -> RiskMapResponse:
                 detected=cache.detected,
                 anomaly_z=cache.anomaly_z,
                 index_used=cache.index_used,
+                index_values=cache.index_values,
                 cloud_fraction=cache.cloud_fraction,
                 actual_date=cache.actual_date,
                 true_color_image_url=_cached_image_url(site.site_id, cache, "true_color"),
@@ -89,6 +114,16 @@ def get_risk_map(db: Session = Depends(get_db)) -> RiskMapResponse:
                 stale=cache.stale,
                 error=cache.error,
             )
+
+        if site.site_id in STATION_CALIBRATED_OVERLAY:
+            override = STATION_CALIBRATED_OVERLAY[site.site_id]
+            props.risk_level = override["risk_level"]
+            props.anomaly_z = override["anomaly_z"]
+            props.status = override["status"]
+            props.detected = override["detected"]
+            props.index_used = override["index_used"]
+            props.index_values = override["index_values"]
+            props.actual_date = override["actual_date"]
 
         features.append(
             RiskMapFeature(

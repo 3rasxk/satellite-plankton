@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 from . import _detection as bridge
 from .db import SessionLocal, get_db, init_db  # noqa: F401  (get_db re-exported for routers/tests)
 from .db_models import ValidationEvent
-from .routers import detect, risk_map, satellite_image, summary, timeseries, validation
+from .routers import alerts, detect, risk_map, satellite, satellite_image, summary, timeseries, validation
 from .scheduler import create_scheduler, ensure_monitored_sites
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -42,17 +42,17 @@ app = FastAPI(
 # the web dashboard to reach the API at all in local development.
 app.add_middleware(
     CORSMiddleware,
-    # regex (not a fixed port list) because `vite --port 5173` falls back
-    # to the next free port whenever something else on the machine is
-    # already holding 5173.
-    allow_origin_regex=r"http://(localhost|127\.0\.0\.1):\d+",
-    allow_methods=["GET"],
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
+app.include_router(alerts.router)
 app.include_router(risk_map.router)
 app.include_router(timeseries.router)
 app.include_router(detect.router)
+app.include_router(satellite.router)
 app.include_router(satellite_image.router)
 app.include_router(summary.router)
 app.include_router(validation.router)
@@ -102,6 +102,22 @@ def on_startup() -> None:
     ensure_monitored_sites()
     logger.info("startup: seed_validation_events")
     _seed_validation_events()
+
+    # Pre-load ML model ensemble once at application startup (Invariance check)
+    try:
+        from ensemble_service import DualModelBloomEnsemble
+        ensemble = DualModelBloomEnsemble()
+        if ensemble.is_ready():
+            logger.info("startup: Dual-Model Bloom Ensemble (XGBoost + Random Forest) successfully pre-loaded in memory.")
+    except Exception:
+        try:
+            from backend.ensemble_service import DualModelBloomEnsemble
+            ensemble = DualModelBloomEnsemble()
+            if ensemble.is_ready():
+                logger.info("startup: Dual-Model Bloom Ensemble (XGBoost + Random Forest) successfully pre-loaded in memory.")
+        except Exception as e:
+            logger.warning(f"startup: ML model preloading skipped or failed: {e}")
+
     logger.info("startup: starting scheduler")
     _scheduler = create_scheduler()
     _scheduler.start()

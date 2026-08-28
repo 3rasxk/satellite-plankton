@@ -181,6 +181,7 @@ class RiskMapProperties(DisclaimerMixin):
     detected: bool | None
     anomaly_z: float | None
     index_used: str | None
+    index_values: dict[str, float] | None = None
 
     cloud_fraction: float | None = None
     actual_date: str | None = None

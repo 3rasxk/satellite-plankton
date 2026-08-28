@@ -31,6 +31,35 @@ Every response from the API carries these as separate fields (`backend/src/schem
 
 **Geographic scope is the upper Gulf of Thailand only.** Nothing here is calibrated, or claimed to generalize, beyond that area.
 
+## NDCI watch overlay limitations
+
+The **NDCI watch signal (z >= 1.5)** is a current anomaly screen for human
+review, separate from the rule-based prediction layer. Its `z >= 1.5`
+threshold is an uncalibrated screen, not bloom confirmation or a forecast.
+NDCI can also respond to sediment, optically complex coastal water, residual
+cloud contamination, and other non-bloom causes.
+
+The overlay filters known Sentinel-2 SCL cloud and invalid classes, but that
+filter cannot guarantee that every remaining pixel is uncontaminated.
+Transparent pixels must not be read as normal water: they can be below the
+watch threshold, cloud or invalid, land or disconnected water, short of the
+minimum seasonal baseline, or have zero baseline variance.
+
+The rendered grid is 10 m, but NDCI uses Sentinel-2 B5 at 20 m. B5 is
+resampled to the output grid, so the effective NDCI source resolution remains
+20 m; resampling does not add spatial detail. The JRC mask selects historical
+surface water connected to Gulf seed points, removing isolated inland water.
+It does not measure salinity, and connected estuaries or lower river mouths
+can remain.
+
+Each pixel in the 30-day quality mosaic is the latest valid observation for
+that location. Consequently, a single overlay can contain pixels from
+different acquisition dates; its source window and newest available scene
+date do not identify one acquisition date for the whole Gulf. Earth Engine
+tile URLs are cached but may expire or become unavailable. The API surfaces
+`stale` and `error` state instead of treating an unavailable tile or a missing
+pixel as a clear reading.
+
 ## What the build actually found, beyond what the plan anticipated
 
 ### 1. Zero of the 14 validation events could be matched to a real satellite reading

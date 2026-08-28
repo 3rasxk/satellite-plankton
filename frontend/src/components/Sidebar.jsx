@@ -3,10 +3,6 @@ import Icon from './Icon.jsx'
 
 const NAV_ITEMS = [
   { to: '/', label: 'ภาพรวม/แผนที่', icon: 'map', end: true },
-  { to: '/ndci', label: 'Sentinel-2 NDCI', icon: 'satellite' },
-  { to: '/anomaly', label: 'ความผิดปกติตามฤดูกาล', icon: 'trend' },
-  { to: '/aquaculture', label: 'พื้นที่เพาะเลี้ยงสัตว์น้ำ', icon: 'fish' },
-  { to: '/reports', label: 'รายงานและการส่งออก', icon: 'file' },
 ]
 
 /** Sidebar nav shell (HAB Sentinel design spec). */

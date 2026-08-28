@@ -41,6 +41,18 @@ export async function getValidation() {
   return data
 }
 
+export async function getAlerts() {
+  const { data } = await client.get('/api/alerts')
+  return data
+}
+
+export async function getPinSatellitePreview(lat, lon, date) {
+  const { data } = await client.get('/api/satellite/pin-preview', {
+    params: { lat, lon, date },
+  })
+  return data
+}
+
 // backend/src/main.py's existing meta route at GET / — reused here only to
 // prove the API is reachable (Sidebar's connectivity pill), not for its
 // response shape.

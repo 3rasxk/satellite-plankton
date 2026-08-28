@@ -10,13 +10,19 @@ const NDCI_OVERLAY_BOUNDS = [
 ]
 
 /**
- * Decorative NDCI-mode texture (docs/superpowers/specs/2026-08-26-hab-
- * sentinel-dashboard-design.md, Screen 1). Domain-warped noise on the
- * diverging ramp — illustrative only, NOT a real per-pixel NDCI raster
- * (no such backend endpoint exists). Regenerated once per mount
- * (useMemo, empty deps) so it doesn't re-warp on every re-render.
+ * Composite Index Map overlay: NDCI + 2BDA + 3BDA, water-masked.
+ *
+ * This is still an illustrative texture (no backend raster endpoint
+ * exists), but it now:
+ *  1. Applies a water mask so only sea pixels are coloured — land is
+ *     transparent.
+ *  2. Labels the overlay as a multi-index composite (NDCI + 2BDA + 3BDA)
+ *     rather than NDCI-only.
+ *
+ * The water mask is a simplified polygon approximation of the upper Gulf
+ * of Thailand coastline, rasterised at overlay resolution.
  */
 export default function NdciRasterOverlay() {
-  const dataUrl = useMemo(() => fieldToDataUrl(256, 7), [])
-  return <ImageOverlay url={dataUrl} bounds={NDCI_OVERLAY_BOUNDS} opacity={0.65} />
+  const dataUrl = useMemo(() => fieldToDataUrl(512, 7, { waterMask: true }), [])
+  return <ImageOverlay url={dataUrl} bounds={NDCI_OVERLAY_BOUNDS} opacity={0.85} />
 }

@@ -1,13 +1,11 @@
 import { Outlet } from 'react-router-dom'
-import Sidebar from './components/Sidebar.jsx'
 
 /**
- * Layout shell shared by every route: sidebar nav + routed page content.
+ * Layout shell — map-only, no sidebar.
  */
 export default function App() {
   return (
-    <div className="app-shell">
-      <Sidebar />
+    <div className="app-shell no-sidebar">
       <div className="app-body">
         <main className="app-main">
           <Outlet />

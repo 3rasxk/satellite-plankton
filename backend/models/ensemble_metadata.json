@@ -1,0 +1,60 @@
+{
+  "timestamp_utc": "2026-08-28T00:23:47.817054+00:00",
+  "feature_schema": [
+    "chlor_a",
+    "sst",
+    "nflh",
+    "poc",
+    "chlor_a_anomaly",
+    "month_sin",
+    "month_cos"
+  ],
+  "decision_thresholds": {
+    "NORMAL": "< 0.35",
+    "WATCH": "0.35 - 0.65",
+    "WARNING": ">= 0.65",
+    "default_operational_threshold": 0.35
+  },
+  "performance": {
+    "xgboost": {
+      "model_name": "XGBoost (High-Recall Screener)",
+      "precision_class_1": 0.6666666666666666,
+      "recall_class_1": 0.8106796116504854,
+      "f1_class_1": 0.7316538882803943,
+      "accuracy": 0.9771263187377462,
+      "confusion_matrix": {
+        "TN": 10132,
+        "FP": 167,
+        "FN": 78,
+        "TP": 334
+      }
+    },
+    "random_forest": {
+      "model_name": "Random Forest (High-Precision Validator)",
+      "precision_class_1": 0.9696048632218845,
+      "recall_class_1": 0.7742718446601942,
+      "f1_class_1": 0.8609986504723347,
+      "accuracy": 0.9903837176734198,
+      "confusion_matrix": {
+        "TN": 10289,
+        "FP": 10,
+        "FN": 93,
+        "TP": 319
+      }
+    },
+    "ensemble": {
+      "model_name": "Dual-Model Soft-Voting Ensemble",
+      "decision_threshold": 0.35,
+      "precision_class_1": 0.39149888143176736,
+      "recall_class_1": 0.8495145631067961,
+      "f1_class_1": 0.5359877488514548,
+      "accuracy": 0.9434226496125478,
+      "confusion_matrix": {
+        "TN": 9755,
+        "FP": 544,
+        "FN": 62,
+        "TP": 350
+      }
+    }
+  }
+}

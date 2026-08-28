@@ -41,6 +41,12 @@ export function useSatelliteImage(url) {
       return () => {}
     }
 
+    // If already a full external web URL, allow direct rendering immediately
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      setState({ loading: false, error: null, objectUrl: url })
+      return () => {}
+    }
+
     let cancelled = false
     setState({ loading: true, error: null, objectUrl: null })
 

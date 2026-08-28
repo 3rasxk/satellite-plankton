@@ -68,6 +68,7 @@ from .db import SessionLocal
 from .db_models import DetectionCache, MonitoredSite
 from .grid import MONITORED_GRID
 from .satellite_meta import fetch_satellite_meta
+from .services.cache_service import clear_cache
 
 logger = logging.getLogger("backend.scheduler")
 
@@ -204,6 +205,7 @@ def refresh_one_site(db: Session, site: MonitoredSite, target_date: str) -> None
             for key, value in fields.items():
                 setattr(existing, key, value)
         db.commit()
+        clear_cache()
         logger.info("scheduler: refreshed %s -> status=%s level=%s", site.site_id,
                     detection["status"], prediction["level"])
 

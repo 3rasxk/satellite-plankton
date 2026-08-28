@@ -10,6 +10,7 @@ const ICON_PATHS = {
   settings: <><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z" /><path d="m4.9 4.9 2.1 2.1m10-2.1-2.1 2.1m2.1 10-2.1-2.1m-10 2.1 2.1-2.1M3 12h3m12 0h3M12 3v3m0 12v3" /></>,
   calendar: <><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M16 3v4M8 3v4M3 10h18M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01" /></>,
   alert: <><path d="M12 3 2.7 20h18.6L12 3Z" /><path d="M12 9v5M12 17h.01" /></>,
+  refresh: <><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /></>,
   chevronDown: <path d="m6 9 6 6 6-6" />,
 }
 

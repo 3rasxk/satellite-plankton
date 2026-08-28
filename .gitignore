@@ -29,3 +29,4 @@ data/cache/
 *.db
 *.sqlite3
 backend/data/
+output_snapshots/

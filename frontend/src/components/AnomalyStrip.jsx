@@ -21,14 +21,14 @@ export default function AnomalyStrip({ segments, leftLabel, rightLabel, caption 
         <div className="anomaly-strip-band">
           <div className="anomaly-strip-segment no-data" style={{ flex: '1 1 100%' }} />
         </div>
-        <p className="anomaly-strip-caption">No anomaly data yet for this range.</p>
+        <p className="anomaly-strip-caption">ยังไม่มีข้อมูลความผิดปกติสำหรับช่วงเวลานี้</p>
       </div>
     )
   }
 
   return (
     <div className="anomaly-strip">
-      <div className="anomaly-strip-band" role="img" aria-label={caption || 'Chlorophyll anomaly strip'}>
+      <div className="anomaly-strip-band" role="img" aria-label={caption || 'แถบแสดงความผิดปกติของคลอโรฟิลล์'}>
         {segments.map((seg, i) => {
           const colorVar = zToColorVar(seg.z)
           return (
