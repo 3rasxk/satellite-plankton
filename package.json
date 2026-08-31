@@ -1,6 +1,9 @@
 {
   "name": "gulf-algal-bloom-monitor-root",
   "private": true,
+  "workspaces": [
+    "frontend"
+  ],
   "scripts": {
     "dev": "npm --prefix frontend run dev",
     "build": "npm --prefix frontend run build",
