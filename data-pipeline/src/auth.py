@@ -19,6 +19,15 @@ Every public function in `sentinel2.py`, `modis.py`, and `rainfall.py` calls
 initialization fails for any reason, this raises `GEEAuthError` with an
 actionable fix-it message — callers must let it propagate rather than
 catching it and substituting fabricated data.
+
+Headless/server deploys (no interactive browser to run `earthengine
+authenticate` against, e.g. a Render/Fly/Railway web service): set
+`GEE_SERVICE_ACCOUNT_KEY_JSON` to the full contents of a GCP service
+account's JSON key file (IAM & Admin -> Service Accounts -> Create ->
+grant it Earth Engine access -> Keys -> Add key -> JSON, in the same
+Cloud project as `EE_PROJECT_ID`). When set, this takes priority over the
+interactive-credentials flow below. Optional — every local/dev path that
+doesn't set it behaves exactly as before this option was added.
 """
 
 from __future__ import annotations
@@ -50,7 +59,11 @@ FIX_IT_MESSAGE = (
     "\n"
     "Newer GEE accounts also require a registered Cloud project: set "
     "EE_PROJECT_ID in data-pipeline/.env to the project id registered at "
-    "https://code.earthengine.google.com (see .env.example)."
+    "https://code.earthengine.google.com (see .env.example).\n"
+    "\n"
+    "Running on a headless server with no browser to authenticate "
+    "against? Set GEE_SERVICE_ACCOUNT_KEY_JSON to a GCP service account's "
+    "JSON key contents instead (see this module's docstring)."
 )
 
 
@@ -84,8 +97,20 @@ def initialize_ee(force: bool = False) -> None:
             return
 
         project = os.environ.get("EE_PROJECT_ID") or None
+        # Service-account key takes priority when present -- this is the
+        # only path a headless server (no browser for `earthengine
+        # authenticate`) can use. Unset (the default everywhere this
+        # option wasn't explicitly configured), initialize_ee() behaves
+        # exactly as it did before this branch existed.
+        service_account_key_json = os.environ.get("GEE_SERVICE_ACCOUNT_KEY_JSON") or None
         try:
-            if project:
+            if service_account_key_json:
+                # email is omitted deliberately -- ee.ServiceAccountCredentials
+                # reads client_email out of the JSON key itself when key_data
+                # is a full service-account key (see its own docstring).
+                credentials = ee.ServiceAccountCredentials(key_data=service_account_key_json)
+                ee.Initialize(credentials=credentials, project=project)
+            elif project:
                 ee.Initialize(project=project)
             else:
                 ee.Initialize()
