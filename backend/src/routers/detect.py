@@ -4,6 +4,7 @@ rule-based prediction layer (see /risk-map, /timeseries for that)."""
 
 from __future__ import annotations
 
+import asyncio
 from datetime import date as date_cls
 from urllib.parse import urlencode
 
@@ -41,30 +42,37 @@ async def get_detect(
     # human's "don't silently accept" requirement, not a "don't accept").
     area_check = bridge.check_point_in_study_area(lat, lng)
 
-    import asyncio
+    # Real, live GEE calls -- detect() measured 4-26s depending on
+    # cloud-search/climatology cost (see docs/superpowers/specs/
+    # 2026-08-31-regional-scan-design.md §2's measurement of the same
+    # underlying pipeline). No timeout here: a prior version of this
+    # endpoint wrapped both calls in `asyncio.wait_for` with a 0.6s
+    # timeout and, on ANY exception (including a real GEEAuthError),
+    # substituted a fabricated result (index_values={"ndci": 0.04},
+    # cloud_fraction=0.15) -- a direct violation of CLAUDE.md's "never
+    # catch-and-fabricate" rule, since the real call almost always takes
+    # longer than 0.6s. detect() and fetch_satellite_meta() already
+    # report real "no data" conditions (no_imagery/no_water_pixels/
+    # no_climatology) as honest status fields, not exceptions -- the
+    # only exception either can raise is GEEAuthError, which is caught
+    # here only to translate it into a clear 503 (never to hide it or
+    # substitute a fake reading), matching src/_detection.py's own
+    # documented contract for this bridge.
+    try:
+        result = await asyncio.to_thread(bridge.detect, lat, lng, date)
+    except bridge.GEEAuthError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Google Earth Engine is not authenticated -- the pipeline is unusable: {exc}",
+        )
 
     try:
-        result = await asyncio.wait_for(
-            asyncio.to_thread(bridge.detect, lat, lng, date),
-            timeout=0.6,
+        meta = await asyncio.to_thread(fetch_satellite_meta, lat, lng, date)
+    except bridge.GEEAuthError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Google Earth Engine is not authenticated -- the pipeline is unusable: {exc}",
         )
-    except Exception as exc:
-        result = {
-            "status": "no_imagery",
-            "detected": False,
-            "anomaly_z": None,
-            "index_used": "ndci",
-            "index_values": {"ndci": 0.04},
-            "reason": f"Live satellite query fallback: {exc}",
-        }
-
-    try:
-        meta = await asyncio.wait_for(
-            asyncio.to_thread(fetch_satellite_meta, lat, lng, date),
-            timeout=0.6,
-        )
-    except Exception:
-        meta = {"cloud_fraction": 0.15, "actual_date": date}
 
     true_color_url = _satellite_image_url(lat, lng, date, "true_color")
     ndci_heatmap_url = _satellite_image_url(lat, lng, date, "ndci_heatmap")
