@@ -269,7 +269,20 @@ class RiskLevelCounts(BaseModel):
     elevated: int = 0
     watch: int = 0
     warning: int = 0
-    no_data: int = Field(default=0, description="Sites with no successful cache entry yet.")
+    not_checked_yet: int = Field(
+        default=0,
+        description="Sites the scheduler has not reached yet -- no cache row at all. "
+        "This is a loading state, not a finding: it says nothing about the water. "
+        "Distinct from no_usable_data, and never merged with it.",
+    )
+    no_usable_data: int = Field(
+        default=0,
+        description="Sites the scheduler did read, whose reading produced no usable "
+        "value -- status no_imagery / no_water_pixels / no_climatology / error. "
+        "This is a real finding about a real attempt (cloud cover, no baseline, a "
+        "failed fetch), not a loading state. These sites are excluded from the four "
+        "risk-level counts rather than being counted as 'normal'.",
+    )
 
 
 class MostRecentDetection(BaseModel):
