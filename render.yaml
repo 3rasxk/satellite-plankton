@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: plankton-backend
+    name: satellite-plankton
     env: python
     pythonVersion: "3.11.7"
     buildCommand: "pip install -r backend/requirements.txt"

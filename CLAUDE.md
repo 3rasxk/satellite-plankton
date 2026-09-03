@@ -127,6 +127,8 @@ Regenerate `detection/reports/*` from a live run (slow, needs real GEE auth):
 cd detection && source venv/bin/activate && python src/generate_reports.py
 ```
 
+Deployed: frontend on Vercel (project `satellite-plankton`, behind Vercel Authentication), backend at `https://satellite-plankton.onrender.com`. Both auto-deploy from `origin/main` on push. The live Render service was renamed in Render's dashboard at some point and `render.yaml` was left naming `plankton-backend`, a hostname that resolves to nothing; the blueprint's `name:` has since been corrected to match the live service. Renaming it in the blueprint does **not** rename the running service — that only matters if the backend is ever re-provisioned from this file.
+
 ## 8. Architecture: cross-project import bridges
 
 `data-pipeline/`, `detection/`, and `backend/` are separate projects with separate venvs by design (§5), but at runtime each imports the previous one's `src/` **directly**, via `importlib.util.spec_from_file_location` under a namespaced module name — not a package install. This is necessary because `data-pipeline/src` and `detection/src` are both literally named `src` and would collide in `sys.modules` under a plain import.
