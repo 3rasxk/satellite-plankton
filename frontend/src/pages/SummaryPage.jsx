@@ -92,9 +92,14 @@ export default function SummaryPage() {
               <StatCard label="Watch" value={s.risk_level_counts.watch} riskLevel="watch" />
               <StatCard label="Warning" value={s.risk_level_counts.warning} riskLevel="warning" />
               <StatCard
-                label="No reading"
-                value={s.risk_level_counts.no_data}
-                detail="Cloud cover, missing baseline, or not yet checked"
+                label="Not checked yet"
+                value={s.risk_level_counts.not_checked_yet}
+                detail="Scheduler has not reached these sites yet — a loading state, not a finding"
+              />
+              <StatCard
+                label="No usable data"
+                value={s.risk_level_counts.no_usable_data}
+                detail="Read, but returned nothing usable: cloud cover, missing baseline, or a failed fetch"
               />
               <StatCard
                 label="Stale sites"

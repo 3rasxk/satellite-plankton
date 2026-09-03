@@ -9,19 +9,63 @@ Run with: `uvicorn src.main:app --reload` from `backend/` (see README.md).
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import func, select
 
 from . import _detection as bridge
 from .db import SessionLocal, get_db, init_db  # noqa: F401  (get_db re-exported for routers/tests)
-from .db_models import ValidationEvent
+from .db_models import DetectionCache, MonitoredSite, ValidationEvent
 from .routers import alerts, detect, regional_scan, risk_map, satellite, satellite_image, summary, timeseries, validation
 from .scheduler import create_scheduler, ensure_monitored_sites
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("backend.main")
+
+_scheduler = None
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Startup/shutdown, replacing the deprecated @app.on_event hooks.
+
+    Everything before the `yield` blocks the server from accepting
+    requests, so only work that every route depends on belongs here.
+    Measured at ~1.1s total, almost all of it the module import chain
+    (detection/src -> data-pipeline/src -> earthengine-api); the three
+    DB steps are ~0.01s each and are kept blocking deliberately -- every
+    router queries the tables they create and seed, so deferring them
+    would only trade 30ms for a window where routes hit missing tables.
+
+    The scheduler is started, not awaited: create_scheduler() returns a
+    BackgroundScheduler whose .start() hands its jobs to its own thread
+    pool and returns immediately. Its refresh_grid job fires at boot
+    (scheduler.py's next_run_time=now) and makes real, multi-second GEE
+    calls -- concurrently with serving, never blocking it. refresh_grid
+    commits per site, so /risk-map fills in site by site rather than
+    all at once; sites it has not reached yet report the honest
+    `no_data_yet` status, never a placeholder reading.
+    """
+    global _scheduler
+    logger.info("startup: init_db")
+    init_db()
+    logger.info("startup: ensure_monitored_sites")
+    ensure_monitored_sites()
+    logger.info("startup: seed_validation_events")
+    _seed_validation_events()
+
+    logger.info("startup: starting scheduler")
+    _scheduler = create_scheduler()
+    _scheduler.start()
+
+    yield
+
+    if _scheduler is not None:
+        _scheduler.shutdown(wait=False)
+
 
 app = FastAPI(
     title="Gulf of Thailand Algal Bloom Monitor -- API",
@@ -32,6 +76,7 @@ app = FastAPI(
         "`disclaimer` field -- see CLAUDE.md's truth boundary."
     ),
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 # Local dev only: the frontend (frontend-dashboard agent) runs on Vite's
@@ -57,8 +102,6 @@ app.include_router(satellite_image.router)
 app.include_router(summary.router)
 app.include_router(validation.router)
 app.include_router(regional_scan.router)
-
-_scheduler = None
 
 
 def _seed_validation_events() -> None:
@@ -94,42 +137,6 @@ def _seed_validation_events() -> None:
         db.close()
 
 
-@app.on_event("startup")
-def on_startup() -> None:
-    global _scheduler
-    logger.info("startup: init_db")
-    init_db()
-    logger.info("startup: ensure_monitored_sites")
-    ensure_monitored_sites()
-    logger.info("startup: seed_validation_events")
-    _seed_validation_events()
-
-    # Pre-load ML model ensemble once at application startup (Invariance check)
-    try:
-        from ensemble_service import DualModelBloomEnsemble
-        ensemble = DualModelBloomEnsemble()
-        if ensemble.is_ready():
-            logger.info("startup: Dual-Model Bloom Ensemble (XGBoost + Random Forest) successfully pre-loaded in memory.")
-    except Exception:
-        try:
-            from backend.ensemble_service import DualModelBloomEnsemble
-            ensemble = DualModelBloomEnsemble()
-            if ensemble.is_ready():
-                logger.info("startup: Dual-Model Bloom Ensemble (XGBoost + Random Forest) successfully pre-loaded in memory.")
-        except Exception as e:
-            logger.warning(f"startup: ML model preloading skipped or failed: {e}")
-
-    logger.info("startup: starting scheduler")
-    _scheduler = create_scheduler()
-    _scheduler.start()
-
-
-@app.on_event("shutdown")
-def on_shutdown() -> None:
-    if _scheduler is not None:
-        _scheduler.shutdown(wait=False)
-
-
 @app.exception_handler(bridge.GEEAuthError)
 def gee_auth_error_handler(request, exc: bridge.GEEAuthError) -> JSONResponse:
     # Belt-and-suspenders: routers already convert this to a 503 where
@@ -144,9 +151,55 @@ def gee_auth_error_handler(request, exc: bridge.GEEAuthError) -> JSONResponse:
 
 @app.get("/", tags=["meta"])
 def root() -> dict:
+    """Service metadata plus honest first-refresh progress.
+
+    `first_refresh` reports how far the scheduler's boot-time
+    refresh_grid pass has got, counted from real DetectionCache rows --
+    nothing here is estimated or synthesised. A caller can distinguish
+    "the server is up but the grid has not been read yet" from "the
+    grid has been read and this is genuinely all the data there is",
+    which the per-site statuses on /risk-map also express individually
+    (`no_data_yet` vs no_imagery/no_water_pixels/no_climatology/error).
+    """
+    db = SessionLocal()
+    try:
+        total_sites = db.execute(select(func.count()).select_from(MonitoredSite)).scalar_one()
+        # A cache row means the scheduler reached this site. Whether that
+        # attempt produced a usable reading is a separate question, so it
+        # is a separate number -- an attempted site with status != 'ok' is
+        # real data about a real failure, not a reading.
+        sites_attempted = db.execute(select(func.count()).select_from(DetectionCache)).scalar_one()
+        sites_with_usable_reading = db.execute(
+            select(func.count()).select_from(DetectionCache).where(DetectionCache.status == "ok")
+        ).scalar_one()
+    finally:
+        db.close()
+
+    if total_sites == 0:
+        state = "no_sites_configured"
+    elif sites_attempted == 0:
+        state = "not_started"
+    elif sites_attempted < total_sites:
+        state = "in_progress"
+    else:
+        state = "complete"
+
     return {
         "service": "Gulf of Thailand Algal Bloom Monitor -- API",
         "docs": "/docs",
+        "first_refresh": {
+            "state": state,
+            "sites_attempted": sites_attempted,
+            "sites_with_usable_reading": sites_with_usable_reading,
+            "total_sites": total_sites,
+            "note": (
+                "sites_attempted counts sites the scheduler has reached; "
+                "sites_with_usable_reading counts those whose attempt returned "
+                "status='ok'. Sites not yet reached are reported as "
+                "status='no_data_yet' by /risk-map -- never as a risk level, "
+                "never with a placeholder value."
+            ),
+        },
         "endpoints": [
             "/risk-map",
             "/risk-map/{site_id}/image",

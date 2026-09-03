@@ -30,8 +30,32 @@ def get_summary(db: Session = Depends(get_db)) -> SummaryResponse:
     most_recent_dt = None
 
     for site, cache in rows:
+        # Three genuinely different situations, kept apart on purpose.
+        #
+        # 1. No cache row: the scheduler has not reached this site yet.
+        #    A loading state, not a finding about the water.
+        # 2. A cache row whose status is not 'ok': the site *was* read and
+        #    the read produced no usable value (cloud, no baseline, a failed
+        #    fetch). A real finding about a real attempt.
+        # 3. status == 'ok': a real reading, counted under its risk level.
+        #
+        # (2) previously fell through to `cache.level or "normal"` and was
+        # counted as a normal site -- reporting "normal" for water nothing
+        # could actually be read from.
         if cache is None:
-            counts.no_data += 1
+            counts.not_checked_yet += 1
+            continue
+
+        if cache.status != "ok":
+            counts.no_usable_data += 1
+            # A failed attempt is still an attempt: it has a real
+            # fetched_at and can be stale, so it keeps contributing to
+            # both, exactly as before this split.
+            if cache.stale:
+                stale_count += 1
+            fetched_at = as_aware_utc(cache.fetched_at)
+            if fetched_at is not None:
+                fetched_ats.append(fetched_at)
             continue
 
         level = cache.level or "normal"

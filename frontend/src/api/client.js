@@ -12,7 +12,23 @@
  */
 import axios from 'axios'
 
-const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+const DEV_FALLBACK_BASE_URL = 'http://localhost:8000'
+
+const baseURL = import.meta.env.VITE_API_BASE_URL || DEV_FALLBACK_BASE_URL
+
+// Runs once, at module import -- not per request. Without this, an unset
+// VITE_API_BASE_URL degrades silently to the localhost fallback and the
+// only symptom is a bare ERR_CONNECTION_REFUSED per call, which says
+// nothing about *why* the URL is localhost. Say both facts out loud.
+if (!import.meta.env.VITE_API_BASE_URL) {
+  console.warn(
+    `[api] VITE_API_BASE_URL is not set — falling back to ${DEV_FALLBACK_BASE_URL}. ` +
+      'A backend must be running there, or every API call fails with ' +
+      'ERR_CONNECTION_REFUSED. Start it with ./scripts/dev.sh (or ' +
+      'cd backend && uvicorn src.main:app --reload), or set ' +
+      'VITE_API_BASE_URL in frontend/.env — see frontend/.env.example.',
+  )
+}
 
 export const client = axios.create({ baseURL, timeout: 30000 })
 
