@@ -83,7 +83,7 @@ function makeAccessible(layer, label, onActivate) {
   })
 }
 
-export default function RiskMap({ featureCollection, onSelectSite = () => {}, mode = 'risk' }) {
+export default function RiskMap({ featureCollection, onSelectSite = () => {}, mode = 'risk', children }) {
   // Render strictly active alert tiers: เริ่มผิดปกติ (elevated), เฝ้าระวัง (watch), and เตือนภัย (warning)
   const features = useMemo(
     () =>
@@ -186,6 +186,7 @@ export default function RiskMap({ featureCollection, onSelectSite = () => {}, mo
           </Fragment>
         )
       })}
+      {children}
     </MapContainer>
   )
 }

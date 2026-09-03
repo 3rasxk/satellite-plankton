@@ -41,6 +41,11 @@ export async function getValidation() {
   return data
 }
 
+export async function getRegionalScan() {
+  const { data } = await client.get('/regional-scan')
+  return data
+}
+
 export async function getAlerts() {
   const { data } = await client.get('/api/alerts')
   return data

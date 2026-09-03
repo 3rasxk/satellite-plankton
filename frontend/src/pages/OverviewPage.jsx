@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useApi } from '../hooks/useApi.js'
-import { getRiskMap } from '../api/client.js'
+import { getRiskMap, getRegionalScan } from '../api/client.js'
 import RiskMap from '../components/RiskMap.jsx'
 import RiskLegend from '../components/RiskLegend.jsx'
 import MapControls from '../components/MapControls.jsx'
@@ -8,11 +8,14 @@ import SitePanel from '../components/SitePanel.jsx'
 import { MapOverlaySkeleton } from '../components/SkeletonLoader.jsx'
 import { formatThaiDate } from '../constants.js'
 import Icon from '../components/Icon.jsx'
+import RegionalScanLayer from '../components/RegionalScanLayer.jsx'
 
 export default function OverviewPage() {
   const { data, loading, error, refetch } = useApi(getRiskMap, [])
   const [mode, setMode] = useState('true_color')
   const [selectedSite, setSelectedSite] = useState(null)
+  const [showRegionalScan, setShowRegionalScan] = useState(false)
+  const { data: regionalScanData } = useApi(getRegionalScan, [], { enabled: showRegionalScan })
 
   const newestSceneDate = useMemo(() => {
     if (!data) return null
@@ -36,8 +39,19 @@ export default function OverviewPage() {
               featureCollection={data}
               mode={mode}
               onSelectSite={setSelectedSite}
-            />
+            >
+              {showRegionalScan && <RegionalScanLayer data={regionalScanData} />}
+            </RiskMap>
             <MapControls mode={mode} onModeChange={setMode} />
+            <button
+              type="button"
+              className="map-segmented-control glass"
+              style={{ position: 'absolute', top: 76, left: 16, zIndex: 500 }}
+              onClick={() => setShowRegionalScan((v) => !v)}
+              aria-pressed={showRegionalScan}
+            >
+              {showRegionalScan ? 'Hide regional scan' : 'Show regional scan'}
+            </button>
             <RiskLegend mode={mode} />
             {selectedSite && (
               <SitePanel site={selectedSite} onClose={() => setSelectedSite(null)} />
