@@ -31,28 +31,6 @@ router = APIRouter()
 CACHE_KEY_RISK_MAP = "api_risk_map_geojson"
 
 
-STATION_CALIBRATED_OVERLAY: dict[str, dict] = {
-    "bangsaen": {
-        "risk_level": "elevated",
-        "anomaly_z": 1.28,
-        "status": "ok",
-        "detected": True,
-        "index_used": "ndci",
-        "index_values": {"ndci": 0.142, "2bda": 1.25, "3bda": 1.18},
-        "actual_date": "2026-08-28",
-    },
-    "chaophraya_mouth": {
-        "risk_level": "watch",
-        "anomaly_z": 1.74,
-        "status": "ok",
-        "detected": True,
-        "index_used": "ndci",
-        "index_values": {"ndci": 0.218, "2bda": 1.84, "3bda": 1.62},
-        "actual_date": "2026-08-28",
-    },
-}
-
-
 def _cached_image_url(site_id: str, cache: DetectionCache | None, image_type: str) -> str | None:
     """None unless a live PNG blob is actually sitting in the cache row
     for this image_type -- never a URL that's already known to 404."""
@@ -114,16 +92,6 @@ async def get_risk_map(db: Session = Depends(get_db)) -> RiskMapResponse:
                 stale=cache.stale,
                 error=cache.error,
             )
-
-        if site.site_id in STATION_CALIBRATED_OVERLAY:
-            override = STATION_CALIBRATED_OVERLAY[site.site_id]
-            props.risk_level = override["risk_level"]
-            props.anomaly_z = override["anomaly_z"]
-            props.status = override["status"]
-            props.detected = override["detected"]
-            props.index_used = override["index_used"]
-            props.index_values = override["index_values"]
-            props.actual_date = override["actual_date"]
 
         features.append(
             RiskMapFeature(

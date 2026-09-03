@@ -9,6 +9,7 @@ export default function SatelliteImage({
   ndciHeatmapUrl,
   noImageMessage,
   sceneDate,
+  resolving = false,
 }) {
   const hasBoth = !!trueColorUrl && !!ndciHeatmapUrl
 
@@ -50,7 +51,11 @@ export default function SatelliteImage({
       </div>
 
       <div className="satellite-preview-container">
-        {!trueColorUrl && !ndciHeatmapUrl ? (
+        {resolving ? (
+          <div className="satellite-image-frame">
+            <p className="no-rules">กำลังค้นหาภาพถ่ายดาวเทียม… อาจใช้เวลาสักครู่ (ดึงข้อมูลจริงจาก Sentinel-2)</p>
+          </div>
+        ) : !trueColorUrl && !ndciHeatmapUrl ? (
           <div className="status-banner satellite-no-image">
             <strong>ไม่มีภาพถ่ายดาวเทียม</strong>
             <p>{noImageMessage || 'ไม่มีข้อมูลภาพถ่ายดาวเทียมที่ใช้งานได้สำหรับพิกัดนี้'}</p>

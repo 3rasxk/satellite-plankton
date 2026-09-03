@@ -89,3 +89,57 @@ satellite-data ──► bloom-detection
 - [ ] Web: map + click-to-chart + summary page
 - [ ] LIMITATIONS.md states the truth boundary; no percentage claims on n=14; no overclaiming
 - [ ] README reproducible from scratch
+
+## 7. Common commands
+
+Full setup from a clean clone (three Python venvs + frontend) is in `README.md` "Setup from a clean clone" — read it first if any of this fails. Quick reference:
+
+```bash
+# full dev stack: backend :8000 + frontend :5173, one Ctrl-C stops both
+./scripts/dev.sh
+
+# or run each by hand
+cd backend  && source venv/bin/activate && uvicorn src.main:app --reload
+cd frontend && npm run dev
+```
+
+Tests — three separate pytest suites, each with its own venv, no live GEE credentials required (GEE is mocked/bypassed at typed boundaries):
+
+```bash
+cd data-pipeline && ./venv/bin/python -m pytest tests/ -q   # 59 tests
+cd detection      && ./venv/bin/python -m pytest tests/ -q   # 50 tests
+cd backend        && ./venv/bin/python -m pytest tests/ -q   # 72 tests
+```
+
+Single test: `./venv/bin/python -m pytest tests/test_climatology.py::test_name -q` (run from the relevant subproject directory, with its venv active).
+
+Frontend lint/build (root `package.json` proxies the same scripts via an npm workspace, so these also work unprefixed from the repo root):
+
+```bash
+cd frontend && npm run lint     # oxlint — no Python formatter/linter is configured anywhere in this repo
+cd frontend && npm run build    # vite build
+cd frontend && npm run preview
+```
+
+Regenerate `detection/reports/*` from a live run (slow, needs real GEE auth):
+
+```bash
+cd detection && source venv/bin/activate && python src/generate_reports.py
+```
+
+## 8. Architecture: cross-project import bridges
+
+`data-pipeline/`, `detection/`, and `backend/` are separate projects with separate venvs by design (§5), but at runtime each imports the previous one's `src/` **directly**, via `importlib.util.spec_from_file_location` under a namespaced module name — not a package install. This is necessary because `data-pipeline/src` and `detection/src` are both literally named `src` and would collide in `sys.modules` under a plain import.
+
+- `detection/src/_data_pipeline.py` loads `data-pipeline/src/__init__.py` as `data_pipeline_src`, re-exporting `get_sentinel2_bands`, `get_modis_chlorophyll_history`, `get_modis_sst`, `get_rainfall_proxy`, `day_of_year_climatology`.
+- `backend/src/_detection.py` loads `detection/src/prediction.py` / `thresholds.py` as `detection_src_prediction` / `detection_src_thresholds`.
+
+Consequence: `detection/venv` and `backend/venv` each need the *full* transitive dependency chain installed directly (`earthengine-api`, `numpy`, `PyYAML`), even where the importing project's own `requirements.txt` doesn't list them — see each subproject's README "Cross-project import(s)" section.
+
+Request flow: frontend (React/Vite) → `backend/src/routers/*.py` → `backend/src/_detection.py` bridge → `detection/src/prediction.py`'s `detect()` / `risk_level()` → `detection/src/_data_pipeline.py` bridge → `data-pipeline/src` GEE calls. `backend/src/scheduler.py` runs this same chain on a timer (`SCHEDULER_INTERVAL_MINUTES`, default 360) for the fixed 6-site grid (`backend/src/grid.py`) and caches results — plus pre-rendered true-color/NDCI PNGs — in the `detection_cache` table; `/risk-map` and `/summary` read that cache and never call GEE live. `/detect` and `/satellite-image` call the chain live, on demand.
+
+DB defaults to local SQLite (`backend/data/app.db`, gitignored) via `backend/src/config.py`; swapping to Postgres/Supabase is a single `DATABASE_URL` env var — `src/db.py`/`src/db_models.py` never branch on which DB is in use beyond one SQLite-only `connect_args` line.
+
+## 9. Known inconsistency — do not extend without asking
+
+`backend/ensemble_service.py`, `backend/train_dual_models.py`, `backend/forecast_service.py`, and `backend/models/*.joblib` (a RandomForest + XGBoost soft-voting ensemble, trained via `sklearn`) exist in the tree — duplicated at repo root too (`ensemble_service.py`, `tests/test_ensemble_service.py`, etc.). `backend/src/main.py`'s startup hook (lines ~107-119) does **import** it — `from ensemble_service import DualModelBloomEnsemble`, retried as `from backend.ensemble_service import ...` — but that import sits **inside a failure-swallowing try/except** (it currently just logs `ML model preloading skipped or failed: No module named 'backend'` and continues), and it is **wired into no route and feeds no response**: nothing the API returns is ever produced by it. This directly contradicts §0/§1's locked "physics-based, not ML" decision and the explicit rejection of "supervised ML / trained classifier" in the decision table, for the reasons §0 gives (no usable Thai training labels in the public HAB databases). It was introduced in commit `b15af00` ("...integrate dual-model ensemble..."). Treat it as orphaned/experimental, not part of the shipped detection pipeline — do not wire it into the API or build on it without the human explicitly overriding §0/§1 first.
