@@ -14,10 +14,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import func, select
 
 from . import _detection as bridge
 from .db import SessionLocal, get_db, init_db  # noqa: F401  (get_db re-exported for routers/tests)
-from .db_models import ValidationEvent
+from .db_models import DetectionCache, MonitoredSite, ValidationEvent
 from .routers import alerts, detect, risk_map, satellite, satellite_image, summary, timeseries, validation
 from .scheduler import create_scheduler, ensure_monitored_sites
 
@@ -149,9 +150,55 @@ def gee_auth_error_handler(request, exc: bridge.GEEAuthError) -> JSONResponse:
 
 @app.get("/", tags=["meta"])
 def root() -> dict:
+    """Service metadata plus honest first-refresh progress.
+
+    `first_refresh` reports how far the scheduler's boot-time
+    refresh_grid pass has got, counted from real DetectionCache rows --
+    nothing here is estimated or synthesised. A caller can distinguish
+    "the server is up but the grid has not been read yet" from "the
+    grid has been read and this is genuinely all the data there is",
+    which the per-site statuses on /risk-map also express individually
+    (`no_data_yet` vs no_imagery/no_water_pixels/no_climatology/error).
+    """
+    db = SessionLocal()
+    try:
+        total_sites = db.execute(select(func.count()).select_from(MonitoredSite)).scalar_one()
+        # A cache row means the scheduler reached this site. Whether that
+        # attempt produced a usable reading is a separate question, so it
+        # is a separate number -- an attempted site with status != 'ok' is
+        # real data about a real failure, not a reading.
+        sites_attempted = db.execute(select(func.count()).select_from(DetectionCache)).scalar_one()
+        sites_with_usable_reading = db.execute(
+            select(func.count()).select_from(DetectionCache).where(DetectionCache.status == "ok")
+        ).scalar_one()
+    finally:
+        db.close()
+
+    if total_sites == 0:
+        state = "no_sites_configured"
+    elif sites_attempted == 0:
+        state = "not_started"
+    elif sites_attempted < total_sites:
+        state = "in_progress"
+    else:
+        state = "complete"
+
     return {
         "service": "Gulf of Thailand Algal Bloom Monitor -- API",
         "docs": "/docs",
+        "first_refresh": {
+            "state": state,
+            "sites_attempted": sites_attempted,
+            "sites_with_usable_reading": sites_with_usable_reading,
+            "total_sites": total_sites,
+            "note": (
+                "sites_attempted counts sites the scheduler has reached; "
+                "sites_with_usable_reading counts those whose attempt returned "
+                "status='ok'. Sites not yet reached are reported as "
+                "status='no_data_yet' by /risk-map -- never as a risk level, "
+                "never with a placeholder value."
+            ),
+        },
         "endpoints": [
             "/risk-map",
             "/risk-map/{site_id}/image",
