@@ -51,24 +51,6 @@ router = APIRouter()
 _CLIMATOLOGY_WINDOW_DAYS = 7
 
 
-import concurrent.futures
-
-
-def _generate_fallback_history(lat: float, lng: float) -> list[dict[str, Any]]:
-    import math
-    from datetime import date as dt_date, timedelta
-    today_dt = dt_date.today()
-    history: list[dict[str, Any]] = []
-    for i in range(120, -1, -1):
-        d = (today_dt - timedelta(days=i)).isoformat()
-        day_of_year = (today_dt - timedelta(days=i)).timetuple().tm_yday
-        seasonal = 3.2 + 1.2 * math.sin(2 * math.pi * (day_of_year - 80) / 365)
-        pseudo_rand = ((abs(hash((round(lat, 3), round(lng, 3), d))) % 1000) / 1000.0) - 0.5
-        val = round(max(0.6, seasonal + pseudo_rand * 0.8), 2)
-        history.append({"date": d, "chlor_a": val})
-    return history
-
-
 @router.get("/timeseries", response_model=TimeseriesResponse, tags=["detection"])
 async def get_timeseries(
     lat: float = Query(..., ge=-90, le=90),
@@ -76,13 +58,27 @@ async def get_timeseries(
 ) -> TimeseriesResponse:
     import asyncio
 
+    # Real, live GEE call -- no artificial timeout. A prior version of
+    # this endpoint wrapped the call in `asyncio.wait_for(..., timeout=0.6)`
+    # and, on ANY exception (including a real GEEAuthError) or timeout,
+    # silently substituted a fabricated sine-wave + hash-seeded series
+    # (`_generate_fallback_history`, now removed) that then flowed through
+    # real climatology/z-score math and was returned as an ordinary 200 --
+    # a direct violation of CLAUDE.md's "never catch-and-fabricate" rule,
+    # since a real GEE round trip genuinely takes several seconds to tens
+    # of seconds and would essentially always exceed 0.6s. As with
+    # routers/detect.py, `get_modis_chlorophyll_history` reports real
+    # "no data" conditions via its returned series (sparse/gappy, per its
+    # own docstring), not exceptions -- the only exception it documents is
+    # GEEAuthError, caught here only to translate it into a clear 503,
+    # never to hide it or substitute a fake reading.
     try:
-        history = await asyncio.wait_for(
-            asyncio.to_thread(bridge.get_modis_chlorophyll_history, lat, lng),
-            timeout=0.6,
+        history = await asyncio.to_thread(bridge.get_modis_chlorophyll_history, lat, lng)
+    except bridge.GEEAuthError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Google Earth Engine is not authenticated -- the pipeline is unusable: {exc}",
         )
-    except Exception:
-        history = _generate_fallback_history(lat, lng)
 
     points: list[TimeseriesPoint] = []
     for row in history:
