@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 from . import _detection as bridge
 from .db import SessionLocal, get_db, init_db  # noqa: F401  (get_db re-exported for routers/tests)
 from .db_models import ValidationEvent
-from .routers import alerts, detect, risk_map, satellite, satellite_image, summary, timeseries, validation
+from .routers import alerts, detect, regional_scan, risk_map, satellite, satellite_image, summary, timeseries, validation
 from .scheduler import create_scheduler, ensure_monitored_sites
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -56,6 +56,7 @@ app.include_router(satellite.router)
 app.include_router(satellite_image.router)
 app.include_router(summary.router)
 app.include_router(validation.router)
+app.include_router(regional_scan.router)
 
 _scheduler = None
 
@@ -154,5 +155,6 @@ def root() -> dict:
             "/satellite-image",
             "/summary",
             "/validation",
+            "/regional-scan",
         ],
     }

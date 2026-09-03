@@ -363,3 +363,61 @@ class ValidationResponse(DisclaimerMixin):
     events: list[ValidationEventRow]
     leave_one_out: list[LeaveOneOutRow]
     computed_at: str = Field(description="When this (cached) calibration attempt was computed.")
+
+
+# --------------------------------------------------------------------------
+# /regional-scan
+# --------------------------------------------------------------------------
+
+REGIONAL_SCAN_CAVEAT_TEXT = (
+    "This is a detection scan -- current anomaly state from real, live "
+    "Sentinel-2 readings across the full upper Gulf study-area polygon, "
+    "the same detect() pipeline /detect and /risk-map use. It is a "
+    "separate output from the unvalidated Ang Sila spatial-trend test "
+    "and must not be blurred together with it."
+)
+
+
+class RegionalScanPointSchema(BaseModel):
+    point_id: str
+    lat: float
+    lng: float
+    status: Literal["ok", "no_imagery", "no_water_pixels", "no_climatology", "error"]
+    index_values: dict[str, float] | None = None
+    anomaly_z: float | None = None
+    threshold_tier: Literal["elevated", "warning"] | None = None
+
+
+class RegionalScanClusterSchema(BaseModel):
+    centroid_lat: float
+    centroid_lng: float
+    cell_count: int
+    mean_anomaly_z: float
+    max_anomaly_z: float
+    threshold_tier: Literal["elevated", "warning"]
+    member_point_ids: list[str]
+
+
+class RegionalScanRunMeta(BaseModel):
+    run_id: int
+    started_at: str
+    completed_at: str | None
+    status: Literal["running", "ok", "partial_error", "error"]
+    grid_spacing_km: float
+    date_used: str
+    newest_scene_date: str | None
+    total_points: int
+    count_ok: int
+    count_no_imagery: int
+    count_no_water_pixels: int
+    count_no_climatology: int
+    count_error: int
+
+
+class RegionalScanResponse(DisclaimerMixin):
+    caveat: str = Field(default=REGIONAL_SCAN_CAVEAT_TEXT)
+    run: RegionalScanRunMeta | None = Field(
+        default=None, description="Null only if no regional scan has completed yet."
+    )
+    points: list[RegionalScanPointSchema] = []
+    clusters: list[RegionalScanClusterSchema] = []
