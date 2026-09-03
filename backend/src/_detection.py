@@ -144,6 +144,10 @@ get_ndci_heatmap = _data_pipeline_bridge.get_ndci_heatmap
 # to flag (never silently accept) a query outside the upper Gulf polygon.
 check_point_in_study_area = _data_pipeline_bridge.check_point_in_study_area
 
+# Sentinel-2 scene-freshness poll -- used by
+# backend/src/regional_scan/trigger.py's poll_and_maybe_scan().
+get_newest_scene_timestamp = _data_pipeline_bridge.get_newest_scene_timestamp
+
 # Pure function for computing an anomaly z-score -- reused (not
 # reimplemented) for /timeseries, same call climatology.py itself makes
 # for the single-date case in detect().
@@ -165,4 +169,5 @@ __all__ = [
     "get_true_color_image",
     "get_ndci_heatmap",
     "check_point_in_study_area",
+    "get_newest_scene_timestamp",
 ]

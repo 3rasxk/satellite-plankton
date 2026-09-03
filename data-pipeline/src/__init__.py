@@ -22,12 +22,16 @@ and other downstream consumers:
     check_point_in_study_area(lat, lng)    -- boundary check, see study_area.py
                                                (pure, no GEE call -- doesn't
                                                need auth to run)
+    get_newest_scene_timestamp(polygon_latlng, since_date)  -- Sentinel-2
+                                               scene-freshness poll, see
+                                               scene_poll.py
 """
 
 from .auth import GEEAuthError, initialize_ee
 from .imagery import get_ndci_heatmap, get_true_color_image
 from .modis import get_modis_chlorophyll_history, get_modis_sst
 from .rainfall import get_rainfall_proxy
+from .scene_poll import get_newest_scene_timestamp
 from .sentinel2 import (
     NoCloudFreeImageryError,
     NoWaterPixelsError,
@@ -48,4 +52,5 @@ __all__ = [
     "NoWaterPixelsError",
     "check_point_in_study_area",
     "STUDY_AREA_POLYGON_LATLNG",
+    "get_newest_scene_timestamp",
 ]

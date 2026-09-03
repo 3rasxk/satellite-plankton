@@ -119,6 +119,12 @@ get_ndci_heatmap = _dp.get_ndci_heatmap
 # bridge rather than a separate path into data-pipeline/src.
 check_point_in_study_area = _dp.check_point_in_study_area
 
+# Sentinel-2 scene-freshness poll (data-pipeline/src/scene_poll.py) --
+# added for backend-api's regional-scan event-driven trigger. Re-exported
+# purely as a pass-through, same reasoning as check_point_in_study_area
+# above.
+get_newest_scene_timestamp = _dp.get_newest_scene_timestamp
+
 # `day_of_year_climatology` is a pure function in data-pipeline/src/modis.py
 # whose own docstring says bloom-detection is "expected to build on this
 # rather than reimplement it" — re-exported here for src/climatology.py so
@@ -145,4 +151,5 @@ __all__ = [
     "get_true_color_image",
     "get_ndci_heatmap",
     "check_point_in_study_area",
+    "get_newest_scene_timestamp",
 ]
