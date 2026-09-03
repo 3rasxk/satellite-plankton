@@ -9,6 +9,7 @@ Run with: `uvicorn src.main:app --reload` from `backend/` (see README.md).
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,6 +24,48 @@ from .scheduler import create_scheduler, ensure_monitored_sites
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("backend.main")
 
+_scheduler = None
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Startup/shutdown, replacing the deprecated @app.on_event hooks.
+
+    Everything before the `yield` blocks the server from accepting
+    requests, so only work that every route depends on belongs here.
+    Measured at ~1.1s total, almost all of it the module import chain
+    (detection/src -> data-pipeline/src -> earthengine-api); the three
+    DB steps are ~0.01s each and are kept blocking deliberately -- every
+    router queries the tables they create and seed, so deferring them
+    would only trade 30ms for a window where routes hit missing tables.
+
+    The scheduler is started, not awaited: create_scheduler() returns a
+    BackgroundScheduler whose .start() hands its jobs to its own thread
+    pool and returns immediately. Its refresh_grid job fires at boot
+    (scheduler.py's next_run_time=now) and makes real, multi-second GEE
+    calls -- concurrently with serving, never blocking it. refresh_grid
+    commits per site, so /risk-map fills in site by site rather than
+    all at once; sites it has not reached yet report the honest
+    `no_data_yet` status, never a placeholder reading.
+    """
+    global _scheduler
+    logger.info("startup: init_db")
+    init_db()
+    logger.info("startup: ensure_monitored_sites")
+    ensure_monitored_sites()
+    logger.info("startup: seed_validation_events")
+    _seed_validation_events()
+
+    logger.info("startup: starting scheduler")
+    _scheduler = create_scheduler()
+    _scheduler.start()
+
+    yield
+
+    if _scheduler is not None:
+        _scheduler.shutdown(wait=False)
+
+
 app = FastAPI(
     title="Gulf of Thailand Algal Bloom Monitor -- API",
     description=(
@@ -32,6 +75,7 @@ app = FastAPI(
         "`disclaimer` field -- see CLAUDE.md's truth boundary."
     ),
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 # Local dev only: the frontend (frontend-dashboard agent) runs on Vite's
@@ -56,8 +100,6 @@ app.include_router(satellite.router)
 app.include_router(satellite_image.router)
 app.include_router(summary.router)
 app.include_router(validation.router)
-
-_scheduler = None
 
 
 def _seed_validation_events() -> None:
@@ -91,27 +133,6 @@ def _seed_validation_events() -> None:
         db.commit()
     finally:
         db.close()
-
-
-@app.on_event("startup")
-def on_startup() -> None:
-    global _scheduler
-    logger.info("startup: init_db")
-    init_db()
-    logger.info("startup: ensure_monitored_sites")
-    ensure_monitored_sites()
-    logger.info("startup: seed_validation_events")
-    _seed_validation_events()
-
-    logger.info("startup: starting scheduler")
-    _scheduler = create_scheduler()
-    _scheduler.start()
-
-
-@app.on_event("shutdown")
-def on_shutdown() -> None:
-    if _scheduler is not None:
-        _scheduler.shutdown(wait=False)
 
 
 @app.exception_handler(bridge.GEEAuthError)
