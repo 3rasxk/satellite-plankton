@@ -145,3 +145,68 @@ class ValidationCache(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
     computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     payload: Mapped[dict] = mapped_column(JSON)
+
+
+class RegionalScanRun(Base):
+    """One row per full-polygon regional-scan run (history kept -- small
+    rows, cheap). See docs/superpowers/specs/2026-08-31-regional-scan-design.md
+    §6. `newest_scene_date` is the max Sentinel-2 scene timestamp the
+    triggering poll considered -- read back by the next poll as its
+    comparison baseline (spec §5)."""
+
+    __tablename__ = "regional_scan_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String)  # running|ok|partial_error|error
+    grid_spacing_km: Mapped[float] = mapped_column(Float)
+    date_used: Mapped[str] = mapped_column(String)
+    newest_scene_date: Mapped[str | None] = mapped_column(String, nullable=True)
+    total_points: Mapped[int] = mapped_column(Integer)
+    count_ok: Mapped[int] = mapped_column(Integer, default=0)
+    count_no_imagery: Mapped[int] = mapped_column(Integer, default=0)
+    count_no_water_pixels: Mapped[int] = mapped_column(Integer, default=0)
+    count_no_climatology: Mapped[int] = mapped_column(Integer, default=0)
+    count_error: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class RegionalScanPoint(Base):
+    """Latest-run snapshot, upserted by `point_id` (not appended) --
+    same overwrite-latest convention as DetectionCache. No-data points
+    are stored with their real status, never omitted (spec §0/§6).
+    `point_id` is f"{row_idx}_{col_idx}" -- stable across runs at the
+    same grid spacing (backend/src/regional_scan/grid.py)."""
+
+    __tablename__ = "regional_scan_points"
+
+    point_id: Mapped[str] = mapped_column(String, primary_key=True)
+    lat: Mapped[float] = mapped_column(Float)
+    lng: Mapped[float] = mapped_column(Float)
+    row_idx: Mapped[int] = mapped_column(Integer)
+    col_idx: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String)  # ok|no_imagery|no_water_pixels|no_climatology|error
+    index_values: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    anomaly_z: Mapped[float | None] = mapped_column(Float, nullable=True)
+    threshold_tier: Mapped[str | None] = mapped_column(String, nullable=True)  # elevated|warning|null
+    run_id: Mapped[int] = mapped_column(ForeignKey("regional_scan_runs.id"))
+
+
+class RegionalScanCluster(Base):
+    """Latest-run snapshot -- deleted and reinserted whole each run
+    (unlike RegionalScanPoint's stable point_id, cluster membership can
+    change entirely between runs). Computed only over real, status='ok'
+    member cells by construction -- only already-flagged 'ok' points are
+    ever clustered (spec §4)."""
+
+    __tablename__ = "regional_scan_clusters"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("regional_scan_runs.id"))
+    centroid_lat: Mapped[float] = mapped_column(Float)
+    centroid_lng: Mapped[float] = mapped_column(Float)
+    cell_count: Mapped[int] = mapped_column(Integer)
+    mean_anomaly_z: Mapped[float] = mapped_column(Float)
+    max_anomaly_z: Mapped[float] = mapped_column(Float)
+    threshold_tier: Mapped[str] = mapped_column(String)  # elevated|warning
+    member_point_ids: Mapped[list] = mapped_column(JSON)

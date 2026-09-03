@@ -94,3 +94,13 @@ def today_str() -> str:
 # GEE on every /validation request -- the underlying events.csv/config.yaml
 # don't change on their own between requests.
 VALIDATION_CACHE_TTL_HOURS: int = int(os.environ.get("VALIDATION_CACHE_TTL_HOURS", "24"))
+
+# Regional bloom scan (docs/superpowers/specs/2026-08-31-regional-scan-design.md
+# §8). Same env-override convention as SCHEDULER_INTERVAL_MINUTES above.
+REGIONAL_SCAN_GRID_SPACING_KM: float = float(os.environ.get("REGIONAL_SCAN_GRID_SPACING_KM", "5"))
+REGIONAL_SCAN_POLL_INTERVAL_HOURS: int = int(os.environ.get("REGIONAL_SCAN_POLL_INTERVAL_HOURS", "3"))
+REGIONAL_SCAN_COOLDOWN_HOURS: int = int(os.environ.get("REGIONAL_SCAN_COOLDOWN_HOURS", "20"))
+# Lookback window for the poll's own Sentinel-2 metadata query (spec §5) --
+# bounds the filterDate() query cost; does not affect the cooldown/trigger
+# decision itself (that compares timestamps, not window length).
+REGIONAL_SCAN_POLL_LOOKBACK_DAYS: int = int(os.environ.get("REGIONAL_SCAN_POLL_LOOKBACK_DAYS", "10"))

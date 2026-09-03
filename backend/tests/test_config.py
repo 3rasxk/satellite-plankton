@@ -99,3 +99,23 @@ def test_as_aware_utc_passes_through_aware_datetime_unchanged():
 
 def test_as_aware_utc_none_returns_none():
     assert as_aware_utc(None) is None
+
+
+def test_regional_scan_config_defaults():
+    from src import config
+
+    assert config.REGIONAL_SCAN_GRID_SPACING_KM == 5.0
+    assert config.REGIONAL_SCAN_POLL_INTERVAL_HOURS == 3
+    assert config.REGIONAL_SCAN_COOLDOWN_HOURS == 20
+    assert config.REGIONAL_SCAN_POLL_LOOKBACK_DAYS == 10
+
+
+def test_regional_scan_tables_created(client):
+    from sqlalchemy import inspect
+
+    from src.db import engine
+
+    tables = inspect(engine).get_table_names()
+    assert "regional_scan_runs" in tables
+    assert "regional_scan_points" in tables
+    assert "regional_scan_clusters" in tables
