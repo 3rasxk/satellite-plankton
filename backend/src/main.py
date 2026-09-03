@@ -103,21 +103,6 @@ def on_startup() -> None:
     logger.info("startup: seed_validation_events")
     _seed_validation_events()
 
-    # Pre-load ML model ensemble once at application startup (Invariance check)
-    try:
-        from ensemble_service import DualModelBloomEnsemble
-        ensemble = DualModelBloomEnsemble()
-        if ensemble.is_ready():
-            logger.info("startup: Dual-Model Bloom Ensemble (XGBoost + Random Forest) successfully pre-loaded in memory.")
-    except Exception:
-        try:
-            from backend.ensemble_service import DualModelBloomEnsemble
-            ensemble = DualModelBloomEnsemble()
-            if ensemble.is_ready():
-                logger.info("startup: Dual-Model Bloom Ensemble (XGBoost + Random Forest) successfully pre-loaded in memory.")
-        except Exception as e:
-            logger.warning(f"startup: ML model preloading skipped or failed: {e}")
-
     logger.info("startup: starting scheduler")
     _scheduler = create_scheduler()
     _scheduler.start()
