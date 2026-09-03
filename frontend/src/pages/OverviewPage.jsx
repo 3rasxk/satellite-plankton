@@ -9,6 +9,7 @@ import { MapOverlaySkeleton } from '../components/SkeletonLoader.jsx'
 import { formatThaiDate } from '../constants.js'
 import Icon from '../components/Icon.jsx'
 import RegionalScanLayer from '../components/RegionalScanLayer.jsx'
+import RegionalScanBanner from '../components/RegionalScanBanner.jsx'
 
 export default function OverviewPage() {
   const { data, loading, error, refetch } = useApi(getRiskMap, [])
@@ -52,6 +53,7 @@ export default function OverviewPage() {
             >
               {showRegionalScan ? 'Hide regional scan' : 'Show regional scan'}
             </button>
+            {showRegionalScan && <RegionalScanBanner data={regionalScanData} />}
             <RiskLegend mode={mode} />
             {selectedSite && (
               <SitePanel site={selectedSite} onClose={() => setSelectedSite(null)} />

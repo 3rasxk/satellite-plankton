@@ -1397,6 +1397,56 @@ table.events-table td.mono {
   gap: 7px;
 }
 
+/* Regional-scan last-scanned/status banner -- absolute map overlay,
+   sibling to map-date-pill/RiskLegend/MapControls (RegionalScanBanner.jsx).
+   Reuses .validation-callout's box chrome (border/background/radius/
+   padding/layout) for the caveat + disclaimer text; only position/sizing
+   and the small status row below are new, per spec §10's "reuse an
+   existing pattern" instruction. */
+.regional-scan-banner {
+  position: absolute;
+  bottom: 14px;
+  right: 14px;
+  z-index: 1100;
+  width: min(360px, calc(100vw - 28px));
+  padding: 12px 14px;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(8px);
+}
+
+.regional-scan-banner .headline {
+  font-size: 13px;
+}
+
+.regional-scan-banner p {
+  font-size: 12px;
+}
+
+.regional-scan-banner-status-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.regional-scan-banner-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.regional-scan-banner-status-text {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.regional-scan-banner-status-text.is-error {
+  color: var(--status-error);
+  font-weight: 500;
+}
+
 .risk-legend {
   position: absolute;
   z-index: 500;
