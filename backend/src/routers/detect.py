@@ -74,8 +74,12 @@ async def get_detect(
             detail=f"Google Earth Engine is not authenticated -- the pipeline is unusable: {exc}",
         )
 
-    true_color_url = _satellite_image_url(lat, lng, date, "true_color")
-    ndci_heatmap_url = _satellite_image_url(lat, lng, date, "ndci_heatmap")
+    # Null unless status == 'ok' -- a second live render for a scene that
+    # already had no usable numeric reading would fail the same way (see
+    # DetectResponse.true_color_image_url's own docstring), so don't hand
+    # the frontend a URL guaranteed to 404.
+    true_color_url = _satellite_image_url(lat, lng, date, "true_color") if result["status"] == "ok" else None
+    ndci_heatmap_url = _satellite_image_url(lat, lng, date, "ndci_heatmap") if result["status"] == "ok" else None
 
     # Threshold context -- read live from config.yaml (via detection/src/
     # prediction.py's own load_config(), never a hardcoded copy), so a
