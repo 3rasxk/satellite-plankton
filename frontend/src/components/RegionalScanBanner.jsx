@@ -1,4 +1,11 @@
-import { formatRelativeTime } from '../constants.js'
+import {
+  formatRelativeTime,
+  formatIndexValue,
+  regionalIndexDomain,
+  REGIONAL_INDEX_RAMP_HEX,
+  REGIONAL_INDEX_LABEL,
+  REGIONAL_PRIMARY_INDEX,
+} from '../constants.js'
 
 /**
  * Last-scanned/status banner for the regional bloom scan layer
@@ -35,6 +42,17 @@ import { formatRelativeTime } from '../constants.js'
  * "system-health signal" pair, distinct from the --risk-* ramp, which
  * is exactly what a scan run's ok/error/partial_error status is.
  *
+ * Also carries the regional-scan layer's own legend and interim notice.
+ * RegionalScanLayer.jsx currently paints each pin by its primary spectral
+ * index value on the neutral --regional-index-* ramp, because no point of
+ * the latest run carries a `threshold_tier` (the anomaly cutoffs in
+ * detection/src/config.yaml are uncalibrated). RiskLegend.jsx describes
+ * the 6-site risk ramp and would be actively misleading if read as
+ * describing these pins, so the index ramp gets its own legend here,
+ * worded as an index value rather than a risk level. The interim notice
+ * is rendered only while this run really did produce no tier and no
+ * cluster -- it is checked against the response, not hard-coded.
+ *
  * Renders nothing when no regional scan has ever completed
  * (`data.run` is null) -- same null-guard convention as
  * RegionalScanLayer.jsx's own `if (!data?.run) return null`. Every
@@ -52,6 +70,17 @@ export default function RegionalScanBanner({ data }) {
   if (!data?.run) return null
 
   const { run, caveat, disclaimer } = data
+  const points = data.points || []
+  const clusters = data.clusters || []
+  // The interim notice is a claim about this run, so it is checked against
+  // this run rather than hard-coded: it holds only while the scan produced
+  // no threshold_tier and no cluster anywhere. The moment a point does
+  // clear a cutoff, the layer is showing a detection again and this line
+  // must not still say otherwise.
+  const spatialTriggerIdle =
+    clusters.length === 0 && points.every((p) => !p.threshold_tier)
+  const domain = regionalIndexDomain(points)
+  const primaryLabel = REGIONAL_INDEX_LABEL[REGIONAL_PRIMARY_INDEX]
   // completed_at is null while a scan is still running (or aborted before
   // finishing), so fall back to date_used -- never invent a timestamp.
   const lastScannedSource = run.completed_at || run.date_used
@@ -69,6 +98,28 @@ export default function RegionalScanBanner({ data }) {
           {STATUS_LABEL_TH[run.status] || run.status}
         </span>
       </div>
+      {spatialTriggerIdle && (
+        <p className="regional-scan-interim">index values only — no anomaly detection active</p>
+      )}
+      {domain && (
+        <div className="regional-scan-index-legend">
+          <span className="regional-scan-index-legend-title">
+            {primaryLabel} index value — not a risk level
+          </span>
+          <div className="regional-scan-index-legend-ramp" aria-hidden="true">
+            {REGIONAL_INDEX_RAMP_HEX.map((hex) => (
+              <span key={hex} style={{ background: hex }} />
+            ))}
+          </div>
+          <div className="regional-scan-index-legend-scale">
+            <span>{formatIndexValue(domain.min)}</span>
+            <span>{formatIndexValue(domain.max)}</span>
+          </div>
+          <span className="regional-scan-index-legend-note">
+            shaded across this scan&apos;s own 5th–95th percentile · hollow grey ring = no satellite pass
+          </span>
+        </div>
+      )}
       <p>{caveat}</p>
       <p>{disclaimer}</p>
     </div>

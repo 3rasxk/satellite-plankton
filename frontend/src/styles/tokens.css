@@ -58,6 +58,21 @@
   --no-data-line: #aeaeb2;
   --no-data-rgb: 174, 174, 178;
 
+  /* neutral sequential ramp for an *index value* (NDCI and friends) on the
+     regional-scan layer — low to high. It encodes the magnitude of a
+     spectral reading, NOT a risk tier: the regional scan's anomaly
+     cutoffs are uncalibrated and no point of the latest run carries a
+     threshold_tier, so painting those pins with --risk-* would publish a
+     risk claim the pipeline has not made. Deliberately outside both the
+     risk ramp and --accent, same reasoning as --no-data above. Mirrored
+     as literal hex in constants.js (REGIONAL_INDEX_RAMP_HEX) because
+     Leaflet cannot resolve custom properties — keep the two in sync. */
+  --regional-index-1: #dde5ee;
+  --regional-index-2: #b3c1d4;
+  --regional-index-3: #8497b3;
+  --regional-index-4: #586d8e;
+  --regional-index-5: #33445f;
+
   /* system-health signal (e.g. API connectivity pill) — deliberately
      distinct from --risk-*, which means chlorophyll-concentration tier
      only and must never be reused for decorative/status purposes. */

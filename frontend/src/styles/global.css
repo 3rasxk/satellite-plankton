@@ -1447,6 +1447,57 @@ table.events-table td.mono {
   font-weight: 500;
 }
 
+/* Interim notice + index-value legend inside the regional-scan banner
+   (RegionalScanBanner.jsx). The layer currently publishes spectral index
+   readings only, so it needs its own legend: RiskLegend.jsx describes the
+   6-site risk ramp and must not be read as describing these pins. The
+   ramp swatches use --regional-index-* (an index magnitude), never
+   --risk-*. */
+.regional-scan-interim {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.regional-scan-index-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 2px;
+}
+
+.regional-scan-index-legend-title {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.regional-scan-index-legend-ramp {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  height: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.regional-scan-index-legend-ramp span {
+  display: block;
+  height: 100%;
+}
+
+.regional-scan-index-legend-scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary);
+}
+
+.regional-scan-index-legend-note {
+  font-size: 10.5px;
+  line-height: 1.35;
+  color: var(--text-tertiary);
+}
+
 .risk-legend {
   position: absolute;
   z-index: 500;
