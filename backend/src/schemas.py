@@ -149,7 +149,7 @@ class RiskMapProperties(DisclaimerMixin):
     site_type: Literal["monitoring_grid"] = Field(
         default="monitoring_grid",
         description="Explicit, typed marker that this site is one of src/grid.py's "
-        "6 live-monitoring points, NOT a data/validation/events.csv historical event "
+        "7 live-monitoring points, NOT a data/validation/events.csv historical event "
         "-- some grid site names collide with (differently-coordinated) validated "
         "event location names, e.g. grid site 'chaam' ('Cha-am coast, Phetchaburi', "
         "12.75/100.05) vs. validated event th_004 ('Cha-am Coast, Phetchaburi', "

@@ -13,7 +13,7 @@ import {
 
 /**
  * Full-polygon regional bloom scan overlay (backend GET /regional-scan) --
- * a distinct layer from RiskMap.jsx's 6-site monitoring grid, per spec
+ * a distinct layer from RiskMap.jsx's 7-site monitoring grid, per spec
  * §0/§10: does not touch or replace that grid or any of its markers.
  * Renders real NDCI/2BDA/3BDA values in each pin's popup -- never a
  * colored dot with no data behind it (no-fabrication rule, §0).

@@ -21,7 +21,7 @@ renders and caches a true-color and an NDCI-heatmap PNG per site
 (`data-pipeline/src/imagery.py`, via `bridge.get_true_color_image`/
 `get_ndci_heatmap`), stored as BLOB columns on the same `DetectionCache`
 row (`true_color_png`/`ndci_heatmap_png`). This is a caching decision, not
-an on-demand one, specifically because this grid is small (6 sites),
+an on-demand one, specifically because this grid is small (7 sites),
 fixed, and already on a periodic refresh cycle -- unlike `/detect` and the
 new `/satellite-image` endpoint, which take an arbitrary caller-chosen
 lat/lng/date (an effectively unbounded key space with nothing sensible to
@@ -34,7 +34,7 @@ triples the round trip. Serving that live, per-request, from `/risk-map`
 sub-second endpoint into a multi-site, multi-second one on every poll,
 for imagery that does not change between Sentinel-2 revisits (~5 days)
 anyway. Paying that cost once per scheduler cycle (default every 6h) for
-6 sites (~12 extra image renders, roughly 30-90s added to the cycle,
+7 sites (~14 extra image renders, roughly 35-105s added to the cycle,
 which already runs in the background) and then serving cached bytes in
 milliseconds per request is the correct trade for this bounded set --
 mirrors exactly why the numeric fields are cached here at all.
@@ -59,7 +59,7 @@ import logging
 from datetime import datetime, timezone
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from . import _detection as bridge
@@ -73,6 +73,8 @@ from .services.cache_service import clear_cache
 
 logger = logging.getLogger("backend.scheduler")
 
+RETIRED_MONITORED_SITE_IDS = {"upper_gulf_open_water"}
+
 
 def _upsert_site(db: Session, site_id: str) -> None:
     if db.get(MonitoredSite, site_id) is None:
@@ -81,10 +83,12 @@ def _upsert_site(db: Session, site_id: str) -> None:
 
 
 def ensure_monitored_sites() -> None:
-    """Upsert MONITORED_GRID into monitored_sites. Called at app startup,
-    before the first scheduler run."""
+    """Sync configured sites and remove explicitly retired grid entries."""
     db = SessionLocal()
     try:
+        for site_id in RETIRED_MONITORED_SITE_IDS:
+            db.execute(delete(DetectionCache).where(DetectionCache.site_id == site_id))
+            db.execute(delete(MonitoredSite).where(MonitoredSite.site_id == site_id))
         for info in MONITORED_GRID:
             existing = db.get(MonitoredSite, info["site_id"])
             if existing is None:

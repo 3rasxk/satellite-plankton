@@ -6,7 +6,7 @@ GEE live on every /risk-map request in production shape").
 Also GET /risk-map/{site_id}/image -- serves this site's scheduler-cached
 PNG bytes (true_color_png/ndci_heatmap_png, see db_models.py and
 scheduler.py's "Satellite imagery" docstring section for why this bounded
-6-site grid is cached rather than rendered on demand). Like the main
+7-site grid is cached rather than rendered on demand). Like the main
 route, this never makes a live GEE call -- it is a DB blob read, so a 404
 here means "no cached image for this site right now" (scheduler hasn't
 run yet, last detection wasn't 'ok', or the image render itself failed

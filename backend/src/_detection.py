@@ -136,7 +136,7 @@ day_of_year_climatology = _data_pipeline_bridge.day_of_year_climatology
 # get_sentinel2_bands returns numeric bands for (same-scene guarantee, see
 # data-pipeline/src/imagery.py's module docstring). Used by
 # routers/satellite_image.py (on-demand, per lat/lng/date) and
-# scheduler.py (pre-rendered/cached for the 6-site monitored grid).
+# scheduler.py (pre-rendered/cached for the 7-site monitored grid).
 get_true_color_image = _data_pipeline_bridge.get_true_color_image
 get_ndci_heatmap = _data_pipeline_bridge.get_ndci_heatmap
 

@@ -17,9 +17,48 @@ from src import scheduler as scheduler_module
 from src.config import as_aware_utc
 from src.db import SessionLocal
 from src.db_models import DetectionCache, MonitoredSite
-from src.scheduler import refresh_one_site
+from src.scheduler import ensure_monitored_sites, refresh_one_site
 
 _TEST_SITE_ID = "pytest_scheduler_failure_site"
+
+
+def test_ensure_monitored_sites_removes_retired_upper_gulf_site(client):
+    retired_id = "upper_gulf_open_water"
+    db = SessionLocal()
+    try:
+        retired = db.get(MonitoredSite, retired_id)
+        if retired is None:
+            retired = MonitoredSite(
+                site_id=retired_id, name="Retired regional reference", lat=13.0, lng=100.7
+            )
+            db.add(retired)
+        if db.get(DetectionCache, retired_id) is None:
+            db.add(DetectionCache(
+                site_id=retired_id,
+                target_date="2026-09-05",
+                status="ok",
+                detected=None,
+                spatial_anomaly_z=None,
+                index_used="ndci",
+                index_values={"ndci": 0.04},
+                level=None,
+                triggered_rules=[],
+                actual_date="2026-09-02",
+            ))
+        db.commit()
+    finally:
+        db.close()
+
+    ensure_monitored_sites()
+
+    db = SessionLocal()
+    try:
+        assert db.get(MonitoredSite, retired_id) is None
+        assert db.execute(
+            select(DetectionCache).where(DetectionCache.site_id == retired_id)
+        ).scalar_one_or_none() is None
+    finally:
+        db.close()
 
 
 def _good_cache_fields(fetched_at: datetime) -> dict:

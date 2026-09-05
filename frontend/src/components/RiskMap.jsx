@@ -11,6 +11,7 @@ import {
   formatSiteName,
 } from '../constants.js'
 import { MAP_BOUNDS, syncMinimumBoundsZoom } from '../utils/mapBounds.js'
+import { selectMapFeatures } from '../utils/mapFeatures.js'
 
 const UPPER_GULF_CENTER = [13.1, 100.6]
 const UPPER_GULF_ZOOM = 9
@@ -84,15 +85,10 @@ function makeAccessible(layer, label, onActivate) {
 }
 
 export default function RiskMap({ featureCollection, onSelectSite = () => {}, mode = 'risk', children }) {
-  // Render strictly active alert tiers: เริ่มผิดปกติ (elevated), เฝ้าระวัง (watch), and เตือนภัย (warning)
+  // Every configured monitoring site stays visible. Alert colours remain
+  // reserved for evaluated tiers; null risk uses the neutral marker below.
   const features = useMemo(
-    () =>
-      (featureCollection?.features || []).filter(
-        (f) =>
-          f.properties.risk_level === 'elevated' ||
-          f.properties.risk_level === 'watch' ||
-          f.properties.risk_level === 'warning',
-      ),
+    () => selectMapFeatures(featureCollection?.features || []),
     [featureCollection],
   )
 

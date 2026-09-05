@@ -16,7 +16,7 @@ deterministically (data-pipeline/src/imagery.py's "same-scene guarantee",
 extended through this HTTP layer, per .claude/agents/backend-api.md's
 brief for this endpoint).
 
-Deliberately NOT cached, unlike /risk-map's fixed 6-site grid (see
+Deliberately NOT cached, unlike /risk-map's fixed 7-site grid (see
 scheduler.py): lat/lng/date here is caller-chosen and effectively
 unbounded (any point, any date) -- there is no small, enumerable key space
 worth pre-rendering, the same reasoning /detect itself already applies to

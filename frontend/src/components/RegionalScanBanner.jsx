@@ -13,7 +13,7 @@ import {
  * that RegionalScanLayer.jsx's pins/clusters belong to.
  *
  * Deliberately separate from the existing `map-date-pill` in
- * OverviewPage.jsx, which describes `/risk-map`'s 6-site data and is
+ * OverviewPage.jsx, which describes `/risk-map`'s 7-site data and is
  * left untouched. Per spec §7, the regional detection scan and the
  * unvalidated Ang Sila spatial-trend test "must never be blurred
  * together in the response or the frontend" -- this banner exists so
@@ -47,7 +47,7 @@ import {
  * index value on the neutral --regional-index-* ramp, because no point of
  * the latest run carries a `threshold_tier` (the anomaly cutoffs in
  * detection/src/config.yaml are uncalibrated). RiskLegend.jsx describes
- * the 6-site risk ramp and would be actively misleading if read as
+ * the 7-site risk ramp and would be actively misleading if read as
  * describing these pins, so the index ramp gets its own legend here,
  * worded as an index value rather than a risk level. The interim notice
  * is rendered only while this run really did produce no tier and no

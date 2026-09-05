@@ -18,7 +18,7 @@ SQLAlchemy ORM models. Four tables:
                     pre-rendered true-color/NDCI-heatmap PNG bytes
                     (`true_color_png`/`ndci_heatmap_png`) refreshed on the
                     same cycle -- see scheduler.py for why this bounded
-                    6-site grid is cached rather than rendered on demand.
+                    7-site grid is cached rather than rendered on demand.
 - ValidationEvent   mirrors data/validation/events.csv (14 rows), upserted
                     read-only at startup from that file. Not editable via
                     any API route -- events.csv is the single source of
@@ -94,7 +94,7 @@ class DetectionCache(Base):
     # -- pre-rendered satellite imagery (scheduler-cached, see scheduler.py
     # _refresh_images) -- PNG bytes of the same resolved Sentinel-2 scene
     # `actual_date`/`cloud_fraction` above describe (data-pipeline/src/
-    # imagery.py's same-scene guarantee). Only this monitored 6-site grid
+    # imagery.py's same-scene guarantee). Only this monitored 7-site grid
     # gets images pre-rendered and cached this way; /detect and
     # /satellite-image render on demand instead -- see scheduler.py's
     # docstring / the backend-api build report for the latency reasoning
