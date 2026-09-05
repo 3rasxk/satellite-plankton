@@ -7,41 +7,16 @@
 # is hard-coded in either module.
 #
 # ---------------------------------------------------------------------
-# CALIBRATION STATUS -- read this before trusting any number below.
-# Updated 2026-09-05, after the water-mask fix (see LIMITATIONS.md 5).
+# CALIBRATION STATUS — anomaly scoring disabled, 2026-09-05.
+# Sentinel-2 indices cannot be standardized against MODIS chlor_a:
+# their units differ. No valid index baseline exists yet, so all 14
+# events and every leave-one-out unit cannot be evaluated.
+# th_010 supplies real indices, not an anomaly score or a hit/miss result.
+# Its n=1, karenia_sp and ETOPO1 near-shore reading qualifiers remain;
+# see LIMITATIONS.md 1.
+# Numeric cutoffs below are inactive historical convention placeholders.
+# calibrated_* remains null pending a valid statistic and calibration.
 # ---------------------------------------------------------------------
-# docs/DETECTION_PLAN.md 4 calls for thresholds calibrated by sweeping
-# against the 14 documented Thai events (leave-one-out). This still
-# cannot be done. 1 of the 14 now produces a real satellite reading;
-# 13 cannot, for verified reasons:
-#   - 7 have no coordinate in any source (named place / province only;
-#     this project does not invent one).
-#   - th_003 (2009), th_008 (2010), th_012 (1981), th_014 (1983)
-#     predate Sentinel-2's 2015-06-23 launch.
-#   - th_004 (2016-01, Cha-am): zero Sentinel-2 scenes for the whole
-#     recorded month -- an early-era coverage gap.
-#   - th_006 (2019-08-27, Koh Loy): 20 real candidates, all cloud-
-#     rejected -- genuine monsoon cover.
-#
-# th_010 (Ang Sila) was listed here until 2026-09-05 as failing the JRC
-# land/water mask, described as "a real near-shore/pier site
-# characteristic". That was wrong -- it was the defect fixed in
-# LIMITATIONS.md 5, and the report quoted the defect's own error string
-# as its evidence. It now returns a real reading with strongly negative
-# z-scores. It does not calibrate anything: n=1, the species is
-# karenia_sp rather than the Noctiluca the B2/B3 feature targets, and
-# the reading exists only via the ETOPO1 fallback over a buffer whose
-# bands look like a turbid pier strip.
-#
-# One matched pair is not a calibration set. The z-score cutoffs below
-# remain LITERATURE/CONVENTION DEFAULTS (the illustrative shape from
-# docs/DETECTION_PLAN.md 3 and .claude/agents/bloom-detection.md 5),
-# not values calibrated against Thai data. A `calibrated_*` sibling key
-# is included per threshold, explicitly `null`, so the shape is ready
-# for a real value the moment enough matched pairs exist -- but no
-# number is forced out of insufficient data now. This is a limitation
-# to state plainly, not to paper over -- see
-# detection/reports/event_table.md and index_comparison.md.
 
 indices:
   primary: ndci            # docs/DETECTION_PLAN.md §2: NDCI is the primary chlorophyll proxy
@@ -52,41 +27,16 @@ climatology:
   window_days: 7            # +/- days around target day-of-year pooled across all MODIS archive years
   min_reliable_n: 5         # below this many pooled observations, climatology.py flags reliable=false
 
-# Anomaly z-score cutoffs per compared index. UNCALIBRATED (see status
-# note above) -- carried over from the illustrative shape in
-# docs/DETECTION_PLAN.md §3 / .claude/agents/bloom-detection.md §5.
-# Sensitivity is biased up-front (lower cutoff, i.e. more sensitive) per
-# the stated early-warning principle "a missed bloom costs more than a
-# false alarm" (docs/DETECTION_PLAN.md §4) -- since there was no real
-# false-alarm-rate data to trade this off against, erring toward
-# sensitivity was the only defensible default.
-#
-# Shape note (added 2026-08-22, re-run after 7 events gained real
-# coordinates -- see CALIBRATION STATUS above): `elevated_z`/`warning_z`
-# remain plain scalar floats -- this is the field prediction.py's
-# detect()/risk_level() and thresholds.py's leave_one_out() read at
-# runtime (`config["thresholds"][index]["elevated_z"]`), unchanged, so
-# nothing downstream (backend/frontend) needs to know about the new
-# fields below. `literature_default_*` records the same convention value
-# the operating field currently equals, named explicitly so it stays
-# recoverable even after a future real calibration overwrites
-# `elevated_z`/`warning_z`. `calibrated_*` is the value this run's
-# leave-one-out calibration would have produced -- explicitly `null`
-# here because 1 of 14 events has produced a real reading and one pair
-# is not a calibration set (see CALIBRATION STATUS above), not because
-# the field was forgotten. When a
-# future run does produce a real matched subset, the intended convention
-# is: `calibrated_*` gets the real number, `elevated_z`/`warning_z` (the
-# operating value) is updated to match it, and `literature_default_*` is
-# left untouched as the permanent historical reference -- never
-# overwritten, never deleted.
+# Inactive historical cutoff shape retained for future calibration.
+# No entry supplies a valid baseline, and none is currently applied to
+# Sentinel-2 index values. calibrated_* must remain null.
 thresholds:
   ndci:
     elevated_z: 1.5
     warning_z: 2.0
     literature_default_elevated_z: 1.5
     literature_default_warning_z: 2.0
-    calibrated_elevated_z: null   # no matched subset this run -- see CALIBRATION STATUS above
+    calibrated_elevated_z: null   # no valid statistic or calibration
     calibrated_warning_z: null
   2bda:
     elevated_z: 1.5
@@ -103,16 +53,8 @@ thresholds:
     calibrated_elevated_z: null
     calibrated_warning_z: null
     note: >
-      Carried the same default cutoffs as ndci/2bda pending real
-      calibration data -- docs/DETECTION_PLAN.md §2 expects 3BDA to
-      perform differently (better) near river mouths specifically
-      because it corrects for sediment backscatter, so this index most
-      needs recalibration once real event coordinates exist. Of the 7
-      newly-coordinate events, th_003/th_008/th_012 ARE river-mouth
-      events (Tha Chin) -- exactly the case 3BDA is meant for -- but all
-      three predate Sentinel-2 or hit a MODIS archive gap this run (see
-      CALIBRATION STATUS above), so this recalibration still could not
-      be attempted with real data.
+      Historical convention placeholders only; no valid index anomaly
+      statistic or Thai event calibration exists yet.
 
 # cell_count handling (data/validation/CALIBRATION_NOTES.md §5): stored in
 # events.csv as a blank, a single number, or a literal range string like
@@ -137,7 +79,7 @@ cell_count_range_policy: midpoint
 # Same-episode cluster hold-out grouping for leave-one-out calibration
 # (data/validation/CALIBRATION_NOTES.md §1). Each cluster's rows are
 # held out together as one unit, never split, turning 14 events into
-# 12 leave-one-out iterations (10 singles + 2 clusters).
+# 11 leave-one-out iterations (9 singles + 2 clusters).
 leave_one_out_clusters:
   chonburi_aug2019:
     members: [th_005, th_006, th_007]
@@ -169,18 +111,18 @@ historical_low_weight_events: [th_012, th_013, th_014]
 # ---------------------------------------------------------------------
 escalation_rules:
   elevated:
-    description: "Chlorophyll anomaly is at least 1.5 standard deviations above the seasonal norm."
+    description: "Inactive: requires a valid spatial anomaly statistic, which is not computed."
     conditions:
-      - "anomaly_z >= 1.5"
+      - "spatial_anomaly_z >= 1.5"
   watch:
-    description: "Anomaly is elevated AND the 14-day trend is rising."
+    description: "Inactive: requires a valid spatial anomaly statistic and a rising 14-day trend."
     conditions:
-      - "anomaly_z >= 1.5"
+      - "spatial_anomaly_z >= 1.5"
       - "trend_14d_rising == true"
   warning:
-    description: "Anomaly has reached 2.0 std above normal AND the 14-day trend is rising AND sea surface temperature is above its seasonal normal (warm water favours dinoflagellate growth, docs/DETECTION_PLAN.md §3)."
+    description: "Inactive: requires a valid spatial anomaly statistic, a rising 14-day trend and SST above its seasonal normal."
     conditions:
-      - "anomaly_z >= 2.0"
+      - "spatial_anomaly_z >= 2.0"
       - "trend_14d_rising == true"
       - "sst_anomaly > 0"
 

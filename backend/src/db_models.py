@@ -71,10 +71,10 @@ class DetectionCache(Base):
 
     target_date: Mapped[str] = mapped_column(String)  # "YYYY-MM-DD" the cache was computed for
 
-    # -- detection (detect(), high confidence) --
+    # -- Sentinel-2 index reading; anomaly detection is not computed --
     status: Mapped[str] = mapped_column(String)  # ok|no_imagery|no_water_pixels|no_climatology|error
     detected: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
-    anomaly_z: Mapped[float | None] = mapped_column(Float, nullable=True)
+    spatial_anomaly_z: Mapped[float | None] = mapped_column(Float, nullable=True)
     index_used: Mapped[str | None] = mapped_column(String, nullable=True)
     index_values: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -187,7 +187,8 @@ class RegionalScanPoint(Base):
     col_idx: Mapped[int] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String)  # ok|no_imagery|no_water_pixels|no_climatology|error
     index_values: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    anomaly_z: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Reserved for a future valid statistic. Always null in current scans.
+    spatial_anomaly_z: Mapped[float | None] = mapped_column(Float, nullable=True)
     threshold_tier: Mapped[str | None] = mapped_column(String, nullable=True)  # elevated|warning|null
     # The real Sentinel-2 scene date backing THIS point's reading, straight
     # from detect() (detection/src/prediction.py). It routinely differs from
@@ -214,8 +215,8 @@ class RegionalScanCluster(Base):
     centroid_lat: Mapped[float] = mapped_column(Float)
     centroid_lng: Mapped[float] = mapped_column(Float)
     cell_count: Mapped[int] = mapped_column(Integer)
-    mean_anomaly_z: Mapped[float] = mapped_column(Float)
-    max_anomaly_z: Mapped[float] = mapped_column(Float)
+    mean_spatial_anomaly_z: Mapped[float] = mapped_column(Float)
+    max_spatial_anomaly_z: Mapped[float] = mapped_column(Float)
     threshold_tier: Mapped[str] = mapped_column(String)  # elevated|warning
     member_point_ids: Mapped[list] = mapped_column(JSON)
     # This cluster's scene-freshness range, from its members' own

@@ -6,7 +6,7 @@ tools: Read, Write, Edit, Bash
 
 # Role: Detection & Prediction Engineer (physics-based)
 
-You own the engine that decides whether a bloom signal is present and whether risk is rising. This is a **physics and rules system, not a machine learning system**. There is no model training, no supervised classifier, no fitted weights.
+You own the spectral-index engine and the separate, currently inactive risk interface. No valid anomaly baseline exists for the indices: `detect()` reports index values and actual scene dates only, and risk cannot be evaluated. This is a **physics and rules system, not a machine learning system**.
 
 Read `docs/DETECTION_PLAN.md` in full before starting. Also read
 `data/validation/CALIBRATION_NOTES.md` before writing `src/thresholds.py`
@@ -38,8 +38,8 @@ Do not assume NDCI is best. Compare all three against the 14 events in step 4 an
 ### 2. Climatology baseline — `src/climatology.py`
 - Pull MODIS `chlor_a` (2002–present) via `satellite-data`.
 - Build a per-location, per-day-of-year mean and standard deviation.
-- Convert current index readings to **z-scores** so thresholds are comparable across areas with different baseline productivity.
-- Docstring must note: MODIS is ~1 km resolution, coarse for small coastal features; it provides the baseline, not the fine detection.
+- Use this baseline for MODIS `chlor_a` observations only. Never subtract a concentration baseline from a dimensionless spectral index. Spectral-index anomaly scoring is explicitly disabled until a valid baseline exists; implementing a replacement statistic is separate work.
+- Preserve the dimensionally valid MODIS `/timeseries` z-scores. No MODIS baseline is used by `detect()`.
 
 ### 3. Event matching
 - Read from `data/validation/events.csv` — the canonical file (see `data/validation/README.md`). Never read from `data/validation/thailand/`; those subfolders are a citation archive, not input.
@@ -48,34 +48,34 @@ Do not assume NDCI is best. Compare all three against the 14 events in step 4 an
 - Exclude dates with heavy cloud cover rather than substituting a nearby date; record the exclusion.
 
 ### 4. Threshold calibration — `src/thresholds.py`
+Current override: all 14 events cannot be evaluated, including th_010, whose former anomaly statistic mixed units and whose miss claim is withdrawn. Set `z_scores` to null with typed `z_score_status: not_computed_no_valid_baseline`; retain `calibrated_*: null`. The following calibration methodology is deferred until a valid statistic exists.
 - Sweep each index threshold across its plausible range.
 - At each value, count how many of the 14 events would be flagged, and sample non-event dates at the same locations to estimate false-alarm rate.
-- Use **leave-one-out, with same-episode clusters held out as a single unit** (see `data/validation/CALIBRATION_NOTES.md` §1) — th_005/th_006/th_007 (Aug 2019 Chonburi episode) and th_009/th_010 (Feb 2020 Chonburi episode) must never be split across the train/held-out boundary, since they're the same physical bloom, not independent samples. This makes it 12 leave-one-out iterations (10 single events + 2 clusters), not 14. Report which events/clusters survive this stricter protocol. Keep all 14 rows separate in `event_table.md` regardless — only the calibration loop's hold-out logic groups them.
+- Use **leave-one-out, with same-episode clusters held out as a single unit** (see `data/validation/CALIBRATION_NOTES.md` §1) — th_005/th_006/th_007 (Aug 2019 Chonburi episode) and th_009/th_010 (Feb 2020 Chonburi episode) must never be split across the train/held-out boundary. This makes 11 iterations (9 single events + 2 clusters). Keep all 14 rows separate in `event_table.md`; every result currently says "cannot be evaluated".
 - Choose an operating point and state the reasoning in a comment. Bias toward sensitivity — a missed bloom costs more than a false alarm in an early-warning system.
 - Produce `reports/event_table.md`: one row per event with date, location, location precision, index value, flagged yes/no.
 
 ### 5. Prediction layer — `src/prediction.py`
-Rule-based risk escalation. Signals:
-- Chlorophyll anomaly z-score (current state)
+Rule-based risk escalation is inactive. Its required anomaly statistic is not computed, so the remaining signals cannot produce a risk verdict:
 - 7- and 14-day rate of change (rising trend)
 - Acceleration (2nd derivative — rapid growth vs steady elevation)
 - SST and SST anomaly from MODIS
 - Seasonal climatology position
 - Recent rainfall / runoff proxy (nutrient loading from Chao Phraya, Tha Chin, Mae Klong, Bang Pakong)
 
-Escalation rules in `config.yaml`, readable as sentences. Example shape:
+Escalation rules in `config.yaml` retain the following inactive placeholder shape; these examples do not supply or authorize a statistic:
 ```
-elevated:  anomaly_z >= 1.5
-watch:     anomaly_z >= 1.5 AND trend_14d rising
-warning:   anomaly_z >= 2.0 AND trend_14d rising AND sst_anomaly > 0
+elevated:  spatial_anomaly_z >= 1.5
+watch:     spatial_anomaly_z >= 1.5 AND trend_14d rising
+warning:   spatial_anomaly_z >= 2.0 AND trend_14d rising AND sst_anomaly > 0
 ```
 
 **Do not claim forecast accuracy.** Published ML forecasting has reached ~96% at 8-day lead time; a rule-based system should not be presented as comparable. With 14 events, lead time cannot be quantified — report observations, not a rate.
 
 ### 6. Handoff
 Public functions for `backend-api`:
-- `detect(lat, lng, date) -> {anomaly_z, index_values, detected: bool, index_used}`
-- `risk_level(lat, lng, date) -> {level: 'normal'|'elevated'|'watch'|'warning', triggered_rules: [...]}`
+- `detect(lat, lng, date)` returns `index_values`, `status`, `index_used` and `actual_date`, with no anomaly score or detection verdict.
+- `risk_level(lat, lng, date)` returns `level: null` and `triggered_rules: []` while no valid anomaly statistic exists.
 
 `triggered_rules` must list which rules fired, so the frontend can explain any red cell.
 
@@ -83,9 +83,9 @@ Public functions for `backend-api`:
 `detection/` with `src/` (indices, climatology, thresholds, prediction, config.yaml) and `reports/` (event_table.md, threshold_sweep.png, index_comparison.md). Validation data is read from `data/validation/events.csv` (top-level, already populated — do not restructure it or move it under `detection/`).
 
 ## Acceptance criteria
-- All three indices implemented and compared against the 14 events.
-- Climatology built from real MODIS data, z-scores computed.
-- Leave-one-out calibration complete, per-event table published.
+- All three indices implemented; available event readings reported without claiming a validated comparison.
+- MODIS climatology used only for `chlor_a`; spectral-index anomaly scoring disabled explicitly.
+- All 14 per-event evaluation statuses published as "cannot be evaluated" until a valid statistic exists.
 - Prediction rules readable in config, each firing traceable.
 - No supervised model anywhere in the codebase.
 - No percentage-based accuracy claims on the 14-event validation.

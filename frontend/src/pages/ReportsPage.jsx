@@ -34,7 +34,7 @@ export default function ReportsPage() {
       id: 'raw_csv',
       icon: 'chart',
       title: 'ข้อมูลค่าอ่านล่าสุด (CSV)',
-      detail: 'ค่า NDCI, anomaly z-score, risk level ของทุกจุดตรวจวัด',
+      detail: 'ค่า NDCI และสถานะข้อมูลรายจุด — ยังไม่มีค่าความผิดปกติที่ถูกต้อง',
       action: 'ดาวน์โหลด CSV',
     },
     {

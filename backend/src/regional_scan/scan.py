@@ -1,10 +1,10 @@
 """
 Regional scan orchestration (spec §2/§3/§4/§9): run_scan() generates the
-grid (backend/src/regional_scan/grid.py), calls detect() unchanged
+grid (backend/src/regional_scan/grid.py), calls detect()
 (detection/src/prediction.py, via backend/src/_detection.py) for every
-point, tiers each 'ok' point against config.yaml's elevated_z/warning_z
-cutoffs (the same cutoffs risk_level() uses -- no new numbers), clusters
-the flagged points, and persists a latest-run snapshot.
+point, and persists real spectral indices and scene dates. No valid
+anomaly baseline exists yet, so every score/tier is null and no point
+can be sent to clustering.
 
 GEEAuthError aborts the entire run (status='error') without touching
 whatever RegionalScanPoint/RegionalScanCluster rows a prior successful
@@ -30,17 +30,6 @@ from .clustering import cluster_points
 from .grid import generate_scan_grid
 
 logger = logging.getLogger("backend.regional_scan.scan")
-
-
-def _tier(anomaly_z: float, index_used: str, config: dict) -> str | None:
-    """'warning' | 'elevated' | None, per config.yaml's thresholds --
-    same cutoffs risk_level() reads, no new numbers (spec §3)."""
-    index_thresholds = config["thresholds"][index_used]
-    if anomaly_z >= index_thresholds["warning_z"]:
-        return "warning"
-    if anomaly_z >= index_thresholds["elevated_z"]:
-        return "elevated"
-    return None
 
 
 def run_scan(
@@ -80,8 +69,6 @@ def run_scan(
     db.commit()
     db.refresh(run)
 
-    config = bridge.load_prediction_config()
-    flagged_for_clustering: list[dict] = []
     counts = {"ok": 0, "no_imagery": 0, "no_water_pixels": 0, "no_climatology": 0, "error": 0}
 
     try:
@@ -96,7 +83,7 @@ def run_scan(
                     point["point_id"], type(exc).__name__, exc,
                 )
                 result = {
-                    "status": "error", "detected": False, "anomaly_z": None,
+                    "status": "error",
                     "index_used": None, "index_values": None,
                     "reason": f"{type(exc).__name__}: {exc}",
                 }
@@ -104,16 +91,12 @@ def run_scan(
             status = result["status"]
             counts[status] = counts.get(status, 0) + 1
 
-            tier = None
-            if status == "ok" and result["anomaly_z"] is not None:
-                tier = _tier(result["anomaly_z"], result["index_used"], config)
-
             existing = db.get(RegionalScanPoint, point["point_id"])
             fields = dict(
                 lat=point["lat"], lng=point["lng"],
                 row_idx=point["row_idx"], col_idx=point["col_idx"],
                 status=status, index_values=result.get("index_values"),
-                anomaly_z=result.get("anomaly_z"), threshold_tier=tier,
+                spatial_anomaly_z=None, threshold_tier=None,
                 # Per-point scene date from detect(), not the run's target
                 # date -- .get() because the per-point error dict built
                 # above carries no scene at all (stays null).
@@ -126,20 +109,6 @@ def run_scan(
                 for key, value in fields.items():
                     setattr(existing, key, value)
 
-            if status == "ok" and tier is not None:
-                flagged_for_clustering.append(
-                    {
-                        "point_id": point["point_id"], "lat": point["lat"], "lng": point["lng"],
-                        "row_idx": point["row_idx"], "col_idx": point["col_idx"],
-                        "anomaly_z": result["anomaly_z"], "threshold_tier": tier,
-                        # Adjacency alone decides membership, so a cluster can
-                        # merge cells backed by scenes days apart. Carrying each
-                        # member's own scene date in lets cluster_points report
-                        # that spread per cluster instead of hiding it under one
-                        # undifferentiated pin (spec §12).
-                        "actual_date": result.get("actual_date"),
-                    }
-                )
     except bridge.GEEAuthError as exc:
         # Deliberately does NOT touch any RegionalScanPoint/RegionalScanCluster
         # row written by a prior successful run -- an aborted run must
@@ -181,7 +150,7 @@ def run_scan(
     ).scalars().all()
     for row in prior_clusters:
         db.delete(row)
-    clusters = cluster_points(flagged_for_clustering)
+    clusters = cluster_points([])
     for cluster in clusters:
         db.add(RegionalScanCluster(run_id=run.id, **cluster))
 

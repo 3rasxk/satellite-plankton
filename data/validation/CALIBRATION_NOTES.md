@@ -6,6 +6,14 @@ resolving the 12 `TODO` rows (2026-08-22) — not encoded as columns in
 about any single row. `bloom-detection` must read this before implementing
 `src/thresholds.py`.
 
+**Current status (2026-09-06):** all 14 events cannot be evaluated for
+detection. Spectral-index anomaly scoring is explicitly disabled with
+`z_score_status: not_computed_no_valid_baseline`; `z_scores` and every
+`calibrated_*` value are null. th_010 has a real satellite reading, but
+its former anomaly calculation mixed a dimensionless index with a MODIS
+`chlor_a` concentration baseline. Its claimed miss is withdrawn. The
+calibration methodology below is deferred until a valid statistic exists.
+
 ## 1. Same-episode clusters — hold out together in leave-one-out
 
 Two clusters are the same physical bloom observed at multiple sites/dates,
@@ -23,12 +31,12 @@ single unit (all its rows in, or all its rows out, together) — never hold
 out one member while the others remain in the calibration set. Holding out
 th_006 alone while th_005/th_007 stay in leaks information about the same
 event into the "held-out" test. This changes the loop from 14 iterations
-to effectively **12 iterations** (10 independent single events + 2
+to effectively **11 iterations** (9 independent single events + 2
 clusters treated as one unit each).
 
 **Keep all rows separate in the per-event reporting table** (`event_table.md`)
 for transparency — a reader should still see all 14 rows and their
-individual flag/no-flag result. Only the *calibration loop's* hold-out
+individual "cannot be evaluated" status. Only the *calibration loop's* hold-out
 logic groups them; the report does not.
 
 ## 2. Species range beyond *Noctiluca scintillans* — report species per event
@@ -97,7 +105,7 @@ th_010 (member of the `chonburi_feb2020` cluster, §1). Their cluster-mates
 did not originally cover: what happens in leave-one-out when a cluster is
 only *partially* matchable?
 
-**Decision:** a same-episode cluster is reported `caught` in leave-one-out
+**Deferred methodology:** a same-episode cluster would be reported `caught` in leave-one-out
 if ANY of its matchable members' real z-score crosses the primary index's
 cutoff — evaluated as a logical OR across whichever members actually
 produced a real z-score, not decided independently per member and not
@@ -124,28 +132,15 @@ of a patchy bloom, not evidence the system failed at the second site),
 and averaging would conflate two different signals' strengths with no
 principled weighting between them for a single-index sweep.
 
-A cluster member with no real z-score (no coordinate at all, or a
-coordinate but no usable satellite reading — see
-`reports/event_table.md`'s "newly-coordinate events" detail for th_006's
-and th_010's own real, individually verified non-match reasons this run)
-is simply excluded from the OR; it never counts as an independent miss.
-`caught=None` (not evaluable) only when EVERY member of the cluster lacks
-a real z-score, same as before.
+A member without a valid anomaly statistic cannot count as a miss. At
+present no member has one: `thresholds.leave_one_out` explicitly returns
+`caught=None` for all 11 units and performs no threshold comparison.
 
-**Implemented in** `thresholds.leave_one_out` — the `available` list
-(members with a real z-score) is computed per iteration and `caught` is
-`any(z >= cutoff for member in available)`; the per-member reasons are
-now reported individually in each iteration's `reason` field (which
-member had a coordinate, which didn't, and why a coordinate-bearing
-member still produced no real z-score this run) rather than one generic
-sentence for the whole unit, since after this change the reasons can
-differ member-to-member within the same cluster.
-
-This run, both `chonburi_aug2019` (th_006 matchable) and
-`chonburi_feb2020` (th_010 matchable) still evaluate as `caught=None`,
-because th_006 and th_010 themselves did not produce a real z-score this
-run (th_006: every candidate Sentinel-2 scene cloud-rejected; th_010:
-sample buffer fails the JRC Global Surface Water land/water mask) — see
-`reports/event_table.md`. The OR rule above is fully implemented and
-ready to resolve to a real `True`/`False` the moment either matchable
-member does produce a real z-score in a future run.
+Satellite availability remains a separate finding. th_006's candidate
+scenes were all cloud-rejected. th_010 now has real bands and index values
+on `actual_date` 2020-02-16 after the JRC/ETOPO1 mask correction; its old
+water-mask failure was a defect, not a site property. Its reading remains
+one event (`n=1`), `karenia_sp` rather than the B2/B3 *Noctiluca* target,
+and dependent on the fallback at a turbid near-shore buffer. See
+`LIMITATIONS.md` §1 for the complete reading qualifiers. Neither the
+recovered reading nor any old invalid anomaly value is a hit or a miss.

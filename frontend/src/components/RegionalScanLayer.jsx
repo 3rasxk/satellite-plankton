@@ -21,9 +21,8 @@ import {
  *
  * Interim render (index values only). The previous version gated every
  * pin on `point.threshold_tier` and coloured it from RISK_COLOR_HEX.
- * `threshold_tier` is null on all 501 points of the latest run -- the
- * anomaly cutoffs in detection/src/config.yaml are UNCALIBRATED and no
- * point cleared them -- so that gate drew nothing at all. Gating on a
+ * `threshold_tier` is null because no valid anomaly baseline exists.
+ * The former cross-unit statistic has been removed. Gating on a
  * real primary-index value instead makes the scan's actual output
  * visible, and the neutral --regional-index-* ramp keeps it honest: the
  * shade means "this pixel's NDCI reading, relative to the rest of this
@@ -132,7 +131,7 @@ export default function RegionalScanLayer({ data }) {
               Cluster of {cluster.cell_count} cells
             </div>
             <div style={{ fontSize: '11.5px', marginTop: '2px', color: '#1d1d1f' }}>
-              mean anomaly_z {cluster.mean_anomaly_z.toFixed(2)} · max {cluster.max_anomaly_z.toFixed(2)}
+              mean spatial_anomaly_z {cluster.mean_spatial_anomaly_z?.toFixed(2) ?? '—'} · max {cluster.max_spatial_anomaly_z?.toFixed(2) ?? '—'}
             </div>
             <div style={{ fontSize: '11px', marginTop: '2px', color: '#6e6e73' }}>
               {clusterSceneLine(cluster)}
@@ -195,9 +194,7 @@ export default function RegionalScanLayer({ data }) {
                   <div style={{ fontSize: '11px', marginTop: '2px', color: '#6e6e73' }}>{sceneLine}</div>
                 )}
                 <div style={{ fontSize: '11px', marginTop: '2px', color: '#6e6e73' }}>
-                  {point.anomaly_z === null || point.anomaly_z === undefined
-                    ? 'no anomaly score — spatial trigger not yet active'
-                    : 'anomaly score not shown — spatial trigger not yet active'}
+                  Not computed — no valid baseline exists
                 </div>
               </Tooltip>
             </CircleMarker>

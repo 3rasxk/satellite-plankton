@@ -16,7 +16,7 @@ Three consequences forced the pivot:
 
 Physics has none of these problems. Spectral indices are standard, published, reproducible, need no labels, and work identically in every ocean.
 
-**The 14 Thai events keep their role** — not as training data, but as the independent ground truth the whole system is validated against.
+**The 14 Thai events keep their role** as a documented historical record. All 14 currently cannot be evaluated for detection: no valid anomaly statistic exists. One event has returned a satellite index reading; this is not validation evidence.
 
 ---
 
@@ -26,8 +26,8 @@ Two functions, clearly separated. Never blur them.
 
 | Function | Question answered | Confidence |
 |----------|------------------|------------|
-| **Detection** | Is there an anomalous chlorophyll signal right now? | High — this is standard remote sensing |
-| **Prediction** | Are conditions trending toward a bloom over the coming days? | Lower — rule-based, must be labelled as indicative |
+| **Detection** | What are the Sentinel-2 index values and actual scene date? | Index readings only; no valid anomaly statistic or detection verdict exists |
+| **Prediction** | Are conditions trending toward a bloom over the coming days? | Currently not evaluated because the anomaly input is unavailable; never a validated forecast |
 
 ---
 
@@ -48,17 +48,11 @@ Implement all three Sentinel-2 indices, swappable via config, and compare them a
 
 Green *Noctiluca* shows elevated reflectance across roughly 440–550 nm relative to diatom blooms and non-bloom water. Add a B2/B3 ratio feature to separate a green bloom from a generic chlorophyll rise. Treat this as a secondary, lower-confidence signal — it is less established than NDCI itself.
 
-### Anomaly, not raw value
+### Anomaly scoring is disabled: the original design mixed units
 
-A high index reading alone is not a bloom — some areas are simply productive. What matters is the departure from normal:
+A high spectral index alone is not a bloom. This plan originally specified subtracting a MODIS `chlor_a` concentration baseline (mg/m³) from a dimensionless Sentinel-2 index and converting the result to a z-score. That formula was dimensionally invalid and is withdrawn. `detect()` reports index values, reading status and the actual scene date; it computes no anomaly statistic or detection verdict.
 
-```
-anomaly = index_today − climatology(location, day_of_year)
-```
-
-The climatology comes from the MODIS `chlor_a` archive (2002–present), averaged per location per time of year. This is what makes MODIS load-bearing in the design even though Sentinel-2 does the fine detection.
-
-Express the anomaly in standard deviations (a z-score) so thresholds are comparable across locations with different baseline productivity.
+The current state is **not computed — no valid baseline exists**. No replacement statistic is implemented. MODIS `chlor_a` climatology and the `/timeseries` calculation comparing `chlor_a` with that same quantity remain valid and separate.
 
 ---
 
@@ -70,7 +64,7 @@ The goal is a **risk trajectory**, not a claim to foresee blooms. It is a rule-b
 
 | Signal | Source | Why it matters |
 |--------|--------|----------------|
-| Chlorophyll anomaly (z-score) | Sentinel-2 / MODIS | Current state |
+| Spectral-index anomaly | Not computed — no valid baseline exists | Unavailable prerequisite for escalation |
 | 7- and 14-day rate of change | MODIS time series | A rising trend precedes visible bloom |
 | Acceleration (2nd derivative) | MODIS time series | Distinguishes steady elevation from rapid growth |
 | Sea surface temperature + SST anomaly | MODIS SST | Warm water favours dinoflagellate growth |
@@ -79,7 +73,7 @@ The goal is a **risk trajectory**, not a claim to foresee blooms. It is a rule-b
 
 ### Risk escalation logic
 
-Combine into a small number of explicit, human-readable rules — for example:
+The retained rule shapes below are inactive placeholders. They cannot be evaluated until a valid anomaly statistic exists; `calibrated_*` remains null:
 
 ```
 elevated   ← anomaly z ≥ 1.5
@@ -99,7 +93,7 @@ Every rule must be visible in config, not buried in code. If a judge asks why a 
 
 ## 4. Threshold calibration — the one place the 14 events are used
 
-Thresholds are the only tunable part of the system, and calibrating them is the closest thing to "training" that remains.
+**Current state:** anomaly scoring and threshold evaluation are explicitly disabled. Every event has `z_score_status: not_computed_no_valid_baseline`; all 14 report "cannot be evaluated". th_010 has raw index values but no valid statistic and is not a miss. The following method describes deferred work, not a completed calibration.
 
 **Method:**
 1. For each of the 14 events, pull the satellite indices for that date and location.
@@ -124,8 +118,8 @@ The rule protecting the whole project:
 
 > **The data used to calibrate thresholds must never also serve as the evidence that thresholds work.**
 
-- Ground truth is the 14 events, sourced from researchers counting cells in water — independent of any satellite product.
-- With n=14, hold-out splitting is not viable. Use **leave-one-out**: calibrate on 13, test on the 1 left out, repeat 14 times. Report which events were caught under this stricter protocol.
+- Ground truth is the 14 documented events from the cited sources, with cell counts where reported — independent of any satellite product.
+- Future **leave-one-out** evaluation must preserve same-episode clusters: 9 single events and 2 clusters form 11 held-out units, per `data/validation/CALIBRATION_NOTES.md`. Hold out each whole unit together. All units currently remain unevaluable because no valid anomaly statistic exists.
 - Never generate labels from a satellite threshold and then validate against the same threshold family.
 
 ### Secondary validation
@@ -138,7 +132,7 @@ The Florida/Gulf-of-Mexico data (836K rows with real cell counts) can validate t
 
 **Phase 1 — indices.** Implement NDCI, 2BDA, 3BDA, B2/B3 discrimination over the upper Gulf. Verify against a known-bloom date visually before trusting any number.
 
-**Phase 2 — climatology.** Build the MODIS 2002–present per-location, per-day-of-year baseline. Convert index readings to z-scores.
+**Phase 2 — climatology.** Build the MODIS 2002–present per-location, per-day-of-year `chlor_a` baseline for comparison with `chlor_a` only. Sentinel-2 index anomaly scoring is disabled until a valid baseline exists.
 
 **Phase 3 — event matching.** For each of the 14 events, extract satellite readings at that date/location. Flag events whose location is too vague for a reliable pixel match — do not force a coordinate the source does not support.
 
@@ -156,7 +150,7 @@ The Florida/Gulf-of-Mexico data (836K rows with real cell counts) can validate t
 detection/
 ├── src/
 │   ├── indices.py           # NDCI, 2BDA, 3BDA, B2/B3 discrimination
-│   ├── climatology.py       # MODIS baseline, z-score conversion
+│   ├── climatology.py       # MODIS chlor_a baseline; same-quantity z-scores only
 │   ├── thresholds.py        # calibration sweep + leave-one-out
 │   ├── prediction.py        # trend, SST, seasonality, escalation rules
 │   └── config.yaml          # every threshold and rule, human-readable
@@ -179,10 +173,10 @@ data/validation/              # top-level, not under detection/ — see data/val
 ## 8. Limitations to write down before anyone asks
 
 - **Detection floor.** Blooms smaller than the pixel are missed; at MODIS resolution, detection has been reported to require roughly 13% areal fraction within a pixel. Sentinel-2's 10 m resolution improves this but does not remove it.
-- **Turbid water.** Indices designed for open ocean degrade near river mouths — precisely where upper-Gulf blooms occur. This is why 3BDA is carried alongside NDCI.
+- **Turbid water.** Sediment and shoreline mixing can affect indices near river mouths. This project has not validated an index's discrimination performance at those events.
 - **Clouds.** Optical sensors cannot see through cloud. Monsoon months have blind periods, and the system cannot detect what it cannot observe.
 - **Surface only.** Satellite signal comes from the first few metres. Subsurface blooms are invisible.
-- **Validation sample size.** Fourteen events, most without precise coordinates. Results are indicative, not statistically robust.
+- **Validation sample size.** Fourteen events: seven have recorded coordinates and seven do not. All remain unevaluable for detection without a valid anomaly baseline.
 - **Prediction is rule-based.** It reflects known bloom drivers, not a validated forecast model, and no lead-time accuracy is claimed.
 - **Confounders.** Sediment plumes after heavy rainfall can raise indices without a bloom present.
-- **Geographic scope.** Calibrated for the upper Gulf of Thailand only.
+- **Geographic scope.** The study area is the upper Gulf of Thailand only. No calibrated detection statistic exists.

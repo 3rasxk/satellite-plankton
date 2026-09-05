@@ -27,7 +27,7 @@ Design tables for: monitored sites/grid cells, cached detection results (avoid r
 ### 2. Endpoints
 - `GET /risk-map` → GeoJSON, one feature per grid cell, `risk_level` + `triggered_rules` + `disclaimer` per feature.
 - `GET /timeseries?lat=&lng=` → array of `{date, index_value, anomaly_z, cloud_fraction, actual_date}` for the site panel / anomaly strip.
-- `GET /detect?lat=&lng=&date=` → `{anomaly_z, index_values, detected, index_used, disclaimer}` — thin wrapper over `bloom-detection.detect()`.
+- `GET /detect?lat=&lng=&date=` → index values, reading status, actual scene date, disclaimer, and null `spatial_anomaly_z`/`detected` compatibility fields. No valid anomaly statistic or detection verdict exists.
 - `GET /summary` → region-wide stats: site counts per risk level, most recent detected signal, data freshness.
 - `GET /validation` → the 14-row per-event table (never a percentage), from `bloom-detection`'s threshold calibration output.
 - `GET /satellite-image?lat=&lng=&date=&image_type=true_color|ndci_heatmap` → live-rendered PNG (Content-Type: image/png, not base64/JSON) of the exact Sentinel-2 scene `/detect` would use for the same lat/lng/date. `/detect`'s own response carries `true_color_image_url`/`ndci_heatmap_image_url` pointing at this endpoint (null when `status != 'ok'`). `GET /risk-map/{site_id}/image?image_type=...` serves the scheduler's pre-rendered/cached bytes for the fixed 6-site grid instead (no live call) — see `src/scheduler.py` for the caching-vs-on-demand reasoning, grounded in a real measured latency delta.

@@ -39,17 +39,17 @@ def test_regional_scan_returns_latest_run_points_and_clusters(client):
 
         db.add(RegionalScanPoint(
             point_id="0_0", lat=13.0, lng=100.5, row_idx=0, col_idx=0,
-            status="ok", index_values={"ndci": 0.2}, anomaly_z=2.5,
+            status="ok", index_values={"ndci": 0.2}, spatial_anomaly_z=2.5,
             threshold_tier="warning", run_id=run.id,
         ))
         db.add(RegionalScanPoint(
             point_id="0_1", lat=13.05, lng=100.5, row_idx=0, col_idx=1,
-            status="ok", index_values={"ndci": 0.19}, anomaly_z=2.4,
+            status="ok", index_values={"ndci": 0.19}, spatial_anomaly_z=2.4,
             threshold_tier="warning", run_id=run.id,
         ))
         db.add(RegionalScanCluster(
             run_id=run.id, centroid_lat=13.025, centroid_lng=100.5, cell_count=2,
-            mean_anomaly_z=2.45, max_anomaly_z=2.5, threshold_tier="warning",
+            mean_spatial_anomaly_z=2.45, max_spatial_anomaly_z=2.5, threshold_tier="warning",
             member_point_ids=["0_0", "0_1"],
         ))
         db.commit()
@@ -104,17 +104,17 @@ def test_regional_scan_serves_last_good_clusters_when_latest_run_aborted(client)
 
         db.add(RegionalScanPoint(
             point_id="9_0", lat=13.0, lng=100.5, row_idx=9, col_idx=0,
-            status="ok", index_values={"ndci": 0.2}, anomaly_z=2.5,
+            status="ok", index_values={"ndci": 0.2}, spatial_anomaly_z=2.5,
             threshold_tier="warning", run_id=good_run.id,
         ))
         db.add(RegionalScanPoint(
             point_id="9_1", lat=13.05, lng=100.5, row_idx=9, col_idx=1,
-            status="ok", index_values={"ndci": 0.19}, anomaly_z=2.4,
+            status="ok", index_values={"ndci": 0.19}, spatial_anomaly_z=2.4,
             threshold_tier="warning", run_id=good_run.id,
         ))
         db.add(RegionalScanCluster(
             run_id=good_run.id, centroid_lat=13.025, centroid_lng=100.5, cell_count=2,
-            mean_anomaly_z=2.45, max_anomaly_z=2.5, threshold_tier="warning",
+            mean_spatial_anomaly_z=2.45, max_spatial_anomaly_z=2.5, threshold_tier="warning",
             member_point_ids=["9_0", "9_1"],
         ))
         db.commit()
@@ -184,17 +184,17 @@ def test_regional_scan_serves_per_point_actual_date(client):
         # a no-imagery point that never resolved a scene at all.
         db.add(RegionalScanPoint(
             point_id="7_0", lat=13.0, lng=100.5, row_idx=7, col_idx=0,
-            status="ok", index_values={"ndci": 0.2}, anomaly_z=2.5,
+            status="ok", index_values={"ndci": 0.2}, spatial_anomaly_z=2.5,
             threshold_tier="warning", actual_date="2026-08-31", run_id=run.id,
         ))
         db.add(RegionalScanPoint(
             point_id="7_1", lat=13.05, lng=100.5, row_idx=7, col_idx=1,
-            status="ok", index_values={"ndci": 0.19}, anomaly_z=2.4,
+            status="ok", index_values={"ndci": 0.19}, spatial_anomaly_z=2.4,
             threshold_tier="warning", actual_date="2026-08-25", run_id=run.id,
         ))
         db.add(RegionalScanPoint(
             point_id="7_2", lat=13.1, lng=100.5, row_idx=7, col_idx=2,
-            status="no_imagery", index_values=None, anomaly_z=None,
+            status="no_imagery", index_values=None, spatial_anomaly_z=None,
             threshold_tier=None, actual_date=None, run_id=run.id,
         ))
         db.commit()
@@ -244,7 +244,7 @@ def test_regional_scan_serves_cluster_scene_date_range(client):
         # worst span measured in a real scan (2026-06-15).
         db.add(RegionalScanCluster(
             run_id=run.id, centroid_lat=13.2, centroid_lng=100.6, cell_count=2,
-            mean_anomaly_z=2.45, max_anomaly_z=2.5, threshold_tier="warning",
+            mean_spatial_anomaly_z=2.45, max_spatial_anomaly_z=2.5, threshold_tier="warning",
             member_point_ids=["30_0", "30_1"],
             oldest_scene_date="2026-08-23", newest_scene_date="2026-09-02",
             scene_date_span_days=10,
@@ -252,7 +252,7 @@ def test_regional_scan_serves_cluster_scene_date_range(client):
         # A single-vintage cluster: span 0 is a real statement, not "unknown".
         db.add(RegionalScanCluster(
             run_id=run.id, centroid_lat=13.4, centroid_lng=100.8, cell_count=2,
-            mean_anomaly_z=1.7, max_anomaly_z=1.8, threshold_tier="elevated",
+            mean_spatial_anomaly_z=1.7, max_spatial_anomaly_z=1.8, threshold_tier="elevated",
             member_point_ids=["31_0", "31_1"],
             oldest_scene_date="2026-09-01", newest_scene_date="2026-09-01",
             scene_date_span_days=0,
@@ -261,7 +261,7 @@ def test_regional_scan_serves_cluster_scene_date_range(client):
         # are null together -- never partially filled.
         db.add(RegionalScanCluster(
             run_id=run.id, centroid_lat=13.6, centroid_lng=100.9, cell_count=2,
-            mean_anomaly_z=1.9, max_anomaly_z=2.0, threshold_tier="elevated",
+            mean_spatial_anomaly_z=1.9, max_spatial_anomaly_z=2.0, threshold_tier="elevated",
             member_point_ids=["32_0", "32_1"],
             oldest_scene_date=None, newest_scene_date=None,
             scene_date_span_days=None,

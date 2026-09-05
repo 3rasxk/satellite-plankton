@@ -7,6 +7,7 @@ import {
   STATUS_LABEL,
   formatRelativeTime,
   formatZ,
+  ANOMALY_NOT_COMPUTED,
 } from '../constants.js'
 
 /**
@@ -110,7 +111,7 @@ export default function NdciPage() {
                   <th>จุดตรวจวัด</th>
                   <th>ดัชนีที่ใช้</th>
                   <th>NDCI</th>
-                  <th>Anomaly z</th>
+                  <th>Spatial anomaly z</th>
                   <th>สถานะ</th>
                   <th>อัปเดต</th>
                 </tr>
@@ -135,11 +136,9 @@ export default function NdciPage() {
                           ? '—'
                           : p.ndci_value != null
                             ? p.ndci_value.toFixed(4)
-                            : p.anomaly_z != null
-                              ? '—'
-                              : '—'}
+                            : '—'}
                       </td>
-                      <td className="mono">{formatZ(p.anomaly_z)}</td>
+                      <td>{p.spatial_anomaly_z == null ? ANOMALY_NOT_COMPUTED : formatZ(p.spatial_anomaly_z)}</td>
                       <td>
                         <span className={`status-badge${isNoData ? ' no-data' : ''}`}>
                           <span
@@ -152,7 +151,7 @@ export default function NdciPage() {
                           />
                           {isNoData
                             ? STATUS_LABEL[p.status] || 'ไม่มีค่าอ่าน'
-                            : RISK_LABEL_TH[p.risk_level] || p.risk_level}
+                            : RISK_LABEL_TH[p.risk_level] || 'ยังประเมินไม่ได้'}
                         </span>
                       </td>
                       <td className="mono table-date">

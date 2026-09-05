@@ -71,8 +71,10 @@ app = FastAPI(
     title="Gulf of Thailand Algal Bloom Monitor -- API",
     description=(
         "Physics-based (not ML) early-warning API for harmful algal blooms in the upper "
-        "Gulf of Thailand. Wraps detection/src's spectral-index + MODIS-climatology "
-        "anomaly detection and rule-based risk escalation. Every response carries a "
+        "Gulf of Thailand. Reports Sentinel-2 spectral index values and scene dates. "
+        "Anomaly detection and risk evaluation are not computed because no valid "
+        "spectral-index baseline exists. MODIS chlor_a time-series anomalies remain "
+        "a separate, same-quantity calculation. Every response carries a "
         "`disclaimer` field -- see CLAUDE.md's truth boundary."
     ),
     version="0.1.0",

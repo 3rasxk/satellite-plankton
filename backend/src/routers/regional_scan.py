@@ -74,7 +74,7 @@ async def get_regional_scan(db: Session = Depends(get_db)) -> RegionalScanRespon
         points=[
             RegionalScanPointSchema(
                 point_id=p.point_id, lat=p.lat, lng=p.lng, status=p.status,
-                index_values=p.index_values, anomaly_z=p.anomaly_z,
+                index_values=p.index_values, spatial_anomaly_z=p.spatial_anomaly_z,
                 threshold_tier=p.threshold_tier, actual_date=p.actual_date,
             )
             for p in points
@@ -82,8 +82,8 @@ async def get_regional_scan(db: Session = Depends(get_db)) -> RegionalScanRespon
         clusters=[
             RegionalScanClusterSchema(
                 centroid_lat=c.centroid_lat, centroid_lng=c.centroid_lng,
-                cell_count=c.cell_count, mean_anomaly_z=c.mean_anomaly_z,
-                max_anomaly_z=c.max_anomaly_z, threshold_tier=c.threshold_tier,
+                cell_count=c.cell_count, mean_spatial_anomaly_z=c.mean_spatial_anomaly_z,
+                max_spatial_anomaly_z=c.max_spatial_anomaly_z, threshold_tier=c.threshold_tier,
                 member_point_ids=c.member_point_ids,
                 oldest_scene_date=c.oldest_scene_date,
                 newest_scene_date=c.newest_scene_date,

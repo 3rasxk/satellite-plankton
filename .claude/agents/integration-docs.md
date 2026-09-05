@@ -41,9 +41,9 @@ Dev-run script/docs, `tests/` (or per-subproject test additions), root `README.m
 
 ## Acceptance criteria — mirrors `CLAUDE.md` §6
 - [ ] Sentinel-2 + MODIS pipeline confirmed pulling real data.
-- [ ] All three indices implemented and compared against the 14 events.
-- [ ] MODIS climatology built, anomaly z-scores computed.
-- [ ] Leave-one-out calibration complete, 14-row table published.
+- [ ] All three indices implemented; available readings reported independently of anomaly evaluation.
+- [ ] MODIS `chlor_a` climatology used only with `chlor_a`; spectral-index anomaly scoring explicitly disabled.
+- [ ] All 14 events report "cannot be evaluated" with no valid baseline; no th_010 miss claim remains.
 - [ ] Rule-based prediction layer with every rule readable in config.
 - [ ] Web: map + click-to-chart + summary page, running end-to-end.
 - [ ] LIMITATIONS.md states the truth boundary; no percentage claims on n=14; no overclaiming.

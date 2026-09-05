@@ -23,10 +23,10 @@ earthengine authenticate   # if not already done for data-pipeline
 ## Modules
 
 - `src/indices.py` — NDCI, 2BDA, 3BDA, B2/B3 (green *Noctiluca* discrimination, secondary/lower-confidence).
-- `src/climatology.py` — MODIS `chlor_a` per-location/per-day-of-year mean+std, anomaly z-score.
-- `src/thresholds.py` — event matching against `data/validation/events.csv` + leave-one-out calibration (12 iterations: 10 events + 2 same-episode clusters, per `data/validation/CALIBRATION_NOTES.md` §1). **Headline finding: 7 of 14 events carry a real coordinate; 1 of 14 (th_010) has produced a real satellite reading.** One matched pair is not a calibration set, so thresholds stay literature defaults — see `reports/event_table.md` and `LIMITATIONS.md` §1.
-- `src/prediction.py` — `detect(lat, lng, date)` and `risk_level(lat, lng, date)`, the public handoff functions for `backend-api`. Rule-based escalation (`elevated`/`watch`/`warning`) read entirely from `src/config.yaml`.
-- `src/config.yaml` — every threshold and rule, human-readable. Its own header explains why the z-score cutoffs are literature defaults, not empirically calibrated (see thresholds.py finding above).
+- `src/climatology.py` — MODIS `chlor_a` per-location/per-day-of-year mean+std, valid for comparison with `chlor_a` only.
+- `src/thresholds.py` — event matching against `data/validation/events.csv` + leave-one-out reporting (11 iterations: 9 single events + 2 same-episode clusters). **7 of 14 events have coordinates; 1 (th_010) has a satellite index reading; all 14 cannot be evaluated for detection.** Anomaly scoring is explicitly disabled with `z_score_status: not_computed_no_valid_baseline`. th_010's former miss claim rested on a calculation mixing incompatible units and is withdrawn — see `LIMITATIONS.md` §1.
+- `src/prediction.py` — `detect(lat, lng, date)` reports real index values, reading status and actual scene date, with no anomaly score or detection verdict. `risk_level` cannot evaluate risk while its anomaly input is unavailable.
+- `src/config.yaml` — retained threshold/rule shapes are inactive placeholders; every `calibrated_*` remains null until a valid statistic exists and can be calibrated.
 - `src/generate_reports.py` — regenerates `reports/event_table.md`, `reports/index_comparison.md`, `reports/threshold_sweep.png` from a live run (real GEE calls). Run it with:
   ```bash
   source venv/bin/activate && python src/generate_reports.py

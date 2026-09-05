@@ -9,6 +9,7 @@ import {
   STATUS_LABEL,
   formatRelativeTime,
   formatZ,
+  ANOMALY_NOT_COMPUTED,
 } from '../constants.js'
 
 /**
@@ -139,7 +140,7 @@ export default function AquaculturePage() {
                         />
                         {isNoData
                           ? 'ไม่มีค่าอ่าน'
-                          : RISK_LABEL_TH[proxySite.risk_level] || proxySite.risk_level}
+                          : RISK_LABEL_TH[proxySite.risk_level] || 'ยังประเมินไม่ได้'}
                       </span>
                     </div>
                     <dl className="zone-card-details">
@@ -151,9 +152,9 @@ export default function AquaculturePage() {
                       <dd>{proxySite ? proxySite.name : '—'}</dd>
                       <dt>ระยะห่าง</dt>
                       <dd className="mono">{zone.distanceKm} กม.</dd>
-                      <dt>Anomaly z-score</dt>
-                      <dd className="mono">
-                        {proxySite ? formatZ(proxySite.anomaly_z) : '—'}
+                      <dt>Spatial anomaly z-score</dt>
+                      <dd>
+                        {proxySite?.spatial_anomaly_z == null ? ANOMALY_NOT_COMPUTED : formatZ(proxySite.spatial_anomaly_z)}
                       </dd>
                       <dt>ความหนาแน่นเซลล์</dt>
                       <dd className="no-data-text">ไม่มีข้อมูล</dd>
@@ -174,7 +175,7 @@ export default function AquaculturePage() {
                     <th>จุดตรวจวัด</th>
                     <th>พิกัด</th>
                     <th>สถานะ</th>
-                    <th>Anomaly z</th>
+                    <th>Spatial anomaly z</th>
                     <th>อัปเดต</th>
                   </tr>
                 </thead>
@@ -204,10 +205,10 @@ export default function AquaculturePage() {
                             />
                             {isNoData
                               ? STATUS_LABEL[p.status] || 'ไม่มีค่าอ่าน'
-                              : RISK_LABEL_TH[p.risk_level] || p.risk_level}
+                              : RISK_LABEL_TH[p.risk_level] || 'ยังประเมินไม่ได้'}
                           </span>
                         </td>
-                        <td className="mono">{formatZ(p.anomaly_z)}</td>
+                        <td>{p.spatial_anomaly_z == null ? ANOMALY_NOT_COMPUTED : formatZ(p.spatial_anomaly_z)}</td>
                         <td className="mono table-date">
                           {p.fetched_at ? formatRelativeTime(p.fetched_at) : '—'}
                         </td>

@@ -1,8 +1,8 @@
 # Gulf of Thailand Algal Bloom Monitor
 
-Software-only early-warning system for harmful algal blooms (green *Noctiluca* / red tide) in the upper Gulf of Thailand, targeting SDG 14. **Physics-based, not machine learning** — spectral indices, a MODIS climatology baseline, anomaly z-scores, and rule-based risk escalation. See `CLAUDE.md` for the full spec and `docs/DETECTION_PLAN.md` §0 for why supervised ML was rejected for this problem.
+Software-only monitoring system for harmful algal blooms (green *Noctiluca* / red tide) in the upper Gulf of Thailand, targeting SDG 14. **Physics-based, not machine learning** — the detection path reports spectral index values with actual scene dates. Anomaly scoring and rule-based risk evaluation are disabled: no valid baseline exists for those indices. MODIS `chlor_a` history and its same-quantity seasonal anomalies remain available separately. See `CLAUDE.md` and `LIMITATIONS.md` for the current scope, and `docs/DETECTION_PLAN.md` §0 for why supervised ML was rejected.
 
-**Read `LIMITATIONS.md` before trusting any output of this system.** The short version: detection (is there a satellite anomaly right now) is standard, high-confidence remote sensing; prediction (is risk rising) is rule-based and indicative, not a validated forecast; and the 14-event set is a **record of documented blooms, not a validation gate** — 1 of the 14 has produced a real satellite reading, and one event is not evidence that detection works or that it fails. This is a real, load-bearing finding from the build, not a caveat added after the fact.
+**Read `LIMITATIONS.md` before trusting any output.** The detection path supplies index readings only; it has no valid anomaly statistic or presence/absence verdict. Its prediction rules cannot evaluate risk without that input. The 14-event set is a **record of documented blooms, not a validation gate**: one event has a satellite reading, but all 14 cannot be evaluated. th_010's former miss claim rested on an invalid calculation and is withdrawn.
 
 ## Layout
 

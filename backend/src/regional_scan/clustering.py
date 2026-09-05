@@ -75,7 +75,7 @@ def cluster_points(points: list[dict]) -> list[dict]:
 
     Args:
         points: list of {'point_id', 'lat', 'lng', 'row_idx', 'col_idx',
-                          'anomaly_z', 'threshold_tier', 'actual_date'}.
+                          'spatial_anomaly_z', 'threshold_tier', 'actual_date'}.
                 Every member is already real/'ok' -- callers only ever
                 pass flagged (status='ok', tiered) points, so this
                 function's output satisfies spec §4's "computed only over
@@ -87,7 +87,7 @@ def cluster_points(points: list[dict]) -> list[dict]:
 
     Returns:
         list of {'centroid_lat', 'centroid_lng', 'cell_count',
-                  'mean_anomaly_z', 'max_anomaly_z', 'threshold_tier',
+                  'mean_spatial_anomaly_z', 'max_spatial_anomaly_z', 'threshold_tier',
                   'member_point_ids', 'oldest_scene_date',
                   'newest_scene_date', 'scene_date_span_days'}, one per
         connected component. Empty list if `points` is empty.
@@ -134,7 +134,7 @@ def cluster_points(points: list[dict]) -> list[dict]:
     for members in groups.values():
         lats = [m["lat"] for m in members]
         lngs = [m["lng"] for m in members]
-        z_values = [m["anomaly_z"] for m in members]
+        z_values = [m["spatial_anomaly_z"] for m in members]
         highest_tier = max(members, key=lambda m: _TIER_RANK[m["threshold_tier"]])["threshold_tier"]
         oldest_scene_date, newest_scene_date, scene_date_span_days = _scene_date_range(members)
         clusters.append(
@@ -142,8 +142,8 @@ def cluster_points(points: list[dict]) -> list[dict]:
                 "centroid_lat": sum(lats) / len(lats),
                 "centroid_lng": sum(lngs) / len(lngs),
                 "cell_count": len(members),
-                "mean_anomaly_z": sum(z_values) / len(z_values),
-                "max_anomaly_z": max(z_values),
+                "mean_spatial_anomaly_z": sum(z_values) / len(z_values),
+                "max_spatial_anomaly_z": max(z_values),
                 "threshold_tier": highest_tier,
                 "member_point_ids": [m["point_id"] for m in members],
                 "oldest_scene_date": oldest_scene_date,

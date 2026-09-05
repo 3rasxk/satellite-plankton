@@ -30,14 +30,14 @@ class AlertStation(BaseModel):
     risk_tier: str
     confidence: float
     coordinates: List[float] = Field(..., description="[lat, lng]")
-    anomaly_z: Optional[float] = None
+    spatial_anomaly_z: Optional[float] = None
     actual_date: Optional[str] = None
 
 
 class AlertsResponse(BaseModel):
     updated_at: str
     total_active_alerts: int
-    highest_risk_tier: str
+    highest_risk_tier: Optional[str] = None
     stations: List[AlertStation]
 
 
@@ -61,17 +61,17 @@ async def get_alerts_summary(db: Session = Depends(get_db)) -> AlertsResponse:
     stations: List[Dict[str, Any]] = []
     highest_tier_priority = {"NORMAL": 0, "ELEVATED": 1, "WATCH": 2, "WARNING": 3}
     highest_priority = 0
-    highest_tier_str = "NORMAL"
+    highest_tier_str = None
     latest_ts = datetime.now(timezone.utc).isoformat()
 
     for site, cache in rows:
         if cache is None:
             continue
 
-        raw_level = (cache.level or "normal").upper()
+        raw_level = cache.level.upper() if cache.level else None
         if raw_level in ["ELEVATED", "WATCH", "WARNING"]:
             # Derive deterministic confidence
-            z = cache.anomaly_z or 0.0
+            z = cache.spatial_anomaly_z
             if raw_level == "WARNING":
                 conf = 0.88 + ((abs(site.lat) * 11) % 0.05)
             elif raw_level == "WATCH":
@@ -87,7 +87,7 @@ async def get_alerts_summary(db: Session = Depends(get_db)) -> AlertsResponse:
                 "risk_tier": raw_level,
                 "confidence": round(conf, 3),
                 "coordinates": [round(site.lat, 4), round(site.lng, 4)],
-                "anomaly_z": round(z, 2) if z is not None else None,
+                "spatial_anomaly_z": round(z, 2) if z is not None else None,
                 "actual_date": cache.actual_date,
             })
 

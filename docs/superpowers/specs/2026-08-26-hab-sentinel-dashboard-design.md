@@ -1,5 +1,7 @@
 # HAB Sentinel Dashboard — Design Spec
 
+> Correction, 2026-09-06: detection-derived anomaly numbers and risk verdicts in this historical design are withdrawn. Their calculation mixed dimensionless indices with MODIS `chlor_a` concentrations. Current detection output is index values/status/actual_date only; API `spatial_anomaly_z` and risk verdicts are null. Show "Not computed — no valid baseline exists". `/timeseries` MODIS `chlor_a` anomalies remain valid and retain the `anomaly_z` field. The earlier numeric gauge/current-anomaly proposals below are superseded, not current requirements.
+
 Date: 2026-08-26
 Status: Approved, proceeding to implementation plan
 Scope: `/frontend` only. No backend changes — existing routers (`/risk-map`, `/timeseries`, `/detect`, `/satellite-image`, `/summary`, `/validation`) cover all real data needs.
@@ -53,7 +55,7 @@ Flex row: map fills remaining width, 360px analytics panel on right.
 1. Alert card: uppercase label + status pill, large heading (e.g. "เฝ้าระวัง"), location subtitle, divider, "ความเชื่อมั่นของการพยากรณ์: ปานกลาง" (qualitative only, never a fabricated %), "กฎที่ถูกกระตุ้น: N/3", amber-tinted callout explaining why, footnote disclosing rule-based (non-ML) methodology.
 2. Spectral metrics card: 2×2 grid — Chlorophyll-a (mg/m³), NDCI (20m, labeled "approx"), SST (°C), Anomaly z-score — IBM Plex Mono tabular numbers; footer with scene date + cloud %.
    - **SST has no backend field** (`DetectResponse`/`RiskMapProperties` carry no `sst`; MODIS SST was a locked-decisions intent, never implemented) — render its cell as `—`, with the same "ไม่มีข้อมูล" honesty treatment used elsewhere, never a fabricated number.
-   - **NDCI** and **Anomaly z-score**: from `dt.data.index_values[dt.data.index_used]` and `dt.data.anomaly_z` (the Sentinel-2, per-scene detection reading) — same numbers SitePanel's "Detection verdict" block already shows.
+   - **NDCI** comes from `dt.data.index_values[dt.data.index_used]`. The former detection-derived anomaly cell is withdrawn: API `spatial_anomaly_z` is null because no valid baseline exists. Show the unavailable state without a gauge or verdict.
    - **Chlorophyll-a (mg/m³)**: `/detect` has no chlor_a field (its index_values are NDCI/2BDA/3BDA/B2-B3 ratio, not raw chlorophyll). Use the latest point from the site's already-fetched `/timeseries` series (MODIS chlor_a) instead, and caption the card with *both* dates — the Sentinel-2 scene date (NDCI/z) and the MODIS point date (chlor_a) — since they are two different sensors/resolutions and may not be the same day; never imply one date covers all four numbers.
 3. NDCI trend chart card (reuses `TimeSeriesChart`/`RegionTrendChart`): inline SVG dual-line — solid blue "ปี 2026" vs dashed gray "ค่าฐาน 20 ปี", month axis labels, footnote citing `/timeseries` + MODIS climatology as real sources.
 4. Satellite image card (reuses `SatelliteImage`): True Color / NDCI Heatmap toggle, 150px image frame (rounded, bordered), caption with scene date, footnote on the sampling-buffer caveat (image ~500m context, index sampled from a narrower ~30m area).

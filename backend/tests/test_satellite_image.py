@@ -159,9 +159,8 @@ def test_satellite_image_bad_image_type_422(client):
 
 def _valid_detect_result() -> dict:
     return {
-        "anomaly_z": -1.2,
         "index_values": {"ndci": 0.01, "2bda": 0.02, "3bda": 0.03, "b2_b3_ratio": 0.9},
-        "detected": False,
+        "actual_date": "2024-03-14",
         "index_used": "ndci",
         "status": "ok",
         "reason": None,
@@ -181,18 +180,18 @@ def test_detect_includes_image_urls_when_status_ok(client, monkeypatch):
     body = resp.json()
 
     assert body["true_color_image_url"] == (
-        "/satellite-image?lat=13.2&lng=100.9&date=2024-03-15&image_type=true_color"
+        "/satellite-image?lat=13.2&lng=100.9&date=2024-03-14&image_type=true_color"
     )
     assert body["ndci_heatmap_image_url"] == (
-        "/satellite-image?lat=13.2&lng=100.9&date=2024-03-15&image_type=ndci_heatmap"
+        "/satellite-image?lat=13.2&lng=100.9&date=2024-03-14&image_type=ndci_heatmap"
     )
     # No extra GEE call made inside /detect for these URLs -- just string
-    # construction from the request's own lat/lng/date.
+    # construction from the coordinate and numeric reading's scene date.
 
 
 def test_detect_image_urls_null_when_status_not_ok(client, monkeypatch):
     result = dict(_valid_detect_result())
-    result.update(status="no_imagery", detected=False, anomaly_z=None, reason="no cloud-free scene")
+    result.update(status="no_imagery", actual_date=None, reason="no cloud-free scene")
     monkeypatch.setattr(detect_router.bridge, "detect", lambda *a, **k: result)
     monkeypatch.setattr(
         detect_router,
@@ -291,7 +290,7 @@ def test_risk_map_image_endpoint_serves_cached_bytes_and_risk_map_exposes_the_ur
                 target_date="2024-03-15",
                 status="ok",
                 detected=False,
-                anomaly_z=-0.5,
+                spatial_anomaly_z=None,
                 index_used="ndci",
                 actual_date="2024-03-14",
                 cloud_fraction=0.05,
@@ -443,7 +442,7 @@ def test_refresh_one_site_geeautherror_from_images_marks_whole_site_stale(monkey
                 "level": "normal",
                 "triggered_rules": [],
                 "detection": {
-                    "status": "ok", "detected": False, "anomaly_z": 0.1,
+                    "status": "ok", "actual_date": "2024-03-14",
                     "index_used": "ndci", "index_values": {}, "reason": None,
                 },
                 "trend_14d": {"rising": False},
@@ -483,7 +482,7 @@ def test_refresh_one_site_geeautherror_from_images_marks_whole_site_stale(monkey
 # (several seconds each) by design -- see module docstring.
 # ---------------------------------------------------------------------------
 
-# chaophraya_mouth from src/grid.py -- live-confirmed 'ok' (real anomaly_z)
+# chaophraya_mouth from src/grid.py -- live-confirmed 'ok' (real index reading)
 # at date 2024-03-15 during this project's build.
 _LIVE_LAT, _LIVE_LNG, _LIVE_DATE = 13.4500, 100.6500, "2024-03-15"
 

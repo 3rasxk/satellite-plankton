@@ -94,7 +94,7 @@ def test_risk_map_is_structurally_valid_geojson_with_disclaimer(client):
 
         props = feature["properties"]
         assert isinstance(props["disclaimer"], str) and len(props["disclaimer"]) > 0
-        assert props["risk_level"] in ("normal", "elevated", "watch", "warning")
+        assert props["risk_level"] in (None, "normal", "elevated", "watch", "warning")
         assert isinstance(props["triggered_rules"], list)
 
 
@@ -154,6 +154,7 @@ def test_validation_response_is_uncalibrated_and_percentage_free(client, monkeyp
                 "low_weight": False,
                 "index_values": None,
                 "z_scores": None,
+                "z_score_status": "not_computed_no_valid_baseline",
                 "flagged": None,
             }
             for i in range(1, 15)
@@ -199,12 +200,10 @@ _TEST_SITE_ID = "pytest_e2e_separation_site"
 
 
 def _fake_detect_result() -> dict:
-    """A distinctive, easily-traced detection() output -- high-confidence
-    remote sensing, per CLAUDE.md's separation."""
+    """A real-shape index-only result, with its own scene date."""
     return {
-        "anomaly_z": 2.75,
         "index_values": {"ndci": 0.09, "2bda": 1.2, "3bda": 0.18, "b2_b3_ratio": 0.87},
-        "detected": True,
+        "actual_date": "2024-03-13",
         "index_used": "ndci",
         "status": "ok",
         "reason": None,
@@ -219,8 +218,8 @@ def _fake_risk_level_result() -> dict:
     internally and nests the result) -- this test does not re-implement
     that, it mocks the whole risk_level() call."""
     return {
-        "level": "warning",
-        "triggered_rules": ["elevated", "watch", "warning"],
+        "level": None,
+        "triggered_rules": [],
         "detection": _fake_detect_result(),
         "trend_14d": {"rising": True, "slope": 0.03},
         "sst": {"sst": 29.4, "sst_climatology": {"mean": 28.1, "std": 0.6}},
@@ -248,8 +247,14 @@ def test_detect_response_never_carries_prediction_fields(client, monkeypatch):
 
     # Detection fields present, and traceable straight back to the mock --
     # not recomputed or altered on the way through.
-    assert body["anomaly_z"] == 2.75
-    assert body["detected"] is True
+    assert "anomaly_z" not in body
+    assert body["spatial_anomaly_z"] is None
+    assert body["detected"] is None
+    assert body["index_values"] == _fake_detect_result()["index_values"]
+    assert body["actual_date"] == "2024-03-13"
+    assert body["elevated_z_threshold"] is None
+    assert body["warning_z_threshold"] is None
+    assert body["threshold_source"] is None
     assert body["status"] == "ok"
 
     # Prediction-layer fields must never leak into /detect's response --
@@ -269,10 +274,8 @@ def test_risk_map_keeps_detection_and_prediction_as_separate_fields_through_sche
     This is the closest this test suite gets to a full-stack path without
     a live GEE call: it exercises the real scheduler function and the
     real DB round-trip, not just a router calling a mock directly. Proves
-    the anomaly_z (detection, high-confidence) and risk_level/
-    triggered_rules (prediction, indicative) values survive that whole
-    path as independent fields -- never combined into one number, and
-    never derived from one another in a way the response would hide."""
+    real indices and their own date survive the full path while the
+    unavailable anomaly score, detection outcome and risk remain null."""
     db = SessionLocal()
     try:
         site = db.get(MonitoredSite, _TEST_SITE_ID)
@@ -288,6 +291,7 @@ def test_risk_map_keeps_detection_and_prediction_as_separate_fields_through_sche
             "fetch_satellite_meta",
             lambda *a, **k: {"cloud_fraction": 0.08, "actual_date": "2024-03-14"},
         )
+        monkeypatch.setattr(scheduler_module, "_refresh_images", lambda *a, **k: {})
 
         refresh_one_site(db, site, "2024-03-15")
         db.commit()
@@ -315,30 +319,23 @@ def test_risk_map_keeps_detection_and_prediction_as_separate_fields_through_sche
         )
         props = feature["properties"]
 
-        # Detection: high-confidence remote sensing, traceable to the mock.
-        assert props["anomaly_z"] == 2.75
-        assert props["detected"] is True
+        assert "anomaly_z" not in props
+        assert props["spatial_anomaly_z"] is None
+        assert props["detected"] is None
+        assert props["index_values"] == _fake_detect_result()["index_values"]
+        assert props["actual_date"] == "2024-03-13"
         assert props["status"] == "ok"
         assert props["index_used"] == "ndci"
 
         # Prediction: rule-based, indicative, traceable to the mock --
         # a *different* set of fields, never collapsed into the detection
         # ones above.
-        assert props["risk_level"] == "warning"
-        assert props["triggered_rules"] == ["elevated", "watch", "warning"]
+        assert props["risk_level"] is None
+        assert props["triggered_rules"] == []
         assert "indicative" in props["confidence_label"]
 
         # No merged/opaque score field anywhere in the response shape.
         assert _FORBIDDEN_MERGED_FIELD_NAMES.isdisjoint(props.keys())
-
-        # Structural independence: the prediction's categorical level is
-        # a string enum, the detection's anomaly_z is a float -- there is
-        # no single field that combines them, and risk_level being
-        # "warning" does not require or imply any particular anomaly_z
-        # value beyond what detect() itself returned (config.yaml's rules
-        # are the only thing connecting them, not the response shape).
-        assert isinstance(props["risk_level"], str)
-        assert isinstance(props["anomaly_z"], float)
 
         # Also present via /summary (same cache row, different aggregation
         # -- detection-only field surfaced there, never risk_level itself).
@@ -346,11 +343,8 @@ def test_risk_map_keeps_detection_and_prediction_as_separate_fields_through_sche
         assert summary_resp.status_code == 200
         summary_body = summary_resp.json()
         most_recent = summary_body["most_recent_detected_signal"]
-        assert most_recent is not None
-        assert most_recent["site_id"] == _TEST_SITE_ID
-        assert most_recent["anomaly_z"] == 2.75
-        assert "risk_level" not in most_recent
-        assert "triggered_rules" not in most_recent
+        assert most_recent is None
+        assert summary_body["risk_level_counts"]["not_evaluated"] >= 1
 
     finally:
         db.execute(delete(DetectionCache).where(DetectionCache.site_id == _TEST_SITE_ID))

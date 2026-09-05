@@ -92,11 +92,11 @@ frontend/
 ```js
 getRiskMap()                    // GET /risk-map      → GeoJSON
 getTimeseries(lat, lng)         // GET /timeseries    → array of readings
-detect(lat, lng, date)          // GET /detect        → {detected, anomaly_z, index_values, index_used, disclaimer}
+detect(lat, lng, date)          // GET /detect        → {detected: null, spatial_anomaly_z: null, index_values, index_used, actual_date, status, disclaimer}
 getSummary()                    // GET /summary       → region stats
 ```
 
-Every response carries a `disclaimer` field — surface it, don't discard it.
+Every response carries a `disclaimer` field — surface it, don't discard it. The detection path currently reports index readings only: no valid anomaly baseline exists, so detection verdicts and risk levels are null. `/timeseries` retains its independent, dimensionally valid MODIS `chlor_a` anomaly values.
 
 ---
 

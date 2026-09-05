@@ -1,5 +1,7 @@
 # Upper Gulf Sentinel-2 NDCI Watch Overlay Implementation Plan
 
+> Status correction, 2026-09-06: this is an unimplemented historical proposal in this branch. There is no `/watch-overlay` route or active spectral-index anomaly layer. It is not part of the current removal of invalid anomaly scoring. Current index readings have no anomaly statistic; `/timeseries` MODIS `chlor_a` anomalies remain separate and valid.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (- [ ]) syntax for tracking.
 
 **Goal:** Add a cached, whole-upper-Gulf Sentinel-2 tile overlay that renders only Gulf-connected clear-water pixels whose five-year seasonal NDCI anomaly is `z >= 1.5`, using a 10 m output grid while disclosing the 20 m effective NDCI source resolution.

@@ -8,7 +8,7 @@
 Software-only early-warning system for harmful algal blooms (green *Noctiluca* / red tide) in the upper Gulf of Thailand, targeting SDG 14. **Physics-based, not machine learning.** Two layers + a web app:
 
 1. **Satellite layer** Sentinel-2 (10 m, current detail) + MODIS (~1 km, 2002–present, climatology baseline) via Google Earth Engine.
-2. **Detection & prediction layer** Spectral indices (NDCI / 2BDA / 3BDA) → anomaly z-score against MODIS climatology → rule-based risk escalation. No trained model.
+2. **Detection & prediction layer** Spectral indices (NDCI / 2BDA / 3BDA), reading status and actual scene dates. Anomaly scoring and rule-based risk evaluation are disabled: no valid baseline exists for the indices. MODIS `chlor_a` climatology is valid for `chlor_a` only. No trained model.
 3. **Web dashboard** for viewing/inspection — no LINE, no push. Risk shown as colours on a map.
 
 ### Why no ML
@@ -17,16 +17,16 @@ Public HAB databases (HAEDAT, FWC, HABSOS, PMN — 836K rows) contain **zero usa
 ### Truth boundary (mandatory in every output — no overclaiming)
 - Detection is at **satellite pixel resolution** (Sentinel-2 ~10 m, MODIS ~1 km) — water colour signatures only, never individual organisms.
 - Small or dispersed blooms may be **missed**; state this.
-- **Detection and prediction are separate claims.** Detection (is there an anomaly now) is high-confidence standard remote sensing. Prediction (is risk rising) is rule-based and indicative — never presented as a validated forecast.
-- The **14 documented Thai events** are a historical record, not a validation gate. 1 of 14 has produced a real satellite reading; 13 cannot, for verified reasons (7 have no coordinate, 4 predate Sentinel-2, 1 coverage gap, 1 total cloud cover). Never cite this set as evidence that detection works — or that it fails. Always report **per-event, never as a percentage**: with n=14, a percentage implies precision the sample cannot support.
+- **Detection and prediction are separate claims.** Detection currently returns index readings only, with no valid anomaly statistic or verdict. Prediction cannot evaluate risk while that input is unavailable; it is never a validated forecast. The independent MODIS `/timeseries` calculation compares `chlor_a` with a `chlor_a` baseline and is unaffected.
+- The **14 documented Thai events** are a historical record, not a validation gate. 1 of 14 has produced a real satellite reading; 13 cannot, for verified reasons (7 have no coordinate, 4 predate Sentinel-2, 1 coverage gap, 1 total cloud cover). **All 14 cannot be evaluated for detection:** no valid anomaly baseline exists. th_010's former anomaly values mixed units and its claimed miss is withdrawn. Never cite this set as evidence that detection works — or that it fails. Always report **per-event, never as a percentage**.
 
 ## 1. Locked decisions (do not propose alternatives unless the human asks)
 
 | Topic | Decided | Rejected |
 |-------|---------|----------|
-| Approach | Physics: spectral indices + anomaly z-score + rule-based escalation | ❌ supervised ML / trained classifier |
+| Approach | Physics: spectral index readings; anomaly scoring and escalation currently disabled | ❌ supervised ML / trained classifier |
 | Indices | NDCI, 2BDA, 3BDA, B2/B3 *Noctiluca* discrimination — compare, don't assume | |
-| Baseline | MODIS `chlor_a` 2002–present climatology, per location per day-of-year | |
+| Baseline | MODIS `chlor_a` climatology for `chlor_a` only; no valid spectral-index baseline exists | ❌ comparing dimensionless indices with concentration baselines |
 | Primary satellite | Sentinel-2 (10 m) via GEE | |
 | Secondary satellite | MODIS via GEE — climatology + SST | |
 | Ground truth | 14 documented Thai events — a record, not a pass/fail gate (§0) | ❌ labels derived from a satellite threshold |
@@ -83,8 +83,8 @@ satellite-data ──► bloom-detection
 
 - [ ] Sentinel-2 + MODIS pipeline pulling real data for the upper Gulf
 - [ ] All three indices implemented, with per-event results published for the 14 documented events — a record, not a pass/fail gate (§0)
-- [ ] MODIS climatology built, anomaly z-scores computed
-- [ ] Leave-one-out calibration **attempted and its outcome reported honestly**: 7 of 14 are matchable (carry a coordinate), but only 1 of 14 has produced a real satellite reading, so no calibration is possible and thresholds stay literature defaults
+- [ ] MODIS `chlor_a` climatology used only for `chlor_a`; spectral-index anomaly scoring explicitly disabled
+- [ ] Leave-one-out status **reported honestly**: 7 of 14 have a coordinate and 1 has a satellite reading, but all 14 cannot be evaluated without a valid anomaly baseline; `calibrated_*` remains null
 - [ ] Rule-based prediction layer with every rule readable in config
 - [ ] Web: map + click-to-chart + summary page
 - [ ] LIMITATIONS.md states the truth boundary; no percentage claims on n=14; no overclaiming

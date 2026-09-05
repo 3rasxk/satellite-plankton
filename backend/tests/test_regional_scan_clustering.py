@@ -9,7 +9,7 @@ from src.regional_scan.clustering import cluster_points
 def _point(point_id, row, col, z, tier, actual_date=None):
     return {
         "point_id": point_id, "lat": 13.0 + row * 0.01, "lng": 100.0 + col * 0.01,
-        "row_idx": row, "col_idx": col, "anomaly_z": z, "threshold_tier": tier,
+        "row_idx": row, "col_idx": col, "spatial_anomaly_z": z, "threshold_tier": tier,
         "actual_date": actual_date,
     }
 
@@ -26,8 +26,8 @@ def test_single_point_forms_its_own_cluster():
     assert c["cell_count"] == 1
     assert c["member_point_ids"] == ["0_0"]
     assert c["centroid_lat"] == points[0]["lat"]
-    assert c["mean_anomaly_z"] == 1.6
-    assert c["max_anomaly_z"] == 1.6
+    assert c["mean_spatial_anomaly_z"] == 1.6
+    assert c["max_spatial_anomaly_z"] == 1.6
     assert c["threshold_tier"] == "elevated"
 
 
@@ -46,8 +46,8 @@ def test_8_connected_points_merge_into_one_cluster():
     assert set(c["member_point_ids"]) == {"0_0", "0_1", "1_0", "1_1"}
     # Highest tier among members wins.
     assert c["threshold_tier"] == "warning"
-    assert c["max_anomaly_z"] == 2.1
-    assert c["mean_anomaly_z"] == (1.6 + 1.7 + 2.1 + 1.8) / 4
+    assert c["max_spatial_anomaly_z"] == 2.1
+    assert c["mean_spatial_anomaly_z"] == (1.6 + 1.7 + 2.1 + 1.8) / 4
 
 
 def test_diagonal_adjacency_merges():

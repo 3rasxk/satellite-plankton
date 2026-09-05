@@ -2,7 +2,8 @@
  * Axios client for the Gulf of Thailand Algal Bloom Monitor API.
  *
  * Data source: backend/src (FastAPI) — wraps detection/src physics-based
- * indices + MODIS climatology anomaly z-scores + rule-based escalation.
+ * indices with actual scene dates. Spectral-index anomaly scoring and
+ * rule-based escalation are inactive until a valid baseline exists.
  * No trained model anywhere in this chain (CLAUDE.md §0/§1).
  *
  * Limitation: this file only shapes HTTP calls. It does not interpret or

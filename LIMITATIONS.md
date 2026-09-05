@@ -6,8 +6,8 @@ This document exists so nobody has to ask. It transcribes, in the writer's own w
 
 Two different claims live in this system, and they must never be read as one:
 
-- **Detection** — is there a chlorophyll anomaly at this pixel, right now? Standard remote sensing, high confidence, but still bounded by everything below (resolution, cloud, turbidity).
-- **Prediction** — is bloom risk trending up? Rule-based (config.yaml conditions on anomaly z-score, trend, SST, rainfall), explicitly labelled `"indicative, rule-based -- not a validated forecast"` everywhere it's surfaced (API responses, the dashboard). Never a validated forecast, never assigned a lead-time accuracy number.
+- **Detection** — currently reports Sentinel-2 spectral index values and the actual scene date only. No valid anomaly baseline exists for these indices, so an anomaly statistic and a detection verdict are not computed. The separate MODIS `/timeseries` calculation compares `chlor_a` with a `chlor_a` baseline and remains valid.
+- **Prediction** — the rule-based escalation conditions in config require an anomaly statistic that is unavailable. They cannot currently evaluate bloom risk. The retained prediction interface is explicitly labelled `"indicative, rule-based -- not a validated forecast"`; it supplies no validated forecast or lead-time accuracy number.
 
 Every response from the API carries these as separate fields (`backend/src/schemas.py`), never merged into one score, and the backend and frontend both enforce this structurally (see the integration tests added in Phase 5, `backend/tests/test_integration_e2e.py`).
 
@@ -15,7 +15,7 @@ Every response from the API carries these as separate fields (`backend/src/schem
 
 **Detection floor — blooms smaller than a pixel are invisible.** MODIS's ~4.6 km Level-3 grid needs a bloom covering a meaningful fraction of that pixel (literature puts this around 13% areal coverage) before it registers at all. Sentinel-2's 10 m resolution shrinks this floor by roughly three orders of magnitude, but does not remove it — a small, dispersed, or very early-stage bloom can still sit entirely inside one pixel's noise.
 
-**Turbid water degrades the indices.** NDCI, 2BDA, and 3BDA were designed against relatively clear open-ocean water. The upper Gulf's own bloom hotspots are river mouths — exactly where suspended sediment is heaviest and these indices are least trustworthy. 3BDA is carried specifically because it corrects for some of this backscatter, but per `detection/reports/index_comparison.md`, this correction has not actually been checked against a real river-mouth bloom event yet (no validation event has a usable coordinate there — see below).
+**Turbid water complicates index interpretation.** The upper Gulf's bloom hotspots include river mouths, where suspended sediment can affect the optical signal. The proposed benefit of 3BDA in this water has not been validated here: the coordinate-bearing Tha Chin events have no usable Sentinel-2 reading, and no event has a valid anomaly statistic. See `detection/reports/index_comparison.md`.
 
 **Clouds are a hard stop, not a soft one.** Optical sensors see nothing through cloud. The upper Gulf's monsoon months carry real blind periods where no usable Sentinel-2 or MODIS reading exists at all — this system reports `no_imagery`/gap status honestly in that case rather than substituting a stale or nearby-date reading silently.
 
@@ -31,34 +31,14 @@ Every response from the API carries these as separate fields (`backend/src/schem
 
 **Geographic scope is the upper Gulf of Thailand only.** Nothing here is calibrated, or claimed to generalize, beyond that area.
 
-## NDCI watch overlay limitations
+## No spectral-index anomaly overlay is active
 
-The **NDCI watch signal (z >= 1.5)** is a current anomaly screen for human
-review, separate from the rule-based prediction layer. Its `z >= 1.5`
-threshold is an uncalibrated screen, not bloom confirmation or a forecast.
-NDCI can also respond to sediment, optically complex coastal water, residual
-cloud contamination, and other non-bloom causes.
-
-The overlay filters known Sentinel-2 SCL cloud and invalid classes, but that
-filter cannot guarantee that every remaining pixel is uncontaminated.
-Transparent pixels must not be read as normal water: they can be below the
-watch threshold, cloud or invalid, land or disconnected water, short of the
-minimum seasonal baseline, or have zero baseline variance.
-
-The rendered grid is 10 m, but NDCI uses Sentinel-2 B5 at 20 m. B5 is
-resampled to the output grid, so the effective NDCI source resolution remains
-20 m; resampling does not add spatial detail. The JRC mask selects historical
-surface water connected to Gulf seed points, removing isolated inland water.
-It does not measure salinity, and connected estuaries or lower river mouths
-can remain.
-
-Each pixel in the 30-day quality mosaic is the latest valid observation for
-that location. Consequently, a single overlay can contain pixels from
-different acquisition dates; its source window and newest available scene
-date do not identify one acquisition date for the whole Gulf. Earth Engine
-tile URLs are cached but may expire or become unavailable. The API surfaces
-`stale` and `error` state instead of treating an unavailable tile or a missing
-pixel as a clear reading.
+The earlier NDCI watch-overlay description was a proposed capability, not
+an implemented route or active layer in this branch. The regional scan
+currently shows raw index values and each point's actual scene date. No
+valid spectral-index anomaly statistic exists, so there is no anomaly
+threshold, risk tier or anomaly cluster to display. The separate MODIS
+`/timeseries` comparison of `chlor_a` with a `chlor_a` baseline is unaffected.
 
 ## What the build actually found, beyond what the plan anticipated
 
@@ -77,19 +57,19 @@ As of 2026-09-05, **1 of the 14 has produced a real satellite reading.** The oth
 
 **Correction to a claim this document previously made.** Until 2026-09-05 this section said `lat`/`lng` "are blank for all 14". That has been false since 2026-08-22: **7 of the 14 carry a real, human-confirmed coordinate** (th_003, th_004, th_006, th_008, th_010, th_012, th_014). The sentence was not updated when the coordinates were added.
 
-**The one matched event, and why it settles nothing.** th_010 (Ang Sila, 2020-02-11..20) now returns a complete reading — Sentinel-2 on `actual_date` 2020-02-16 at `cloud_fraction` 0.0, a reliable MODIS climatology baseline (n=6), and z-scores for all four indices. Every z is strongly negative (NDCI −4.50, 2BDA −3.65, 3BDA −4.44, B2/B3 −3.78) at a site where a bloom was documented. Those four come from a live `thresholds.attempt_satellite_reading(13.338, 100.925, "2020-02-16", 10, config)` call on 2026-09-05; `detection/reports/event_table.md` publishes only the primary index's (NDCI −4.50), so the other three are reproducible by that call rather than readable from a checked-in artifact. Three qualifiers apply together, and none of them may be dropped when this is cited:
+**The one event with a satellite reading, and what it actually establishes.** th_010 (Ang Sila, 2020-02-11..20) returns Sentinel-2 bands and index values on `actual_date` 2020-02-16 at `cloud_fraction` 0.0. Its anomaly statistic was never validly computed: the former calculation subtracted a MODIS `chlor_a` concentration baseline (mg/m³) from a dimensionless spectral index. Those quantities cannot be subtracted to measure an anomaly. The published anomaly values and the resulting miss claim are withdrawn entirely. The true state is **not computed — no valid baseline exists**. Three qualifiers apply to the satellite reading itself, and none may be dropped when it is cited:
 
 - **n = 1.** Per §0 this is reported per-event and never as a rate. One observation is not a hit rate, a miss rate, or a skill estimate.
-- **Wrong target organism.** th_010 is `karenia_sp`, not the *Noctiluca scintillans* the B2/B3 discrimination feature is built for. §2 below already establishes that a miss on a non-*Noctiluca* event is not evidence that feature fails.
+- **Wrong target organism.** th_010 is `karenia_sp`, not the *Noctiluca scintillans* the B2/B3 discrimination feature is built for. Its reading does not validate that feature.
 - **It exists only because of the ETOPO1 fallback, at that fallback's weakest point.** JRC Global Surface Water returns zero pixels in this buffer; ETOPO1 averages +3.1 m over it while still placing ~35% below sea level, because one ~1.85 km cell straddles the shoreline. The bands come back at 1040–1660 against 200–560 for open Gulf water — consistent with a turbid pier strip, possibly with shoreline in the average.
 
 This event was previously recorded as failing "a real site characteristic". That was wrong: it was the water-mask defect described in limitation 5, and `detection/reports/event_table.md` quoted the defect's own error string as the evidence.
 
-**The first real leave-one-out result this project has ever had is a miss.** With th_010 producing a reading, the `chonburi_feb2020` cluster (th_009 + th_010, held out together per `CALIBRATION_NOTES.md` §1) now evaluates for real against the uncalibrated default cutoff `z >= 1.5`, and reports `caught: no` — th_010's z is −4.503, far below it. Read that with all three qualifiers above attached: it is one event, of the wrong target species, on the shakiest reading the pipeline produces. It is **not** an accuracy figure, and this codebase computes none.
+**All 14 events cannot be evaluated for detection.** th_010 is not a miss: its anomaly statistic was invalid, so no threshold comparison or leave-one-out outcome can be inferred from it. The `chonburi_feb2020` cluster (th_009 + th_010, held out together per `CALIBRATION_NOTES.md` §1) has `caught: null`, like every other leave-one-out unit. The other 13 events also lack a usable satellite reading for the reasons above. Satellite availability and detection evaluation are separate facts.
 
 One exception was attempted: `th_001` is the only event described at the scale of the whole study area ("upper Gulf of Thailand") rather than a specific site, so a same-scale regional-proxy point was tried as a real check. It found zero Sentinel-2 scenes in a 25-day search window around the event date, and a genuine ~2-month gap in the MODIS `chlor_a` archive spanning the event date — confirmed live during this build, not a bug in the code.
 
-**What this set may and may not be used for.** It may be cited as a record of documented Thai blooms, as the provenance for §0's no-usable-labels finding, and per-event as a description of where this pipeline can and cannot operate. It may **not** be cited as evidence that detection works, nor as evidence that it fails. The leave-one-out sweep in `detection/src/thresholds.py` has one matched pair; that is not a calibration set, so the z-score cutoffs in `detection/src/config.yaml` remain literature/convention defaults — the same illustrative shape `docs/DETECTION_PLAN.md` itself proposed as an example, not values tuned against real Thai bloom data. This is stated in that file's own header, in `detection/reports/event_table.md`, and in the `/validation` API response's `calibration_caveat` field. Treat every threshold in this system as a starting point, not a calibrated result.
+**What this set may and may not be used for.** It may be cited as a record of documented Thai blooms, as the provenance for §0's no-usable-labels finding, and per-event as a description of satellite availability. It may **not** be cited as evidence that detection works or fails. `detection/src/thresholds.py` explicitly disables anomaly scoring and calibration because no valid index baseline exists. All 14 events carry `z_score_status: not_computed_no_valid_baseline`; the retained `calibrated_*: null` fields in `detection/src/config.yaml` are placeholders for future work, not operative or calibrated cutoffs.
 
 See `data/validation/CALIBRATION_NOTES.md` for the methodology decisions this reality forced: same-episode clusters (th_005/006/007, th_009/010 — the same physical bloom reported at multiple nearby sites) must be held out together in any future leave-one-out run, not split; th_012/013/014 are pre-monitoring-era (1981–83) with no cell count in any source and carry lower evidentiary weight; and `cell_count` is stored as literal text (a number, a range, or blank) because several sources gave a range and no single number in that range is more truthful than another.
 
@@ -97,7 +77,7 @@ See `data/validation/CALIBRATION_NOTES.md` for the methodology decisions this re
 
 The B2/B3 ratio (secondary, lower-confidence green-*Noctiluca* discrimination) is specific to *Noctiluca scintillans*'s optical signature. Only 6 of the 14 events are that species. The other 8 span `ceratium_furca`, `karenia_sp` (×2), a diatom (`leptocylindrus_sp`), a mixed *Noctiluca miliaris*/*Ceratium furca* event, a cyanobacterium (`trichodesmium_erythraeum`), and a PSP-causing event (`suspected protogonyaulax sp.`) whose two cross-referenced sources disagree on the casualty count (34 hospitalized/1 death vs. 63 victims — unresolved in the source material, reported as-is rather than picking one). A miss on any of these 8 is not evidence the B2/B3 feature doesn't work; it's a different organism with a different optical signature than the feature was designed for. `detection/reports/event_table.md` carries the `species` column specifically so this distinction is never visually flattened into a single miss/hit count.
 
-**The one event with a real reading is one of these 8.** th_010 is `karenia_sp`. Its strongly negative indices are therefore exactly the case this section describes — a different organism with a different optical signature than the B2/B3 feature was designed for — and must not be read as the feature failing.
+**The one event with a real reading is one of these 8.** th_010's documented organism is `karenia_sp`, which differs from the B2/B3 feature's target. The optical index values do not identify that organism; without a valid anomaly statistic they yield no hit or miss and do not establish the feature's performance.
 
 ### 3. The MODIS Ocean Color catalog on Google Earth Engine runs roughly nine months behind the present
 
@@ -129,7 +109,7 @@ Two consequences that are not yet reflected elsewhere in this repo, recorded her
 
 ## What this means, plainly
 
-- **Trust the detection layer's presence/absence signal at face value, within the resolution/cloud/turbidity limits above** — this is standard remote sensing, not a novel or fragile technique.
-- **Do not trust the specific threshold values in `config.yaml` as calibrated to Thai conditions.** They are defensible literature defaults, explicitly marked as such. One matched pair (§1) is not a calibration set, and 13 of the 14 events cannot produce one at all.
+- **Read detection output as spectral index values with actual scene dates.** No anomaly statistic or presence/absence verdict is computed: no valid baseline exists for those indices.
+- **The detection thresholds in `config.yaml` are inactive placeholders.** All 14 events cannot be evaluated; no calibrated cutoff or hit/miss result exists.
 - **Do not read any per-event result in `detection/reports/event_table.md` or the `/validation` endpoint as a hit/miss rate.** With 1 of 14 events having produced a real satellite reading, there is no rate to report, and none is reported anywhere in this codebase — every validation claim is per-event, by design. See §1 for why that single reading is not evidence in either direction.
-- **Treat the prediction layer's output as a legible, inspectable set of triggered rules, not a probability.** `triggered_rules` tells you exactly which conditions fired; nothing in this system computes or displays a confidence percentage for that outcome.
+- **The prediction rules cannot currently evaluate risk because their anomaly input is unavailable.** An empty `triggered_rules` list does not mean normal water or absence of a bloom.

@@ -1,5 +1,7 @@
 # HAB Sentinel Dashboard Implementation Plan
 
+> Correction, 2026-09-06: current detection-anomaly displays, gauge/risk verdicts and validation-image gates in this historical plan are superseded. The former statistic mixed dimensionless spectral indices with MODIS concentrations and is removed. Current detection output is indices/status/actual_date only, with null API `spatial_anomaly_z`; display "Not computed — no valid baseline exists". Validation images follow raw-reading availability, not anomaly values. `/timeseries` `anomaly_z` remains the valid MODIS `chlor_a` calculation. Numeric detection examples below are withdrawn implementation instructions, not evidence.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace the current 3-page top-nav frontend (`/`, `/summary`, `/validation`) with the 5-screen sidebar-nav "HAB Sentinel" dashboard, in the macOS-Sequoia-style design system, with no loss of any real data currently surfaced and no new fabricated data.
@@ -1017,7 +1019,7 @@ export default function SpectralMetricsCard({ site, detect, latestTimeseriesPoin
           <span className="spectral-label">SST (°C) — ไม่มีข้อมูล</span>
         </div>
         <div className="spectral-cell">
-          <span className="spectral-value mono">{formatZ(detect?.anomaly_z)}</span>
+          <span className="spectral-value mono">{formatZ(detect?.spatial_anomaly_z)}</span>
           <span className="spectral-label">Anomaly z-score</span>
         </div>
       </div>
@@ -1316,7 +1318,7 @@ export default function NdciPage() {
                     <tr key={p.site_id}>
                       <td>{p.name}</td>
                       <td className="mono">{p.index_used || '—'}</td>
-                      <td className="mono">{isNoData ? '—' : formatZ(p.anomaly_z)}</td>
+                      <td className="mono">{isNoData ? '—' : formatZ(p.spatial_anomaly_z)}</td>
                       <td>{isNoData ? STATUS_LABEL[p.status] || 'ไม่มีค่าอ่าน' : RISK_LABEL_TH[p.risk_level]}</td>
                     </tr>
                   )
@@ -1331,7 +1333,7 @@ export default function NdciPage() {
 }
 ```
 
-Note: `/risk-map`'s `anomaly_z` is the site's current anomaly z-score, not a raw NDCI value (no raw-NDCI field exists on `RiskMapProperties` — only `/detect`'s `index_values` carries that, per-request). The table header above is deliberately `ดัชนี (z-score)`, not `NDCI` — the adjacent `ดัชนีที่ใช้` (index-used) column already names which index (`ndci` for every site today) the z-score column's value is drawn from, so the header never claims a specific index by itself.
+Correction: the former `/risk-map` anomaly value was dimensionally invalid and is removed. Its `spatial_anomaly_z` field is a null placeholder. The current table shows raw NDCI where available and states that the anomaly is not computed because no valid baseline exists; the historical table example above is superseded.
 
 - [ ] **Step 2: Wire the route**
 
@@ -1445,7 +1447,7 @@ export default function SeasonalAnomalyPage() {
         name: f.properties.name,
         lat: f.geometry.coordinates[1],
         lng: f.geometry.coordinates[0],
-        anomaly_z: f.properties.anomaly_z,
+        spatial_anomaly_z: f.properties.spatial_anomaly_z,
         status: f.properties.status,
       })),
     [riskMapApi.data],
@@ -1471,7 +1473,7 @@ export default function SeasonalAnomalyPage() {
   const s = summaryApi.data
   const sitesWithReading = sites.filter((site) => !NO_DATA_STATUS.has(site.status)).length
   const watchCount = sites.filter((site) => site.status === 'ok' && site.risk_level === 'watch').length
-  const maxZ = sites.reduce((max, site) => (site.anomaly_z != null && site.anomaly_z > max ? site.anomaly_z : max), -Infinity)
+  const maxZ = sites.reduce((max, site) => (site.spatial_anomaly_z != null && site.spatial_anomaly_z > max ? site.spatial_anomaly_z : max), -Infinity)
 
   return (
     <div className="page">
@@ -1495,7 +1497,7 @@ export default function SeasonalAnomalyPage() {
           <div className="section-title">ล่าสุดทั้งภูมิภาค</div>
           {s.most_recent_detected_signal ? (
             <p className="stat-detail">
-              {s.most_recent_detected_signal.name} · z = {formatZ(s.most_recent_detected_signal.anomaly_z)} ·{' '}
+              {s.most_recent_detected_signal.name} · z = {formatZ(s.most_recent_detected_signal.spatial_anomaly_z)} ·{' '}
               {s.most_recent_detected_signal.actual_date || '—'}
             </p>
           ) : (
@@ -1512,7 +1514,7 @@ export default function SeasonalAnomalyPage() {
           <div className="anomaly-site-row" key={site.site_id}>
             <div className="anomaly-site-name">
               {site.name}
-              <span className="mono stat-detail"> z = {formatZ(site.anomaly_z)}</span>
+              <span className="mono stat-detail"> z = {formatZ(site.spatial_anomaly_z)}</span>
             </div>
             <AnomalyStrip
               segments={bucketAnomalyStrip(points, 90, 45)}
@@ -1847,9 +1849,9 @@ export default function ReportsPage() {
                         <span className={`match-badge${ev.matchable ? ' matched' : ''}`}>{ev.matchable ? ev.match_method || 'matched' : 'not matched'}</span>
                         {ev.match_reason && <div className="stat-detail" style={{ marginTop: 4 }}>{ev.match_reason}</div>}
                       </td>
-                      <td className="mono">{ev.anomaly_z != null ? formatZ(ev.anomaly_z) : '—'}</td>
+                      <td className="mono">{ev.spatial_anomaly_z != null ? formatZ(ev.spatial_anomaly_z) : '—'}</td>
                       <td className="event-image-cell">
-                        {ev.matchable && ev.anomaly_z != null ? (
+                        {ev.matchable && ev.spatial_anomaly_z != null ? (
                           <SatelliteImage trueColorUrl={ev.true_color_image_url} ndciHeatmapUrl={ev.ndci_heatmap_image_url} noImageMessage="No satellite image available for this event." compact />
                         ) : (
                           <span className="no-rules">No satellite image available for this event.</span>

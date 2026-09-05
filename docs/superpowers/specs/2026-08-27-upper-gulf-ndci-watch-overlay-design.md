@@ -1,5 +1,7 @@
 # Upper Gulf Sentinel-2 NDCI Watch Overlay — Design
 
+> Status correction, 2026-09-06: this is an unimplemented historical proposal in this branch. No `/watch-overlay` route or active spectral-index anomaly layer exists. The current detection path reports raw indices and actual scene dates only; it does not implement the statistic proposed below. The MODIS `/timeseries` anomaly calculation remains separate and valid.
+
 Date: 2026-08-27
 
 ## Objective

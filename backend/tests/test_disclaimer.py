@@ -12,9 +12,8 @@ from src.schemas import DISCLAIMER_TEXT
 
 def _valid_detect_result() -> dict:
     return {
-        "anomaly_z": 0.3,
         "index_values": {"ndci": 0.01, "2bda": 0.02, "3bda": 0.03, "b2_b3_ratio": 0.9},
-        "detected": False,
+        "actual_date": "2024-03-14",
         "index_used": "ndci",
         "status": "ok",
         "reason": None,

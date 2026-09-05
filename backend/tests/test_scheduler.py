@@ -2,7 +2,7 @@
 build report proved this manually via live monkeypatching; this is that
 same scenario saved as a real, repeatable test). A refresh that raises
 must mark the cache row `stale=True` with `error` set, while leaving
-every substantive field (status, anomaly_z, index_used, level,
+every substantive field (status, spatial_anomaly_z, index_used, level,
 fetched_at, ...) exactly as it was from the prior successful refresh --
 a failed refresh must never look like a fresh one, and must never
 silently discard/alter the last known-good reading."""
@@ -29,12 +29,12 @@ def _good_cache_fields(fetched_at: datetime) -> dict:
     return dict(
         target_date="2024-03-01",
         status="ok",
-        detected=False,
-        anomaly_z=-0.42,
+        detected=None,
+        spatial_anomaly_z=None,
         index_used="ndci",
         index_values={"ndci": 0.02, "2bda": 0.03, "3bda": 0.04, "b2_b3_ratio": 0.91},
         reason=None,
-        level="normal",
+        level=None,
         triggered_rules=[],
         confidence_label="rule-based, indicative -- not a validated forecast",
         sst_anomaly=0.1,

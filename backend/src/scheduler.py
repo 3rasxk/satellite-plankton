@@ -41,7 +41,7 @@ mirrors exactly why the numeric fields are cached here at all.
 
 Image rendering is only attempted when the numeric detection for that
 site succeeded (`status == 'ok'`) -- if `detect()` itself couldn't get a
-usable reading (no_imagery/no_water_pixels/no_climatology), the same
+usable reading (no_imagery/no_water_pixels), the same
 underlying scene problem would make the image render fail the same way
 (same-scene guarantee), so a second live GEE round trip that's expected
 to fail is skipped rather than attempted and logged as noise. A transient
@@ -181,8 +181,8 @@ def refresh_one_site(db: Session, site: MonitoredSite, target_date: str) -> None
         fields = dict(
             target_date=target_date,
             status=detection["status"],
-            detected=detection["detected"],
-            anomaly_z=detection["anomaly_z"],
+            detected=None,
+            spatial_anomaly_z=None,
             index_used=detection["index_used"],
             index_values=detection["index_values"],
             reason=detection["reason"],
@@ -193,7 +193,7 @@ def refresh_one_site(db: Session, site: MonitoredSite, target_date: str) -> None
             trend_14d_rising=prediction["trend_14d"].get("rising"),
             rainfall_mm=(prediction["rainfall"] or {}).get("recent_rainfall_mm"),
             cloud_fraction=meta["cloud_fraction"],
-            actual_date=meta["actual_date"],
+            actual_date=detection.get("actual_date"),
             fetched_at=datetime.now(timezone.utc),
             stale=False,
             error=None,

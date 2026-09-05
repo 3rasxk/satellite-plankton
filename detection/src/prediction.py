@@ -1,8 +1,7 @@
 """
 Rule-based risk escalation -- the prediction layer.
 
-Data source: composes `indices.py` (Sentinel-2 spectral indices),
-`climatology.py` (MODIS chlor_a baseline/z-score), and, through
+Data source: composes `indices.py` (Sentinel-2 spectral indices) and, through
 `_data_pipeline.py`, live `get_modis_sst` and `get_rainfall_proxy` calls.
 No trained model, no fitted weights -- every cutoff and rule is read from
 `config.yaml`'s `escalation_rules`/`trend` sections (CLAUDE.md
@@ -13,8 +12,8 @@ confidence, per CLAUDE.md's truth boundary and
 `.claude/agents/bloom-detection.md` §"Non-negotiable rules"
 ("Detection and prediction are separate outputs... Never merge them into
 one number"):
-  - `detect()` answers "is there an anomalous signal right now" --
-    standard remote sensing, high confidence.
+  - `detect()` returns spectral index readings and their actual scene date.
+    No valid anomaly baseline exists for those indices yet.
   - `risk_level()` answers "is risk trending up" -- rule-based,
     indicative only. Its docstring and `prediction_confidence_label` in
     config.yaml must be read by any caller before that word ("warning",
@@ -23,9 +22,8 @@ one number"):
 Limitation restated (docs/DETECTION_PLAN.md §3): published ML
 forecasting reaches ~96% accuracy at 8-day lead time; this rule-based
 layer is not claimed to be comparable, and no lead-time accuracy number
-is computed anywhere in this module -- with the validation set's 0-of-14
-real satellite matches (see thresholds.py), there is no basis to compute
-one even informally.
+is computed anywhere in this module. Risk escalation is inactive while
+the required spatial anomaly statistic is not computed.
 """
 
 from __future__ import annotations
@@ -48,7 +46,6 @@ from _data_pipeline import (  # noqa: E402
     get_rainfall_proxy,
     get_sentinel2_bands,
 )
-from climatology import build_climatology, z_score  # noqa: E402
 from indices import compute_all_indices  # noqa: E402
 
 CONFIG_PATH = _THIS_DIR / "config.yaml"
@@ -131,17 +128,16 @@ def compute_acceleration(
 
 
 # --------------------------------------------------------------------------
-# Detection -- high confidence, standard remote sensing.
+# Sentinel-2 readings -- no anomaly detection active.
 # --------------------------------------------------------------------------
 
 
 def detect(lat: float, lng: float, date: str, config: dict | None = None) -> dict:
-    """Is there an anomalous chlorophyll signal right now, at this pixel?
+    """Read spectral indices at this pixel, without an anomaly statistic.
 
-    High-confidence output (docs/DETECTION_PLAN.md §1) -- standard
-    spectral-index + climatology-anomaly remote sensing, no rule-based
-    trend/prediction logic here (that is `risk_level`, separate output,
-    separate confidence).
+    MODIS chlor_a concentrations are not a valid baseline for Sentinel-2
+    spectral indices. No replacement baseline or detection decision is
+    implemented here; `status='ok'` means only that indices were read.
 
     Args:
         lat, lng: WGS84 coordinates.
@@ -149,22 +145,17 @@ def detect(lat: float, lng: float, date: str, config: dict | None = None) -> dic
         config: pre-loaded config.yaml dict; loaded fresh if omitted.
 
     Returns:
-        {'anomaly_z': float | None, 'index_values': dict | None,
-         'detected': bool, 'index_used': str, 'status': str,
+        {'index_values': dict | None, 'index_used': str, 'status': str,
          'reason': str | None, 'actual_date': str | None}
         `status` is one of: 'ok', 'no_imagery' (cloud/no scene in
-        window), 'no_water_pixels' (on land/shore), 'no_climatology'
-        (MODIS archive gap at this location/date). `detected` is False
-        (never True) whenever `status != 'ok'` -- absence of data is
-        never reported as absence of a bloom.
+        window), or 'no_water_pixels' (on land/shore).
         `actual_date` is the real Sentinel-2 scene date this reading came
         from ("YYYY-MM-DD"), which may differ from the requested `date`
         by up to the search window -- get_sentinel2_bands resolves the
         nearest cloud-free scene, so two points scanned on the same
         `date` can be backed by scenes days apart. It is None only on
         the two statuses where no imagery was ever obtained
-        ('no_imagery', 'no_water_pixels'); 'no_climatology' happens
-        after a successful Sentinel-2 pull and so carries a real date.
+        ('no_imagery', 'no_water_pixels').
         Never substitute the requested `date` for it.
 
     Raises:
@@ -180,9 +171,7 @@ def detect(lat: float, lng: float, date: str, config: dict | None = None) -> dic
         bands = get_sentinel2_bands(lat, lng, date)
     except NoCloudFreeImageryError as exc:
         return {
-            "anomaly_z": None,
             "index_values": None,
-            "detected": False,
             "index_used": primary_index,
             "status": "no_imagery",
             "reason": str(exc),
@@ -191,9 +180,7 @@ def detect(lat: float, lng: float, date: str, config: dict | None = None) -> dic
         }
     except NoWaterPixelsError as exc:
         return {
-            "anomaly_z": None,
             "index_values": None,
-            "detected": False,
             "index_used": primary_index,
             "status": "no_water_pixels",
             "reason": str(exc),
@@ -203,28 +190,8 @@ def detect(lat: float, lng: float, date: str, config: dict | None = None) -> dic
         }
 
     index_values = compute_all_indices(bands)
-    climatology = build_climatology(lat, lng, date, config["climatology"]["window_days"])
-    z = z_score(index_values[primary_index], climatology)
-
-    if z["z"] is None:
-        return {
-            "anomaly_z": None,
-            "index_values": index_values,
-            "detected": False,
-            "index_used": primary_index,
-            "status": "no_climatology",
-            "reason": z["reason"],
-            # Sentinel-2 DID resolve here -- the gap is in the MODIS
-            # climatology, not the imagery -- so this carries the real
-            # scene date, the one the index_values above came from.
-            "actual_date": bands["actual_date"],
-        }
-
-    cutoff = config["thresholds"][primary_index]["elevated_z"]
     return {
-        "anomaly_z": z["z"],
         "index_values": index_values,
-        "detected": z["z"] >= cutoff,
         "index_used": primary_index,
         "status": "ok",
         "reason": None,
@@ -245,12 +212,12 @@ _LEVEL_ORDER = ["elevated", "watch", "warning"]
 
 
 def _condition_context(
-    anomaly_z: float | None,
+    spatial_anomaly_z: float | None,
     trend_14d: dict,
     sst_anomaly: float | None,
 ) -> dict:
     return {
-        "anomaly_z": anomaly_z,
+        "spatial_anomaly_z": spatial_anomaly_z,
         "trend_14d_rising": trend_14d.get("rising"),
         "sst_anomaly": sst_anomaly,
     }
@@ -317,11 +284,11 @@ def evaluate_rules(ctx: dict, escalation_rules: dict) -> dict:
 
 
 def risk_level(lat: float, lng: float, date: str, config: dict | None = None) -> dict:
-    """Is risk trending up? Rule-based, indicative -- lower confidence
-    than `detect()`. Never call this the same "score" as detect()'s
-    anomaly_z; the two are returned in the same dict here only for
-    handoff convenience (`.claude/agents/bloom-detection.md` §"Handoff"
-    return shape), not merged into one number.
+    """Return environmental context with anomaly-dependent escalation inactive.
+
+    `spatial_anomaly_z` is reserved for a future valid statistic and is
+    always None here. The configured rules therefore cannot fire. The
+    level is None because the risk cannot currently be evaluated.
 
     Args:
         lat, lng: WGS84 coordinates.
@@ -329,7 +296,7 @@ def risk_level(lat: float, lng: float, date: str, config: dict | None = None) ->
         config: pre-loaded config.yaml dict; loaded fresh if omitted.
 
     Returns:
-        {'level': 'normal'|'elevated'|'watch'|'warning',
+        {'level': None, 'reason': 'not_computed_no_valid_baseline',
          'triggered_rules': [...], 'detection': {...detect() output...},
          'trend_14d': {...}, 'sst': {...} | None,
          'rainfall': {...} | None,
@@ -366,11 +333,12 @@ def risk_level(lat: float, lng: float, date: str, config: dict | None = None) ->
     except GEEAuthError:
         raise
 
-    ctx = _condition_context(detection["anomaly_z"], trend_14d, sst_anomaly)
+    ctx = _condition_context(None, trend_14d, sst_anomaly)
     evaluation = evaluate_rules(ctx, config["escalation_rules"])
 
     return {
-        "level": evaluation["level"],
+        "level": None,
+        "reason": "not_computed_no_valid_baseline",
         "triggered_rules": evaluation["triggered_rules"],
         "detection": detection,
         "trend_14d": trend_14d,

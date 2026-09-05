@@ -1,6 +1,6 @@
 import { useApi } from '../hooks/useApi.js'
 import { getValidation } from '../api/client.js'
-import { formatZ } from '../constants.js'
+import { ANOMALY_NOT_COMPUTED } from '../constants.js'
 import SatelliteImage from '../components/SatelliteImage.jsx'
 
 /**
@@ -17,8 +17,8 @@ import SatelliteImage from '../components/SatelliteImage.jsx'
  * that single reading is not evidence in either direction.
  *
  * The "Satellite image" column follows the same rule: it renders a real
- * image only when `ev.matchable && ev.anomaly_z != null` (a real
- * satellite reading exists — see backend/src/routers/validation.py),
+ * image only when `ev.reading_status === 'ok'` (a real
+ * satellite reading exists independently of anomaly scoring),
  * using `ev.true_color_image_url`/`ev.ndci_heatmap_image_url`, which the
  * backend itself only populates under that exact condition. No count is
  * hardcoded anywhere in this file.
@@ -84,7 +84,8 @@ export default function ValidationPage() {
                     <th>Species</th>
                     <th>Cell count</th>
                     <th>Match</th>
-                    <th>Anomaly z</th>
+                    <th>Anomaly status</th>
+                    <th>Actual scene date</th>
                     <th>Satellite image</th>
                     <th>Notes</th>
                   </tr>
@@ -113,11 +114,10 @@ export default function ValidationPage() {
                           <div className="stat-detail" style={{ marginTop: 4 }}>{ev.match_reason}</div>
                         )}
                       </td>
-                      <td className="mono">
-                        {ev.anomaly_z != null ? formatZ(ev.anomaly_z) : '—'}
-                      </td>
+                      <td>{ANOMALY_NOT_COMPUTED}</td>
+                      <td className="mono">{ev.actual_date || '—'}</td>
                       <td className="event-image-cell">
-                        {ev.matchable && ev.anomaly_z != null ? (
+                        {ev.reading_status === 'ok' ? (
                           <SatelliteImage
                             trueColorUrl={ev.true_color_image_url}
                             ndciHeatmapUrl={ev.ndci_heatmap_image_url}
@@ -145,7 +145,7 @@ export default function ValidationPage() {
                     {row.iteration_label} — held out: {row.held_out_event_ids.join(', ')}
                   </span>
                   <span>
-                    {row.caught === null ? 'Could not run — ' : row.caught ? 'Would have been caught — ' : 'Would have been missed — '}
+                    {row.caught === null ? 'Cannot be evaluated — ' : row.caught ? 'Would have been caught — ' : 'Would have been missed — '}
                     {row.reason}
                   </span>
                 </li>

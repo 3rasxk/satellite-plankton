@@ -3,13 +3,12 @@ The monitored grid -- a small, fixed set of points across the upper Gulf
 of Thailand that `/risk-map`, `/summary`, and the scheduler operate over.
 
 This is NOT the validation set (`data/validation/events.csv`, 14
-historical events with mostly-unrecoverable coordinates -- see
+historical events, seven with recorded coordinates -- see
 `src/_detection.py` / the `/validation` router). These are new,
 deliberately chosen monitoring points, picked to be representative of the
 study area CLAUDE.md §0/§4 describes (upper Gulf of Thailand, focus sites
 e.g. Chonburi/Bang Saen) -- not tied to any historical bloom's exact
-pixel, because (per Phase 2's finding) no historical event's location is
-precise enough to derive one.
+pixel. The validation coordinates remain separate from this monitoring grid.
 
 Seven points. Five of them were live-tested against real Sentinel-2/MODIS
 during this build (2026-08-22, detect() at date 2024-03-15):
@@ -17,11 +16,15 @@ during this build (2026-08-22, detect() at date 2024-03-15):
                               in the search window -- a real, expected gap)
   - siracha                -> no_water_pixels (buffer catches shoreline/
                               JRC-GSW-uncovered pixels at this coastal point)
-  - thachin_mouth          -> no_climatology (MODIS day-of-year window had
+  - thachin_mouth          -> formerly no_climatology (MODIS day-of-year window had
                               too few archive observations at this river-
                               mouth point)
-  - chaophraya_mouth       -> ok (real anomaly_z returned)
-  - chaam                  -> ok (real anomaly_z returned)
+  - chaophraya_mouth       -> Sentinel-2 index reading available
+  - chaam                  -> Sentinel-2 index reading available
+
+Those historical statuses are not current detection results. The former
+anomaly values mixed incompatible units and are withdrawn; detect() now
+returns index readings and scene dates without consulting climatology.
 
 bangpakong_mouth and pattaya were added later (commit b15af00) and were
 NOT part of that 2026-08-22 live test -- no per-site result is claimed

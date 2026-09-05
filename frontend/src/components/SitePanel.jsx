@@ -12,6 +12,7 @@ import {
   NO_DATA_STATUS,
   STATUS_EXPLAINER_TH,
   RULE_DESCRIPTION_TH,
+  ANOMALY_NOT_COMPUTED,
   formatSiteName,
   formatThaiDate,
 } from '../constants.js'
@@ -28,7 +29,7 @@ const today = () => new Date().toISOString().slice(0, 10)
 /**
  * Site Detail Panel: Spectral Index metrics, the rule-based risk
  * assessment (risk_level()/config.yaml — no trained model anywhere in
- * this pipeline, CLAUDE.md §0/§1), the anomaly-z gauge, and the 90-day
+ * this pipeline, CLAUDE.md §0/§1), its unavailable anomaly state, and the 90-day
  * Anomaly Strip. Every displayed value is real or '—', never derived
  * from a formula standing in for a missing source.
  */
@@ -77,7 +78,7 @@ export default function SitePanel({ site, onClose }) {
     satPreview.data?.acquisition_date ||
     dt.data?.actual_date ||
     site.actual_date ||
-    today()
+    null
 
   // Card 1 (Spectral Index) -- every value is real or '—', never a
   // fabricated number derived from lat/lng or another index (CLAUDE.md's
@@ -93,21 +94,14 @@ export default function SitePanel({ site, onClose }) {
   // a real endpoint provides them, never a formula standing in for one.
   const sstVal = null
   const rainfall7d = null
-  const anomalyZ = site.anomaly_z ?? dt.data?.anomaly_z ?? null
-
   // Card 2 -- the real, rule-based escalation this project actually runs
   // (detection/src/prediction.py's risk_level(), CLAUDE.md §0/§1: rule-based
   // only, no trained model). `confidence_label` always carries its own
   // "indicative, not a validated forecast" caveat from config.yaml -- see
   // backend/src/schemas.py RiskMapProperties.confidence_label.
-  const riskLevel = site.risk_level || 'normal'
+  const riskLevel = site.risk_level || null
   const triggeredRules = site.triggered_rules || []
   const confidenceLabel = site.confidence_label || null
-
-  // Gauge meter (z from -2.0 to +3.0) -- only renders when a real
-  // anomaly_z exists; null must not render as "0.0 / normal".
-  const gaugePercent =
-    anomalyZ == null ? null : Math.min(100, Math.max(0, ((anomalyZ - -2.0) / (3.0 - -2.0)) * 100))
 
   // Fast path (scheduler-cached) resolves instantly; the live fallbacks
   // (dt/satPreview) make real GEE calls that take several seconds -- while
@@ -139,7 +133,7 @@ export default function SitePanel({ site, onClose }) {
                 className="dot"
                 style={riskColorVar && !isNoData ? { background: `var(${riskColorVar})` } : undefined}
               />
-              {isNoData ? 'ไม่มีค่าอ่าน' : RISK_LABEL_TH[site.risk_level] || RISK_LABEL[site.risk_level] || site.risk_level}
+              {isNoData ? 'ไม่มีค่าอ่าน' : RISK_LABEL_TH[site.risk_level] || RISK_LABEL[site.risk_level] || 'ยังประเมินไม่ได้'}
             </span>
           </div>
         </div>
@@ -189,7 +183,7 @@ export default function SitePanel({ site, onClose }) {
             </div>
           </div>
           <div className="detail-card-bottom-footer mono">
-            <span>Sentinel-2 L2A · ฉาก {formatThaiDate(sceneDate) || sceneDate}</span>
+            <span>Sentinel-2 L2A · ฉาก {formatThaiDate(sceneDate) || 'ไม่ทราบวันที่ภาพ'}</span>
           </div>
         </div>
 
@@ -208,7 +202,7 @@ export default function SitePanel({ site, onClose }) {
           <div className="ai-prediction-hero">
             <div className="ai-prediction-main">
               <span className="ai-percentage-number mono">
-                {RISK_LABEL_TH[riskLevel] || RISK_LABEL[riskLevel] || riskLevel}
+                {RISK_LABEL_TH[riskLevel] || RISK_LABEL[riskLevel] || 'ยังประเมินไม่ได้'}
               </span>
               <span className="ai-percentage-label">
                 {confidenceLabel || 'ไม่มีข้อมูลระดับความเชื่อมั่น'}
@@ -229,48 +223,7 @@ export default function SitePanel({ site, onClose }) {
             </div>
           )}
 
-          {gaugePercent !== null ? (
-            <>
-              <div className="gauge-track-container">
-                <div className="gauge-pointer-marker" style={{ left: `${gaugePercent}%` }}>
-                  <span className="gauge-pointer-tag">
-                    {anomalyZ > 0 ? `+${Number(anomalyZ).toFixed(2)}` : Number(anomalyZ).toFixed(2)}
-                  </span>
-                  <div className="gauge-pointer-pin" />
-                </div>
-                <div className="gauge-track-bar" />
-              </div>
-
-              <div className="gauge-threshold-ticks">
-                <span>ปกติ (&lt; 1.5)</span>
-                <span>เริ่มผิดปกติ (≥ 1.5)</span>
-                <span>เตือนภัย (≥ 2.0)</span>
-              </div>
-
-              <div className="gauge-context-row">
-                <span
-                  className="gauge-status-dot"
-                  style={{
-                    background:
-                      anomalyZ >= 2.0
-                        ? 'var(--risk-warning)'
-                        : anomalyZ >= 1.5
-                          ? 'var(--risk-elevated)'
-                          : 'var(--risk-normal)',
-                  }}
-                />
-                <span className="gauge-context-note">
-                  {anomalyZ >= 2.0
-                    ? 'ค่าความผิดปกติสูงกว่าเกณฑ์เฉลี่ยมาก'
-                    : anomalyZ >= 1.5
-                      ? 'ค่าความผิดปกติสูงกว่าเกณฑ์เฉลี่ย'
-                      : 'ค่าคลอโรฟิลล์อยู่ในเกณฑ์ปกติของฤดูกาล'}
-                </span>
-              </div>
-            </>
-          ) : (
-            <p className="no-rules">ยังไม่มีค่า anomaly_z สำหรับจุดนี้</p>
-          )}
+          <p className="no-rules">{ANOMALY_NOT_COMPUTED}</p>
         </div>
 
         {/* --- Card 3: Chlorophyll trends & 90-day Anomaly Strip --- */}

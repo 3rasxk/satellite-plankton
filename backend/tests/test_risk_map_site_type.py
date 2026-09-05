@@ -67,7 +67,7 @@ def test_risk_map_site_type_present_on_cached_ok_reading_too(client):
                 target_date="2024-03-15",
                 status="ok",
                 detected=False,
-                anomaly_z=-0.5,
+                spatial_anomaly_z=None,
                 index_used="ndci",
                 actual_date="2024-03-14",
                 cloud_fraction=0.05,

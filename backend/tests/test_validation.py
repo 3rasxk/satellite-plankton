@@ -45,6 +45,7 @@ def _fake_threshold_run_result() -> dict:
                 "low_weight": event_id in ("th_012", "th_013", "th_014"),
                 "index_values": None,
                 "z_scores": None,
+                "z_score_status": "not_computed_no_valid_baseline",
                 "flagged": None,
             }
         )
@@ -132,3 +133,30 @@ def test_validation_calibration_status_is_uncalibrated(client, monkeypatch):
     assert body["n_matchable"] == 0
     assert body["n_with_real_satellite_reading"] == 0
     assert isinstance(body["events"], list) and len(body["events"]) == 14
+
+
+def test_real_index_reading_has_imagery_but_no_anomaly_or_outcome(client, monkeypatch):
+    result = _fake_threshold_run_result()
+    event = result["rows"][9]
+    event.update(
+        matchable=True, match_method="exact_point", lat=13.338, lng=100.925,
+        sentinel2_status="ok", index_values={"ndci": 0.041},
+        actual_date="2020-02-16",
+    )
+    result.update(n_matchable=1, n_with_real_reading=1)
+    monkeypatch.setattr(validation_router.bridge, "threshold_run", lambda: result)
+
+    response = client.get("/validation", params={"refresh": True})
+    assert response.status_code == 200
+    body = response.json()
+    reading = body["events"][9]
+    assert reading["reading_status"] == "ok"
+    assert reading["index_values"] == {"ndci": 0.041}
+    assert reading["actual_date"] == "2020-02-16"
+    assert "date=2020-02-16" in reading["true_color_image_url"]
+    assert "date=2020-02-16" in reading["ndci_heatmap_image_url"]
+    assert all(event["spatial_anomaly_z"] is None for event in body["events"])
+    assert all(event["flagged"] is None for event in body["events"])
+    assert all(event["z_score_status"] == "not_computed_no_valid_baseline" for event in body["events"])
+    assert all("anomaly_z" not in event for event in body["events"])
+    assert all(item["caught"] is None for item in body["leave_one_out"])

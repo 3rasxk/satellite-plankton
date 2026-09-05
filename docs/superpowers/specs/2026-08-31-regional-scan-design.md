@@ -1,5 +1,7 @@
 # Full-polygon regional bloom scan — design spec
 
+> Correction, 2026-09-06: the anomaly and tier portions of this historical design are superseded. `detect()` returns raw indices and actual scene dates only. Its former comparison against MODIS `chlor_a` mixed units and is removed. `spatial_anomaly_z` is a null placeholder, not a replacement statistic; tiers are null and the scan produces no anomaly clusters. The threshold/cluster examples below describe the withdrawn design and are not current implementation instructions. See `LIMITATIONS.md` §1 and `docs/DETECTION_PLAN.md` §2.
+
 Status: approved, not yet implemented. Written 2026-08-31, after three design
 revisions (whole-polygon/24h-timer → whole-polygon/event-driven-poll+cooldown
 → per-tile partial scanning considered and explicitly deferred). This
@@ -54,7 +56,7 @@ For every grid point, `detect(lat, lng, date)` — the existing public
 function from `detection/src/prediction.py`, reached via the existing
 `backend/src/_detection.py` bridge — is called exactly as-is. No
 detection/prediction logic is duplicated or reimplemented. Its return
-(`index_values` for NDCI/2BDA/3BDA, `anomaly_z`, `status`) is stored
+(`index_values` for NDCI/2BDA/3BDA, `spatial_anomaly_z`, `status`) is stored
 per point.
 
 **Measured real cost** (live GEE calls, 2026-08-31, `date=2026-08-15`):
@@ -69,8 +71,8 @@ average, 8–26s range**. For 500 points: **~2.1 hr average per full scan,
 A point is tiered using the exact `elevated_z`/`warning_z` cutoffs
 (1.5/2.0) already governing every other rule in this project
 (`detection/src/config.yaml`):
-- `anomaly_z >= warning_z` → tier `warning`
-- `anomaly_z >= elevated_z` (but below `warning_z`) → tier `elevated`
+- `spatial_anomaly_z >= warning_z` → tier `warning`
+- `spatial_anomaly_z >= elevated_z` (but below `warning_z`) → tier `elevated`
 - otherwise → untiered (not flagged, not pinned individually)
 
 ## 4. Clustering — grid-adjacency connected-components
@@ -87,7 +89,7 @@ dependency, currently pulled in only by the orphaned, unwired
 `ensemble_service.py` files flagged in `CLAUDE.md` §9.)
 
 Each cluster stores: centroid (mean of member lat/lng), `cell_count`,
-`mean_anomaly_z`/`max_anomaly_z` (computed only over real, `status='ok'`
+`mean_spatial_anomaly_z`/`max_spatial_anomaly_z` (computed only over real, `status='ok'`
 member cells — a no-data cell is never counted or averaged in), and
 `threshold_tier` (the highest tier among its members). Member point ids
 are stored as a JSON list for traceability back to individual readings.
@@ -147,10 +149,10 @@ GEE calls for a scan that finds nothing).
 - **`regional_scan_points`** — latest-run snapshot, upserted (not
   appended) on each successful run, matching the existing `detection_cache`
   overwrite-latest pattern: `lat`, `lng`, `row_idx`, `col_idx`, `status`,
-  `index_values` (JSON: ndci/2bda/3bda), `anomaly_z`, `threshold_tier`.
+  `index_values` (JSON: ndci/2bda/3bda), `spatial_anomaly_z`, `threshold_tier`.
   No-data points are stored with their real status, never omitted.
 - **`regional_scan_clusters`** — latest-run snapshot: `centroid_lat`,
-  `centroid_lng`, `cell_count`, `mean_anomaly_z`, `max_anomaly_z`,
+  `centroid_lng`, `cell_count`, `mean_spatial_anomaly_z`, `max_spatial_anomaly_z`,
   `threshold_tier`, member point ids (JSON list).
 
 ## 7. New endpoint — `GET /regional-scan`
@@ -203,7 +205,7 @@ killing the run.
 ## 10. Frontend
 
 A new map layer (individual + cluster markers, Leaflet, reusing
-`RiskMap.jsx`'s existing setup) showing real NDCI/2BDA/3BDA/`anomaly_z`
+`RiskMap.jsx`'s existing setup) showing real NDCI/2BDA/3BDA/`spatial_anomaly_z`
 values in each pin's popup — never a colored dot with no data behind it,
 per the no-fabrication rule. A last-scanned/stale banner reuses the
 existing disclaimer pattern already used elsewhere in the dashboard.

@@ -1,5 +1,7 @@
 # Regional Bloom Scan Implementation Plan
 
+> Correction, 2026-09-06: this historical plan's anomaly-scoring, tiering, persistence and test examples are superseded. The former spectral-index/MODIS-concentration calculation was dimensionally invalid. `detect()` now returns indices/status/actual_date only; `spatial_anomaly_z` is a null placeholder, all tiers are null and no anomaly clusters are produced. Numeric anomaly fixtures and threshold examples below are withdrawn implementation instructions, not valid statistics or evidence. Read `LIMITATIONS.md` §1 and the current source before using this plan.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Implement the full-polygon regional bloom scan (500-point grid over the upper Gulf study-area polygon, event-driven poll+cooldown trigger, grid-adjacency clustering, new `/regional-scan` endpoint) exactly as approved in the design spec — no scope beyond what that spec locked in.
@@ -61,7 +63,7 @@ Modified files:
 - Test: `backend/tests/test_config.py` (extend existing file)
 
 **Interfaces:**
-- Produces: `RegionalScanRun` (fields: `id`, `started_at`, `completed_at`, `status`, `grid_spacing_km`, `date_used`, `newest_scene_date`, `total_points`, `count_ok`, `count_no_imagery`, `count_no_water_pixels`, `count_no_climatology`, `count_error`), `RegionalScanPoint` (fields: `point_id` PK, `lat`, `lng`, `row_idx`, `col_idx`, `status`, `index_values`, `anomaly_z`, `threshold_tier`, `run_id`), `RegionalScanCluster` (fields: `id`, `run_id`, `centroid_lat`, `centroid_lng`, `cell_count`, `mean_anomaly_z`, `max_anomaly_z`, `threshold_tier`, `member_point_ids`) — every later task relies on these exact field names.
+- Produces: `RegionalScanRun` (fields: `id`, `started_at`, `completed_at`, `status`, `grid_spacing_km`, `date_used`, `newest_scene_date`, `total_points`, `count_ok`, `count_no_imagery`, `count_no_water_pixels`, `count_no_climatology`, `count_error`), `RegionalScanPoint` (fields: `point_id` PK, `lat`, `lng`, `row_idx`, `col_idx`, `status`, `index_values`, `spatial_anomaly_z`, `threshold_tier`, `run_id`), `RegionalScanCluster` (fields: `id`, `run_id`, `centroid_lat`, `centroid_lng`, `cell_count`, `mean_spatial_anomaly_z`, `max_spatial_anomaly_z`, `threshold_tier`, `member_point_ids`) — every later task relies on these exact field names.
 - Produces: `config.REGIONAL_SCAN_GRID_SPACING_KM: float`, `config.REGIONAL_SCAN_POLL_INTERVAL_HOURS: int`, `config.REGIONAL_SCAN_COOLDOWN_HOURS: int`, `config.REGIONAL_SCAN_POLL_LOOKBACK_DAYS: int`.
 
 - [ ] **Step 1: Add the three ORM models to `backend/src/db_models.py`**
@@ -109,7 +111,7 @@ class RegionalScanPoint(Base):
     col_idx: Mapped[int] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String)  # ok|no_imagery|no_water_pixels|no_climatology|error
     index_values: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    anomaly_z: Mapped[float | None] = mapped_column(Float, nullable=True)
+    spatial_anomaly_z: Mapped[float | None] = mapped_column(Float, nullable=True)
     threshold_tier: Mapped[str | None] = mapped_column(String, nullable=True)  # elevated|warning|null
     run_id: Mapped[int] = mapped_column(ForeignKey("regional_scan_runs.id"))
 
@@ -128,8 +130,8 @@ class RegionalScanCluster(Base):
     centroid_lat: Mapped[float] = mapped_column(Float)
     centroid_lng: Mapped[float] = mapped_column(Float)
     cell_count: Mapped[int] = mapped_column(Integer)
-    mean_anomaly_z: Mapped[float] = mapped_column(Float)
-    max_anomaly_z: Mapped[float] = mapped_column(Float)
+    mean_spatial_anomaly_z: Mapped[float] = mapped_column(Float)
+    max_spatial_anomaly_z: Mapped[float] = mapped_column(Float)
     threshold_tier: Mapped[str] = mapped_column(String)  # elevated|warning
     member_point_ids: Mapped[list] = mapped_column(JSON)
 ```
@@ -430,7 +432,7 @@ git commit -m "feat(backend): add regional-scan grid generation"
 
 **Interfaces:**
 - Consumes: nothing (pure, standalone).
-- Produces: `clustering.cluster_points(points: list[dict]) -> list[dict]`. Input point dict shape: `{'point_id': str, 'lat': float, 'lng': float, 'row_idx': int, 'col_idx': int, 'anomaly_z': float, 'threshold_tier': 'elevated'|'warning'}`. Output cluster dict shape: `{'centroid_lat': float, 'centroid_lng': float, 'cell_count': int, 'mean_anomaly_z': float, 'max_anomaly_z': float, 'threshold_tier': 'elevated'|'warning', 'member_point_ids': list[str]}` — Task 4 (`scan.py`) both builds the input list in this exact shape and persists the output in this exact shape.
+- Produces: `clustering.cluster_points(points: list[dict]) -> list[dict]`. Input point dict shape: `{'point_id': str, 'lat': float, 'lng': float, 'row_idx': int, 'col_idx': int, 'spatial_anomaly_z': float, 'threshold_tier': 'elevated'|'warning'}`. Output cluster dict shape: `{'centroid_lat': float, 'centroid_lng': float, 'cell_count': int, 'mean_spatial_anomaly_z': float, 'max_spatial_anomaly_z': float, 'threshold_tier': 'elevated'|'warning', 'member_point_ids': list[str]}` — Task 4 (`scan.py`) both builds the input list in this exact shape and persists the output in this exact shape.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -448,7 +450,7 @@ from src.regional_scan.clustering import cluster_points
 def _point(point_id, row, col, z, tier):
     return {
         "point_id": point_id, "lat": 13.0 + row * 0.01, "lng": 100.0 + col * 0.01,
-        "row_idx": row, "col_idx": col, "anomaly_z": z, "threshold_tier": tier,
+        "row_idx": row, "col_idx": col, "spatial_anomaly_z": z, "threshold_tier": tier,
     }
 
 
@@ -464,8 +466,8 @@ def test_single_point_forms_its_own_cluster():
     assert c["cell_count"] == 1
     assert c["member_point_ids"] == ["0_0"]
     assert c["centroid_lat"] == points[0]["lat"]
-    assert c["mean_anomaly_z"] == 1.6
-    assert c["max_anomaly_z"] == 1.6
+    assert c["mean_spatial_anomaly_z"] == 1.6
+    assert c["max_spatial_anomaly_z"] == 1.6
     assert c["threshold_tier"] == "elevated"
 
 
@@ -484,8 +486,8 @@ def test_8_connected_points_merge_into_one_cluster():
     assert set(c["member_point_ids"]) == {"0_0", "0_1", "1_0", "1_1"}
     # Highest tier among members wins.
     assert c["threshold_tier"] == "warning"
-    assert c["max_anomaly_z"] == 2.1
-    assert c["mean_anomaly_z"] == (1.6 + 1.7 + 2.1 + 1.8) / 4
+    assert c["max_spatial_anomaly_z"] == 2.1
+    assert c["mean_spatial_anomaly_z"] == (1.6 + 1.7 + 2.1 + 1.8) / 4
 
 
 def test_diagonal_adjacency_merges():
@@ -548,7 +550,7 @@ def cluster_points(points: list[dict]) -> list[dict]:
 
     Args:
         points: list of {'point_id', 'lat', 'lng', 'row_idx', 'col_idx',
-                          'anomaly_z', 'threshold_tier'}. Every member is
+                          'spatial_anomaly_z', 'threshold_tier'}. Every member is
                 already real/'ok' -- callers only ever pass flagged
                 (status='ok', tiered) points, so this function's output
                 satisfies spec §4's "computed only over real, status='ok'
@@ -557,7 +559,7 @@ def cluster_points(points: list[dict]) -> list[dict]:
 
     Returns:
         list of {'centroid_lat', 'centroid_lng', 'cell_count',
-                  'mean_anomaly_z', 'max_anomaly_z', 'threshold_tier',
+                  'mean_spatial_anomaly_z', 'max_spatial_anomaly_z', 'threshold_tier',
                   'member_point_ids'}, one per connected component.
         Empty list if `points` is empty.
     """
@@ -592,15 +594,15 @@ def cluster_points(points: list[dict]) -> list[dict]:
     for members in groups.values():
         lats = [m["lat"] for m in members]
         lngs = [m["lng"] for m in members]
-        z_values = [m["anomaly_z"] for m in members]
+        z_values = [m["spatial_anomaly_z"] for m in members]
         highest_tier = max(members, key=lambda m: _TIER_RANK[m["threshold_tier"]])["threshold_tier"]
         clusters.append(
             {
                 "centroid_lat": sum(lats) / len(lats),
                 "centroid_lng": sum(lngs) / len(lngs),
                 "cell_count": len(members),
-                "mean_anomaly_z": sum(z_values) / len(z_values),
-                "max_anomaly_z": max(z_values),
+                "mean_spatial_anomaly_z": sum(z_values) / len(z_values),
+                "max_spatial_anomaly_z": max(z_values),
                 "threshold_tier": highest_tier,
                 "member_point_ids": [m["point_id"] for m in members],
             }
@@ -652,11 +654,11 @@ from src.regional_scan import scan as scan_module
 
 
 def _fake_detect_all_ok_high_anomaly(lat, lng, date):
-    """Every point 'ok' with anomaly_z=2.5 (>= warning_z=2.0 in
+    """Every point 'ok' with spatial_anomaly_z=2.5 (>= warning_z=2.0 in
     detection/src/config.yaml) -- forces every point flagged, so
     clustering has real work to do."""
     return {
-        "status": "ok", "detected": True, "anomaly_z": 2.5,
+        "status": "ok", "detected": True, "spatial_anomaly_z": 2.5,
         "index_used": "ndci", "index_values": {"ndci": 0.3}, "reason": None,
     }
 
@@ -689,7 +691,7 @@ def test_run_scan_persists_points_and_clusters(client, monkeypatch):
 
 def _fake_detect_no_imagery(lat, lng, date):
     return {
-        "status": "no_imagery", "detected": False, "anomaly_z": None,
+        "status": "no_imagery", "detected": False, "spatial_anomaly_z": None,
         "index_used": "ndci", "index_values": None, "reason": "forced for test",
     }
 
@@ -786,13 +788,13 @@ from .grid import generate_scan_grid
 logger = logging.getLogger("backend.regional_scan.scan")
 
 
-def _tier(anomaly_z: float, index_used: str, config: dict) -> str | None:
+def _tier(spatial_anomaly_z: float, index_used: str, config: dict) -> str | None:
     """'warning' | 'elevated' | None, per config.yaml's thresholds --
     same cutoffs risk_level() reads, no new numbers (spec §3)."""
     index_thresholds = config["thresholds"][index_used]
-    if anomaly_z >= index_thresholds["warning_z"]:
+    if spatial_anomaly_z >= index_thresholds["warning_z"]:
         return "warning"
-    if anomaly_z >= index_thresholds["elevated_z"]:
+    if spatial_anomaly_z >= index_thresholds["elevated_z"]:
         return "elevated"
     return None
 
@@ -850,7 +852,7 @@ def run_scan(
                     point["point_id"], type(exc).__name__, exc,
                 )
                 result = {
-                    "status": "error", "detected": False, "anomaly_z": None,
+                    "status": "error", "detected": False, "spatial_anomaly_z": None,
                     "index_used": None, "index_values": None,
                     "reason": f"{type(exc).__name__}: {exc}",
                 }
@@ -859,15 +861,15 @@ def run_scan(
             counts[status] = counts.get(status, 0) + 1
 
             tier = None
-            if status == "ok" and result["anomaly_z"] is not None:
-                tier = _tier(result["anomaly_z"], result["index_used"], config)
+            if status == "ok" and result["spatial_anomaly_z"] is not None:
+                tier = _tier(result["spatial_anomaly_z"], result["index_used"], config)
 
             existing = db.get(RegionalScanPoint, point["point_id"])
             fields = dict(
                 lat=point["lat"], lng=point["lng"],
                 row_idx=point["row_idx"], col_idx=point["col_idx"],
                 status=status, index_values=result.get("index_values"),
-                anomaly_z=result.get("anomaly_z"), threshold_tier=tier,
+                spatial_anomaly_z=result.get("spatial_anomaly_z"), threshold_tier=tier,
                 run_id=run.id,
             )
             if existing is None:
@@ -881,7 +883,7 @@ def run_scan(
                     {
                         "point_id": point["point_id"], "lat": point["lat"], "lng": point["lng"],
                         "row_idx": point["row_idx"], "col_idx": point["col_idx"],
-                        "anomaly_z": result["anomaly_z"], "threshold_tier": tier,
+                        "spatial_anomaly_z": result["spatial_anomaly_z"], "threshold_tier": tier,
                     }
                 )
     except bridge.GEEAuthError as exc:
@@ -1524,17 +1526,17 @@ def test_regional_scan_returns_latest_run_points_and_clusters(client):
 
         db.add(RegionalScanPoint(
             point_id="0_0", lat=13.0, lng=100.5, row_idx=0, col_idx=0,
-            status="ok", index_values={"ndci": 0.2}, anomaly_z=2.5,
+            status="ok", index_values={"ndci": 0.2}, spatial_anomaly_z=2.5,
             threshold_tier="warning", run_id=run.id,
         ))
         db.add(RegionalScanPoint(
             point_id="0_1", lat=13.05, lng=100.5, row_idx=0, col_idx=1,
-            status="ok", index_values={"ndci": 0.19}, anomaly_z=2.4,
+            status="ok", index_values={"ndci": 0.19}, spatial_anomaly_z=2.4,
             threshold_tier="warning", run_id=run.id,
         ))
         db.add(RegionalScanCluster(
             run_id=run.id, centroid_lat=13.025, centroid_lng=100.5, cell_count=2,
-            mean_anomaly_z=2.45, max_anomaly_z=2.5, threshold_tier="warning",
+            mean_spatial_anomaly_z=2.45, max_spatial_anomaly_z=2.5, threshold_tier="warning",
             member_point_ids=["0_0", "0_1"],
         ))
         db.commit()
@@ -1599,7 +1601,7 @@ class RegionalScanPointSchema(BaseModel):
     lng: float
     status: Literal["ok", "no_imagery", "no_water_pixels", "no_climatology", "error"]
     index_values: dict[str, float] | None = None
-    anomaly_z: float | None = None
+    spatial_anomaly_z: float | None = None
     threshold_tier: Literal["elevated", "warning"] | None = None
 
 
@@ -1607,8 +1609,8 @@ class RegionalScanClusterSchema(BaseModel):
     centroid_lat: float
     centroid_lng: float
     cell_count: int
-    mean_anomaly_z: float
-    max_anomaly_z: float
+    mean_spatial_anomaly_z: float
+    max_spatial_anomaly_z: float
     threshold_tier: Literal["elevated", "warning"]
     member_point_ids: list[str]
 
@@ -1703,7 +1705,7 @@ async def get_regional_scan(db: Session = Depends(get_db)) -> RegionalScanRespon
         points=[
             RegionalScanPointSchema(
                 point_id=p.point_id, lat=p.lat, lng=p.lng, status=p.status,
-                index_values=p.index_values, anomaly_z=p.anomaly_z,
+                index_values=p.index_values, spatial_anomaly_z=p.spatial_anomaly_z,
                 threshold_tier=p.threshold_tier,
             )
             for p in points
@@ -1711,8 +1713,8 @@ async def get_regional_scan(db: Session = Depends(get_db)) -> RegionalScanRespon
         clusters=[
             RegionalScanClusterSchema(
                 centroid_lat=c.centroid_lat, centroid_lng=c.centroid_lng,
-                cell_count=c.cell_count, mean_anomaly_z=c.mean_anomaly_z,
-                max_anomaly_z=c.max_anomaly_z, threshold_tier=c.threshold_tier,
+                cell_count=c.cell_count, mean_spatial_anomaly_z=c.mean_spatial_anomaly_z,
+                max_spatial_anomaly_z=c.max_spatial_anomaly_z, threshold_tier=c.threshold_tier,
                 member_point_ids=c.member_point_ids,
             )
             for c in clusters
@@ -1803,7 +1805,7 @@ import { RISK_COLOR_HEX } from '../constants.js'
  * Full-polygon regional bloom scan overlay (backend GET /regional-scan) --
  * a distinct layer from RiskMap.jsx's 6-site monitoring grid, per spec
  * §0/§10: does not touch or replace that grid or any of its markers.
- * Renders real NDCI/2BDA/3BDA/anomaly_z values in each pin's popup --
+ * Renders real NDCI/2BDA/3BDA/spatial_anomaly_z values in each pin's popup --
  * never a colored dot with no data behind it (no-fabrication rule, §0).
  * Must be rendered inside a react-leaflet <MapContainer>.
  */
@@ -1844,7 +1846,7 @@ export default function RegionalScanLayer({ data }) {
               Cluster of {cluster.cell_count} cells
             </div>
             <div style={{ fontSize: '11.5px', marginTop: '2px', color: '#1d1d1f' }}>
-              mean anomaly_z {cluster.mean_anomaly_z.toFixed(2)} · max {cluster.max_anomaly_z.toFixed(2)}
+              mean spatial_anomaly_z {cluster.mean_spatial_anomaly_z.toFixed(2)} · max {cluster.max_spatial_anomaly_z.toFixed(2)}
             </div>
           </Tooltip>
         </CircleMarker>
@@ -1863,7 +1865,7 @@ export default function RegionalScanLayer({ data }) {
           >
             <Tooltip direction="top" offset={[0, -8]} opacity={0.95}>
               <div style={{ fontSize: '11.5px' }}>
-                anomaly_z {point.anomaly_z?.toFixed(2)}
+                spatial_anomaly_z {point.spatial_anomaly_z?.toFixed(2)}
                 {point.index_values
                   ? ` · ${Object.entries(point.index_values)
                       .map(([k, v]) => `${k}=${v.toFixed(3)}`)
@@ -1998,7 +2000,7 @@ git commit -m "feat(frontend): add regional-scan map layer, toggleable on the ov
 
 **Placeholder scan:** none — every step above contains complete, runnable code, not a description of what to write.
 
-**Type consistency:** `generate_scan_grid` → `{lat, lng, row_idx, col_idx, point_id}` (Task 2) is exactly what `run_scan` (Task 4) iterates and exactly what `cluster_points` (Task 3) expects as input shape (plus `anomaly_z`/`threshold_tier` added by `run_scan` before clustering). `run_scan`'s signature (`db, target_date, grid_spacing_km, newest_scene_date=None`) matches both call sites: `trigger.poll_and_maybe_scan` (Task 5) and `scripts/run_regional_scan.py` (Task 6). `RegionalScanRun`/`Point`/`Cluster` field names (Task 1) match every read/write site in `scan.py` (Task 4), `trigger.py` (Task 5), and `routers/regional_scan.py` (Task 7) exactly.
+**Type consistency:** `generate_scan_grid` → `{lat, lng, row_idx, col_idx, point_id}` (Task 2) is exactly what `run_scan` (Task 4) iterates and exactly what `cluster_points` (Task 3) expects as input shape (plus `spatial_anomaly_z`/`threshold_tier` added by `run_scan` before clustering). `run_scan`'s signature (`db, target_date, grid_spacing_km, newest_scene_date=None`) matches both call sites: `trigger.poll_and_maybe_scan` (Task 5) and `scripts/run_regional_scan.py` (Task 6). `RegionalScanRun`/`Point`/`Cluster` field names (Task 1) match every read/write site in `scan.py` (Task 4), `trigger.py` (Task 5), and `routers/regional_scan.py` (Task 7) exactly.
 
 ---
 

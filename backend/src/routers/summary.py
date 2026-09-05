@@ -37,7 +37,8 @@ def get_summary(db: Session = Depends(get_db)) -> SummaryResponse:
         # 2. A cache row whose status is not 'ok': the site *was* read and
         #    the read produced no usable value (cloud, no baseline, a failed
         #    fetch). A real finding about a real attempt.
-        # 3. status == 'ok': a real reading, counted under its risk level.
+        # 3. status == 'ok': a real reading. Without a valid baseline its
+        #    risk is not evaluated, even though index values exist.
         #
         # (2) previously fell through to `cache.level or "normal"` and was
         # counted as a normal site -- reporting "normal" for water nothing
@@ -58,9 +59,11 @@ def get_summary(db: Session = Depends(get_db)) -> SummaryResponse:
                 fetched_ats.append(fetched_at)
             continue
 
-        level = cache.level or "normal"
+        level = cache.level
         if level in ("normal", "elevated", "watch", "warning"):
             setattr(counts, level, getattr(counts, level) + 1)
+        else:
+            counts.not_evaluated += 1
 
         if cache.stale:
             stale_count += 1
@@ -75,7 +78,7 @@ def get_summary(db: Session = Depends(get_db)) -> SummaryResponse:
                 most_recent = MostRecentDetection(
                     site_id=site.site_id,
                     name=site.name,
-                    anomaly_z=cache.anomaly_z,
+                    spatial_anomaly_z=cache.spatial_anomaly_z,
                     detected=cache.detected,
                     actual_date=cache.actual_date,
                     fetched_at=fetched_at.isoformat(),

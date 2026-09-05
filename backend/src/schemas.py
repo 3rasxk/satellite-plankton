@@ -17,9 +17,10 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 DISCLAIMER_TEXT = (
-    "Detection is at satellite-pixel resolution. Small or scattered blooms "
-    "may not be visible. Presence and absence are the reliable signal — "
-    "concentration estimates are approximate."
+    "Satellite index values describe water colour at pixel resolution. "
+    "Small or scattered blooms may not be visible. Sentinel-2 anomaly "
+    "detection is not computed — no valid baseline exists. Index values "
+    "alone establish neither bloom presence nor absence."
 )
 
 # `/validation` needs an additional, separate caveat -- calibration status
@@ -32,8 +33,10 @@ CALIBRATION_CAVEAT_TEXT = (
     "and 1 (th_010, Ang Sila) has produced a real satellite reading. The "
     "other 13 cannot: 7 have no coordinate in any source, 4 predate "
     "Sentinel-2's 2015 launch, 1 hit a coverage gap, 1 was entirely "
-    "cloud-covered. One matched pair is not a calibration set, so thresholds "
-    "remain uncalibrated. This set is a record of documented blooms, not "
+    "cloud-covered. No valid spectral-index anomaly baseline exists, so "
+    "all 14 events cannot be evaluated, including th_010: its reading is "
+    "not a detection result or a miss. Thresholds remain uncalibrated and "
+    "inactive. This set is a record of documented blooms, not "
     "evidence that detection works or that it fails -- results are reported "
     "per-event, never as a percentage, because n=14 cannot support one."
 )
@@ -43,8 +46,8 @@ class DisclaimerMixin(BaseModel):
     disclaimer: str = Field(
         default=DISCLAIMER_TEXT,
         description="Truth-boundary caveat. Present on every response — satellite-pixel "
-        "resolution, small/scattered blooms may be missed, presence/absence is the "
-        "reliable signal.",
+        "resolution, small/scattered blooms may be missed, and Sentinel-2 "
+        "index values alone cannot establish bloom presence or absence.",
     )
 
 
@@ -54,19 +57,17 @@ class DisclaimerMixin(BaseModel):
 
 
 class DetectResponse(DisclaimerMixin):
-    """Thin wrapper over detect() -- high-confidence, standard remote
-    sensing. Never call this a 'prediction'; see /risk-map, /timeseries's
-    `level`/`confidence_label` fields for the separate, lower-confidence
-    rule-based layer."""
+    """Real Sentinel-2 index values and scene metadata. No valid anomaly
+    baseline exists; detection and prediction conclusions are unavailable."""
 
     model_config = ConfigDict(json_schema_extra={"example": {
         "lat": 13.45, "lng": 100.65, "date": "2024-03-15",
-        "status": "ok", "detected": False, "anomaly_z": -1.49,
+        "status": "ok", "detected": None, "spatial_anomaly_z": None,
         "index_used": "ndci",
         "index_values": {"ndci": 0.01, "2bda": 0.02, "3bda": 0.03, "b2_b3_ratio": 0.9},
         "cloud_fraction": 0.05, "actual_date": "2024-03-14",
-        "true_color_image_url": "/satellite-image?lat=13.45&lng=100.65&date=2024-03-15&image_type=true_color",
-        "ndci_heatmap_image_url": "/satellite-image?lat=13.45&lng=100.65&date=2024-03-15&image_type=ndci_heatmap",
+        "true_color_image_url": "/satellite-image?lat=13.45&lng=100.65&date=2024-03-14&image_type=true_color",
+        "ndci_heatmap_image_url": "/satellite-image?lat=13.45&lng=100.65&date=2024-03-14&image_type=ndci_heatmap",
         "disclaimer": DISCLAIMER_TEXT,
     }})
 
@@ -74,12 +75,15 @@ class DetectResponse(DisclaimerMixin):
     lng: float
     date: str = Field(description="Date requested, YYYY-MM-DD.")
 
-    status: Literal["ok", "no_imagery", "no_water_pixels", "no_climatology"]
-    detected: bool = Field(
-        description="False whenever status != 'ok' — absence of data is never "
-        "reported as absence of a bloom."
+    status: Literal["ok", "no_imagery", "no_water_pixels"]
+    detected: bool | None = Field(
+        default=None, description="Not computed — no valid anomaly baseline exists. "
+        "Null does not mean absence of a bloom."
     )
-    anomaly_z: float | None
+    spatial_anomaly_z: float | None = Field(
+        default=None, description="Reserved for a future valid statistic. "
+        "Not computed — no valid baseline exists; always null currently."
+    )
     index_used: str
     index_values: dict[str, float] | None
     reason: str | None = Field(
@@ -110,14 +114,12 @@ class DetectResponse(DisclaimerMixin):
     )
 
     elevated_z_threshold: float | None = Field(
-        default=None, description="The operative 'elevated' z-score cutoff for "
-        "`index_used`, read live from detection/src/config.yaml -- not a "
-        "hardcoded frontend copy. Null when status != 'ok' (no index_used to "
-        "look a threshold up for)."
+        default=None, description="Inactive: no valid anomaly statistic exists. "
+        "Always null currently."
     )
     warning_z_threshold: float | None = Field(
-        default=None, description="The operative 'warning' z-score cutoff for "
-        "`index_used`, same sourcing as `elevated_z_threshold`."
+        default=None, description="Inactive: no valid anomaly statistic exists. "
+        "Always null currently."
     )
     in_study_area: bool = Field(
         description="Whether lat/lng falls inside the confirmed upper Gulf of "
@@ -131,15 +133,8 @@ class DetectResponse(DisclaimerMixin):
         "the real warning text from check_point_in_study_area()."
     )
     threshold_source: Literal["literature_default", "calibrated"] | None = Field(
-        default=None, description="Whether the two threshold values above are "
-        "config.yaml's literature/convention defaults or a real value from a "
-        "leave-one-out calibration run. Always 'literature_default' as of this "
-        "build -- see /validation's calibration_caveat for why (1 of 14 "
-        "validation events has produced a usable satellite reading, which is "
-        "not a calibration set, so no calibrated_* value exists in config.yaml "
-        "to prefer over the default). "
-        "Read live, not hardcoded, so this flips automatically the moment a "
-        "future calibration run does populate a real value."
+        default=None, description="No threshold is applied while the anomaly "
+        "statistic is unavailable. Always null currently."
     )
 
 
@@ -165,17 +160,17 @@ class RiskMapProperties(DisclaimerMixin):
     )
 
     # -- prediction (risk_level(), rule-based, indicative) --
-    risk_level: Literal["normal", "elevated", "watch", "warning"]
+    risk_level: Literal["normal", "elevated", "watch", "warning"] | None
     triggered_rules: list[str]
     confidence_label: str = Field(
         description="Always attached per config.yaml's prediction_confidence_label — "
         "this word never travels without its caveat."
     )
 
-    # -- detection (detect(), high confidence) -- nested, never merged into risk_level --
+    # -- Sentinel-2 reading, separate from risk_level --
     status: Literal["ok", "no_imagery", "no_water_pixels", "no_climatology", "error", "no_data_yet"]
     detected: bool | None
-    anomaly_z: float | None
+    spatial_anomaly_z: float | None
     index_used: str | None
     index_values: dict[str, float] | None = None
 
@@ -265,6 +260,10 @@ class RiskLevelCounts(BaseModel):
     elevated: int = 0
     watch: int = 0
     warning: int = 0
+    not_evaluated: int = Field(
+        default=0, description="Sites with real index readings but no computed "
+        "risk level: no valid anomaly baseline exists. Not a normal-water count."
+    )
     not_checked_yet: int = Field(
         default=0,
         description="Sites the scheduler has not reached yet -- no cache row at all. "
@@ -284,7 +283,7 @@ class RiskLevelCounts(BaseModel):
 class MostRecentDetection(BaseModel):
     site_id: str
     name: str
-    anomaly_z: float | None
+    spatial_anomaly_z: float | None
     detected: bool
     actual_date: str | None
     fetched_at: str | None
@@ -331,21 +330,26 @@ class ValidationEventRow(BaseModel):
         "the cell-count-bearing events."
     )
     index_used: str
-    anomaly_z: float | None = Field(
-        description="Real satellite anomaly_z if a match was possible, else null."
+    spatial_anomaly_z: float | None = Field(
+        default=None, description="Not computed — no valid baseline exists."
+    )
+    z_score_status: Literal["not_computed_no_valid_baseline"] = "not_computed_no_valid_baseline"
+    reading_status: str | None = None
+    index_values: dict[str, float] | None = None
+    actual_date: str | None = Field(
+        default=None, description="Actual Sentinel-2 scene date for the index reading."
     )
     flagged: bool | None = Field(
-        description="Whether the (uncalibrated) threshold would have flagged this event, "
-        "only when a real anomaly_z exists; else null."
+        description="Cannot be evaluated without a valid anomaly baseline. "
+        "Null for all 14 events, including th_010; not a miss."
     )
     notes: str
 
     true_color_image_url: str | None = Field(
         default=None, description="GET /satellite-image URL (true-color RGB PNG) for "
         "this event's own coordinate and the actual Sentinel-2 scene date the matching "
-        "attempt used. Null unless `matchable` is true AND a real satellite reading "
-        "exists (`anomaly_z` is not null) -- null for 13 of the 14 events, which have "
-        "produced no usable reading (see `calibration_caveat`). Never a "
+        "attempt used. Null unless `matchable` is true AND real index values "
+        "and an actual scene date exist. No anomaly score is required. Never a "
         "placeholder image; becomes non-null automatically the moment an event "
         "does produce one, no frontend change required."
     )
@@ -358,8 +362,8 @@ class ValidationEventRow(BaseModel):
 class LeaveOneOutRow(BaseModel):
     iteration_label: str
     held_out_event_ids: list[str]
-    caught: bool | None = Field(description="null means the iteration could not run "
-        "(no real satellite reading for any held-out member).")
+    caught: bool | None = Field(description="Null for every iteration: no valid "
+        "anomaly baseline exists, even when a held-out member has an index reading.")
     reason: str
 
 
@@ -379,9 +383,10 @@ class ValidationResponse(DisclaimerMixin):
 # --------------------------------------------------------------------------
 
 REGIONAL_SCAN_CAVEAT_TEXT = (
-    "This is a detection scan -- current anomaly state from real, live "
+    "Index values only — no anomaly detection active. Real "
     "Sentinel-2 readings across the full upper Gulf study-area polygon, "
-    "the same detect() pipeline /detect and /risk-map use. It is a "
+    "the same detect() pipeline /detect and /risk-map use. Spatial anomaly "
+    "is not computed — no valid baseline exists. It is a "
     "separate output from the unvalidated Ang Sila spatial-trend test "
     "and must not be blurred together with it."
 )
@@ -393,7 +398,9 @@ class RegionalScanPointSchema(BaseModel):
     lng: float
     status: Literal["ok", "no_imagery", "no_water_pixels", "no_climatology", "error"]
     index_values: dict[str, float] | None = None
-    anomaly_z: float | None = None
+    spatial_anomaly_z: float | None = Field(
+        default=None, description="Not computed — no valid baseline exists."
+    )
     threshold_tier: Literal["elevated", "warning"] | None = None
     actual_date: str | None = Field(
         default=None, description="Real Sentinel-2 scene date behind THIS point's "
@@ -410,8 +417,8 @@ class RegionalScanClusterSchema(BaseModel):
     centroid_lat: float
     centroid_lng: float
     cell_count: int
-    mean_anomaly_z: float
-    max_anomaly_z: float
+    mean_spatial_anomaly_z: float
+    max_spatial_anomaly_z: float
     threshold_tier: Literal["elevated", "warning"]
     member_point_ids: list[str]
     oldest_scene_date: str | None = Field(

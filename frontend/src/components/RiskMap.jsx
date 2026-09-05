@@ -122,12 +122,12 @@ export default function RiskMap({ featureCollection, onSelectSite = () => {}, mo
         const [lng, lat] = feature.geometry.coordinates
         const props = feature.properties
         const isNoData = NO_DATA_STATUS.has(props.status)
-        const colorHex = !isNoData ? RISK_COLOR_HEX[props.risk_level] : null
-        const label = `${props.name}: ${isNoData ? STATUS_LABEL[props.status] || 'no reading' : props.risk_level}`
+        const colorHex = !isNoData ? RISK_COLOR_HEX[props.risk_level] || NO_DATA_LINE_HEX : null
+        const label = `${props.name}: ${isNoData ? STATUS_LABEL[props.status] || 'no reading' : props.risk_level || 'Risk not evaluated — no valid baseline exists'}`
 
         return (
           <Fragment key={props.site_id}>
-            {!isNoData && (
+            {!isNoData && props.risk_level != null && (
               <CircleMarker
                 center={[lat, lng]}
                 radius={22}
@@ -174,7 +174,7 @@ export default function RiskMap({ featureCollection, onSelectSite = () => {}, mo
                     'ไม่มีค่าอ่าน'
                   ) : (
                     <>
-                      <span style={{ fontWeight: 600 }}>{RISK_LABEL_TH[props.risk_level] || props.risk_level}</span>
+                      <span style={{ fontWeight: 600 }}>{RISK_LABEL_TH[props.risk_level] || 'ยังประเมินไม่ได้ — ยังไม่มีค่าฐานที่ถูกต้อง'}</span>
                       {RISK_MEANING_TH[props.risk_level] ? (
                         <span style={{ color: '#6e6e73' }}> · {RISK_MEANING_TH[props.risk_level]}</span>
                       ) : null}

@@ -4,7 +4,7 @@ import { getSummary, getRiskMap, getTimeseries } from '../api/client.js'
 import StatCard from '../components/StatCard.jsx'
 import AnomalyStrip from '../components/AnomalyStrip.jsx'
 import RegionTrendChart from '../components/RegionTrendChart.jsx'
-import { formatRelativeTime, formatZ } from '../constants.js'
+import { ANOMALY_NOT_COMPUTED, formatRelativeTime, formatZ } from '../constants.js'
 
 /**
  * Summary page (docs/FRONTEND_PLAN.md §5). /summary gives current
@@ -25,7 +25,7 @@ export default function SummaryPage() {
         name: f.properties.name,
         lat: f.geometry.coordinates[1],
         lng: f.geometry.coordinates[0],
-        anomaly_z: f.properties.anomaly_z,
+        spatial_anomaly_z: f.properties.spatial_anomaly_z,
         status: f.properties.status,
       })),
     [riskMapApi.data],
@@ -52,8 +52,8 @@ export default function SummaryPage() {
 
   const regionSegments = sites.map((s) => ({
     key: s.site_id,
-    z: s.anomaly_z,
-    tooltip: `${s.name}: ${s.anomaly_z == null ? 'no reading' : `z=${formatZ(s.anomaly_z)}`}`,
+    z: s.spatial_anomaly_z,
+    tooltip: `${s.name}: ${s.spatial_anomaly_z == null ? ANOMALY_NOT_COMPUTED : `z=${formatZ(s.spatial_anomaly_z)}`}`,
   }))
 
   const s = summaryApi.data
@@ -87,6 +87,7 @@ export default function SummaryPage() {
           <section className="summary-section">
             <div className="stat-row">
               <StatCard label="Monitored sites" value={s.total_sites} />
+              <StatCard label="Risk not evaluated" value={s.risk_level_counts.not_evaluated} detail={ANOMALY_NOT_COMPUTED} />
               <StatCard label="Normal" value={s.risk_level_counts.normal} riskLevel="normal" />
               <StatCard label="Elevated" value={s.risk_level_counts.elevated} riskLevel="elevated" />
               <StatCard label="Watch" value={s.risk_level_counts.watch} riskLevel="watch" />
@@ -117,9 +118,9 @@ export default function SummaryPage() {
                 <dl className="detect-grid">
                   <dt>Scene date</dt>
                   <dd className="mono">{s.most_recent_detected_signal.actual_date || '—'}</dd>
-                  <dt>Anomaly z-score</dt>
+                  <dt>Spatial anomaly z-score</dt>
                   <dd className="mono">
-                    {formatZ(s.most_recent_detected_signal.anomaly_z)}
+                    {formatZ(s.most_recent_detected_signal.spatial_anomaly_z)}
                     <span className="approx-marker">approx</span>
                   </dd>
                   <dt>Checked</dt>
@@ -127,7 +128,7 @@ export default function SummaryPage() {
                 </dl>
               </div>
             ) : (
-              <p className="no-rules">No recent signal — no monitored site currently has a detected bloom-like reading.</p>
+              <p className="no-rules">Detection is not evaluated. {ANOMALY_NOT_COMPUTED}.</p>
             )}
           </section>
 
@@ -137,12 +138,12 @@ export default function SummaryPage() {
           </section>
 
           <section className="summary-section">
-            <div className="section-title">Chlorophyll anomaly across monitored sites, right now</div>
+            <div className="section-title">Anomaly status across monitored sites</div>
             <AnomalyStrip
               segments={regionSegments}
               leftLabel={sites[0]?.name}
               rightLabel={sites[sites.length - 1]?.name}
-              caption="Each band is one monitored site's current anomaly reading, not a time axis — hatched means no current reading for that site."
+              caption="Each band is one monitored site. Hatched means the anomaly is not computed — no valid baseline exists, even when spectral index readings are available."
             />
           </section>
 

@@ -8,7 +8,7 @@ absence, and a loading state is not a finding):
                      cache row at all. Says nothing about the water.
   no_usable_data  -- the scheduler did read this site and the read
                      produced no usable value (no_imagery /
-                     no_water_pixels / no_climatology / error). A real
+                     no_water_pixels / error). A real
                      finding about a real attempt.
 
 Same convention as the rest of this suite: real FastAPI TestClient, real
@@ -80,8 +80,9 @@ def test_summary_keeps_the_two_states_distinct_and_never_calls_a_failed_read_nor
     assert total >= 3, "fixture precondition: at least 3 monitored sites"
 
     _add_cache(
-        site_id=site_ids[0], target_date="2026-09-03", status="ok", detected=True,
-        anomaly_z=1.7, index_used="ndci", level="watch", triggered_rules=["elevated", "watch"],
+        site_id=site_ids[0], target_date="2026-09-03", status="ok", detected=None,
+        spatial_anomaly_z=None, index_used="ndci", level=None, triggered_rules=[],
+        index_values={"ndci": 0.2},
         confidence_label="indicative, rule-based -- not a validated forecast",
     )
     # Failed reads: real attempts, no usable value, and crucially level=None
@@ -97,7 +98,8 @@ def test_summary_keeps_the_two_states_distinct_and_never_calls_a_failed_read_nor
 
     counts = client.get("/summary").json()["risk_level_counts"]
 
-    assert counts["watch"] == 1, "the one real reading is counted under its real risk level"
+    assert counts["not_evaluated"] == 1, "real indices do not establish a risk level"
+    assert counts["watch"] == 0
     assert counts["no_usable_data"] == 2, "both failed reads counted as attempted-but-unusable"
     assert counts["not_checked_yet"] == total - 3, "the untouched sites stay a loading state"
     assert counts["normal"] == 0, "a failed read must never be reported as a normal site"
@@ -106,7 +108,7 @@ def test_summary_keeps_the_two_states_distinct_and_never_calls_a_failed_read_nor
     # none dropped, nothing invented to fill a gap.
     assert (
         counts["normal"] + counts["elevated"] + counts["watch"] + counts["warning"]
-        + counts["no_usable_data"] + counts["not_checked_yet"]
+        + counts["no_usable_data"] + counts["not_checked_yet"] + counts["not_evaluated"]
     ) == total
 
 

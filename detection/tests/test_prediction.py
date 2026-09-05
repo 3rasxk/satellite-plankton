@@ -5,8 +5,8 @@ condition parser (`_eval_condition`), and rule evaluation (`evaluate_rules`).
 
 This is the safety-relevant layer (CLAUDE.md's rule-based risk
 escalation) -- in particular, `evaluate_rules` must never let missing
-data (`anomaly_z=None`) escalate risk. See
-`test_evaluate_rules_missing_anomaly_z_never_escalates_to_warning` below.
+data (`spatial_anomaly_z=None`) escalate risk. See
+`test_evaluate_rules_missing_spatial_anomaly_z_never_escalates_to_warning` below.
 
 Nothing here calls `detect()` or `risk_level()` (both make real GEE
 calls via `_data_pipeline.py`) -- only the pure helper functions are
@@ -175,27 +175,27 @@ def test_compute_acceleration_none_when_either_trend_is_none():
 # guards.
 # --------------------------------------------------------------------------
 
-_CTX = {"anomaly_z": 2.0, "trend_14d_rising": True, "sst_anomaly": 0.5}
+_CTX = {"spatial_anomaly_z": 2.0, "trend_14d_rising": True, "sst_anomaly": 0.5}
 
 
 def test_eval_condition_ge_operator():
-    assert _eval_condition("anomaly_z >= 2.0", _CTX) is True
-    assert _eval_condition("anomaly_z >= 2.1", _CTX) is False
+    assert _eval_condition("spatial_anomaly_z >= 2.0", _CTX) is True
+    assert _eval_condition("spatial_anomaly_z >= 2.1", _CTX) is False
 
 
 def test_eval_condition_le_operator():
-    assert _eval_condition("anomaly_z <= 2.0", _CTX) is True
-    assert _eval_condition("anomaly_z <= 1.9", _CTX) is False
+    assert _eval_condition("spatial_anomaly_z <= 2.0", _CTX) is True
+    assert _eval_condition("spatial_anomaly_z <= 1.9", _CTX) is False
 
 
 def test_eval_condition_gt_operator():
-    assert _eval_condition("anomaly_z > 1.9", _CTX) is True
-    assert _eval_condition("anomaly_z > 2.0", _CTX) is False
+    assert _eval_condition("spatial_anomaly_z > 1.9", _CTX) is True
+    assert _eval_condition("spatial_anomaly_z > 2.0", _CTX) is False
 
 
 def test_eval_condition_lt_operator():
-    assert _eval_condition("anomaly_z < 2.1", _CTX) is True
-    assert _eval_condition("anomaly_z < 2.0", _CTX) is False
+    assert _eval_condition("spatial_anomaly_z < 2.1", _CTX) is True
+    assert _eval_condition("spatial_anomaly_z < 2.0", _CTX) is False
 
 
 def test_eval_condition_eq_operator():
@@ -214,12 +214,12 @@ def test_eval_condition_true_false_literal_parsing():
 
 @pytest.mark.parametrize("op", [">=", "<=", ">", "<", "=="])
 def test_eval_condition_none_context_value_returns_false_for_every_operator(op):
-    ctx_missing = {"anomaly_z": None, "trend_14d_rising": True, "sst_anomaly": 0.5}
-    assert _eval_condition(f"anomaly_z {op} 1.5", ctx_missing) is False
+    ctx_missing = {"spatial_anomaly_z": None, "trend_14d_rising": True, "sst_anomaly": 0.5}
+    assert _eval_condition(f"spatial_anomaly_z {op} 1.5", ctx_missing) is False
 
 
 def test_eval_condition_none_context_value_returns_false_even_for_boolean_literal():
-    ctx_missing = {"anomaly_z": 2.0, "trend_14d_rising": None, "sst_anomaly": 0.5}
+    ctx_missing = {"spatial_anomaly_z": 2.0, "trend_14d_rising": None, "sst_anomaly": 0.5}
     assert _eval_condition("trend_14d_rising == true", ctx_missing) is False
     assert _eval_condition("trend_14d_rising == false", ctx_missing) is False
 
@@ -231,12 +231,12 @@ def test_eval_condition_unknown_variable_raises_value_error():
 
 def test_eval_condition_malformed_expression_too_few_tokens_raises():
     with pytest.raises(ValueError):
-        _eval_condition("anomaly_z>=1.5", _CTX)
+        _eval_condition("spatial_anomaly_z>=1.5", _CTX)
 
 
 def test_eval_condition_malformed_expression_too_many_tokens_raises():
     with pytest.raises(ValueError):
-        _eval_condition("anomaly_z >= 1.5 extra", _CTX)
+        _eval_condition("spatial_anomaly_z >= 1.5 extra", _CTX)
 
 
 # --------------------------------------------------------------------------
@@ -253,44 +253,44 @@ def escalation_rules():
 
 
 def test_evaluate_rules_normal_when_nothing_triggers(escalation_rules):
-    ctx = {"anomaly_z": 0.5, "trend_14d_rising": False, "sst_anomaly": -1.0}
+    ctx = {"spatial_anomaly_z": 0.5, "trend_14d_rising": False, "sst_anomaly": -1.0}
     result = evaluate_rules(ctx, escalation_rules)
     assert result["level"] == "normal"
     assert result["triggered_rules"] == []
 
 
 def test_evaluate_rules_elevated_only(escalation_rules):
-    # anomaly_z satisfies "elevated" (>= 1.5) but not "watch" (needs
+    # spatial_anomaly_z satisfies "elevated" (>= 1.5) but not "watch" (needs
     # trend_14d_rising == true too) or "warning".
-    ctx = {"anomaly_z": 1.6, "trend_14d_rising": False, "sst_anomaly": -1.0}
+    ctx = {"spatial_anomaly_z": 1.6, "trend_14d_rising": False, "sst_anomaly": -1.0}
     result = evaluate_rules(ctx, escalation_rules)
     assert result["triggered_rules"] == ["elevated"]
     assert result["level"] == "elevated"
 
 
 def test_evaluate_rules_elevated_and_watch_wins_watch(escalation_rules):
-    # anomaly_z satisfies elevated and watch (>= 1.5, rising) but not
+    # spatial_anomaly_z satisfies elevated and watch (>= 1.5, rising) but not
     # warning (needs >= 2.0 and sst_anomaly > 0).
-    ctx = {"anomaly_z": 1.6, "trend_14d_rising": True, "sst_anomaly": -1.0}
+    ctx = {"spatial_anomaly_z": 1.6, "trend_14d_rising": True, "sst_anomaly": -1.0}
     result = evaluate_rules(ctx, escalation_rules)
     assert result["triggered_rules"] == ["elevated", "watch"]
     assert result["level"] == "watch"
 
 
 def test_evaluate_rules_all_three_wins_warning(escalation_rules):
-    ctx = {"anomaly_z": 2.5, "trend_14d_rising": True, "sst_anomaly": 0.5}
+    ctx = {"spatial_anomaly_z": 2.5, "trend_14d_rising": True, "sst_anomaly": 0.5}
     result = evaluate_rules(ctx, escalation_rules)
     assert result["triggered_rules"] == ["elevated", "watch", "warning"]
     assert result["level"] == "warning"
 
 
-def test_evaluate_rules_missing_anomaly_z_never_escalates_to_warning(escalation_rules):
-    """THE safety-critical case: anomaly_z is missing (None) while every
+def test_evaluate_rules_missing_spatial_anomaly_z_never_escalates_to_warning(escalation_rules):
+    """THE safety-critical case: spatial_anomaly_z is missing (None) while every
     other variable is set to a value that would otherwise satisfy
-    `warning`'s non-anomaly_z conditions. Missing data must resolve to
+    `warning`'s non-spatial_anomaly_z conditions. Missing data must resolve to
     'normal', never silently escalate risk.
     """
-    ctx = {"anomaly_z": None, "trend_14d_rising": True, "sst_anomaly": 0.5}
+    ctx = {"spatial_anomaly_z": None, "trend_14d_rising": True, "sst_anomaly": 0.5}
     result = evaluate_rules(ctx, escalation_rules)
     assert result["level"] == "normal"
     assert result["triggered_rules"] == []

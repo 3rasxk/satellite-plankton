@@ -43,56 +43,13 @@ Tables (`src/db_models.py`):
 
 See `.claude/agents/backend-api.md` and `docs/FRONTEND_PLAN.md` §3 for the contract. Every response model carries a `disclaimer` field (enforced via Pydantic, visible in `/docs`). Detection (`detect()`) and prediction (`risk_level()`) fields are always kept in separate parts of the response shape — never merged into one score.
 
-## Cached NDCI watch overlay
+## Current anomaly status
 
-`GET /watch-overlay` returns the cached, whole-upper-Gulf **NDCI watch signal
-(z >= 1.5)**. It is a database/cache read only: the route does not call Google
-Earth Engine, and page loads never initiate a regional scan. It is separate
-from `/risk-map` and does not represent the six rule-based monitoring-site
-predictions.
-
-The scheduler refreshes the overlay once per normal scheduler cycle,
-independently of the six-site refreshes. A successful refresh replaces the
-singleton cache metadata. If a later Earth Engine, authentication, or network
-refresh fails, the last successful tile metadata is retained and marked
-`stale: true` with an `error`; an empty cache reports an explicit `error` (or
-`no_imagery` when no Sentinel-2 scene exists in the source window) and has no
-`tile_url`.
-
-The response includes `status` (`ok`, `no_imagery`, or `error`), `tile_url`,
-generation and target dates, `source_window_start`, `source_window_end`,
-`newest_scene_date`, `baseline_periods`, threshold and baseline parameters,
-water-mask metadata, both resolution fields, color, `stale`, `error`, the
-standard `disclaimer`, and the overlay-specific `caveat`. `map_id` remains a
-scheduler/cache internal and is not exposed.
-
-```json
-{
-  "status": "ok",
-  "tile_url": "https://earthengine.example/tiles/{z}/{x}/{y}",
-  "generated_at": "2026-08-27T02:00:00+00:00",
-  "target_date": "2026-08-27",
-  "source_window_start": "2026-07-29",
-  "source_window_end": "2026-08-27",
-  "newest_scene_date": "2026-08-26",
-  "baseline_periods": [{"start": "2025-08-12", "end_exclusive": "2025-09-12"}],
-  "threshold_z": 1.5,
-  "baseline_years": 5,
-  "seasonal_window_days": 15,
-  "min_baseline_observations": 5,
-  "water_occurrence_pct": 50.0,
-  "water_mask": "gulf_connected_historical_surface_water",
-  "output_grid_m": 10,
-  "effective_resolution_m": 20,
-  "color": "#FF9F0A",
-  "stale": false,
-  "error": null,
-  "disclaimer": "Detection is at satellite-pixel resolution; small or scattered blooms may not be visible.",
-  "caveat": "NDCI watch signal, not bloom confirmation or a forecast. Sediment, optically complex coastal water, and residual cloud may produce a signal. The 10 m output grid uses Sentinel-2 B5 with 20 m effective source resolution. The water mask uses Gulf-connected historical surface water and does not measure salinity."
-}
-```
-
-`tile_url` is present only when a cached overlay is available. It is a
-short-lived Earth Engine tile template, so clients must surface stale/error or
-tile-unavailable state instead of inferring that transparent or missing pixels
-are normal.
+The earlier `/watch-overlay` documentation described a proposal; this branch
+has no such route or implemented spectral-index anomaly overlay. `/detect`
+and the cached site/regional-scan endpoints expose real indices and actual
+scene dates, with `spatial_anomaly_z: null`. Detection verdicts, risk levels
+and scan tiers are not evaluated because no valid index baseline exists.
+All 14 validation events have `z_score_status: not_computed_no_valid_baseline`.
+The independent `/timeseries` `anomaly_z` remains the dimensionally valid
+comparison of MODIS `chlor_a` with a `chlor_a` baseline.

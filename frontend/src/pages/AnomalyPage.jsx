@@ -9,6 +9,7 @@ import {
   NO_DATA_STATUS,
   formatZ,
   formatRelativeTime,
+  ANOMALY_NOT_COMPUTED,
 } from '../constants.js'
 import { segmentsFromTimeseries } from '../utils/series.js'
 
@@ -18,8 +19,8 @@ import { segmentsFromTimeseries } from '../utils/series.js'
  * stat cards for the region. Data from /risk-map (current snapshot) +
  * per-site /timeseries (90-day history).
  *
- * All z-scores are real MODIS-climatology-derived values — never
- * fabricated. No-data states rendered as hatched cells and dashes.
+ * Historical /timeseries z-scores compare MODIS chlor_a with a chlor_a
+ * baseline. Current spectral-index anomaly statistics are not computed.
  */
 export default function AnomalyPage() {
   const riskMapApi = useApi(getRiskMap, [])
@@ -31,7 +32,7 @@ export default function AnomalyPage() {
         name: f.properties.name,
         lat: f.geometry.coordinates[1],
         lng: f.geometry.coordinates[0],
-        anomaly_z: f.properties.anomaly_z,
+        spatial_anomaly_z: f.properties.spatial_anomaly_z,
         status: f.properties.status,
         risk_level: f.properties.risk_level,
         fetched_at: f.properties.fetched_at,
@@ -65,7 +66,7 @@ export default function AnomalyPage() {
     (s) => s.risk_level === 'watch' || s.risk_level === 'warning',
   ).length
   const maxZ = sites.reduce((max, s) => {
-    if (s.anomaly_z != null && (max === null || s.anomaly_z > max)) return s.anomaly_z
+    if (s.spatial_anomaly_z != null && (max === null || s.spatial_anomaly_z > max)) return s.spatial_anomaly_z
     return max
   }, null)
 
@@ -79,7 +80,7 @@ export default function AnomalyPage() {
       <div className="page-header">
         <h1>ความผิดปกติตามฤดูกาล</h1>
         <span className="updated-line">
-          เปรียบเทียบค่าคลอโรฟิลล์ปัจจุบันกับค่าเฉลี่ยรายฤดูกาลจาก MODIS climatology (2002–ปัจจุบัน)
+          ประวัติค่าคลอโรฟิลล์จาก MODIS เทียบกับค่าฐานคลอโรฟิลล์ตามฤดูกาล
           · หน้าต่าง 90 วัน
           {newestFetch ? ` · อัปเดต ${formatRelativeTime(newestFetch)}` : ''}
         </span>
@@ -113,9 +114,9 @@ export default function AnomalyPage() {
                 riskLevel={sitesAtWatch > 0 ? 'watch' : undefined}
               />
               <StatCard
-                label="z-score สูงสุด"
+                label="Spatial anomaly z"
                 value={maxZ != null ? formatZ(maxZ) : '—'}
-                detail="ค่าเบี่ยงเบนสูงสุดจากค่าเฉลี่ยรายฤดูกาล"
+                detail={ANOMALY_NOT_COMPUTED}
               />
             </div>
           </section>
@@ -159,10 +160,10 @@ export default function AnomalyPage() {
                             />
                             {isNoData
                               ? 'ไม่มีค่าอ่าน'
-                              : RISK_LABEL_TH[site.risk_level] || site.risk_level}
+                              : RISK_LABEL_TH[site.risk_level] || 'ยังประเมินไม่ได้'}
                           </span>
                           <span className="mono anomaly-z-value">
-                            z = {formatZ(site.anomaly_z)}
+                            {site.spatial_anomaly_z == null ? ANOMALY_NOT_COMPUTED : `z = ${formatZ(site.spatial_anomaly_z)}`}
                           </span>
                         </div>
                       </div>

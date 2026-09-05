@@ -49,18 +49,20 @@ export const RISK_LABEL_TH = {
 }
 
 export const RISK_MEANING = {
-  normal: 'Chlorophyll near the seasonal baseline for this site.',
-  elevated: 'Chlorophyll above baseline — one rule-based signal triggered.',
-  watch: 'Multiple signals elevated — indicative of rising bloom risk.',
-  warning: 'Strong, multi-signal anomaly — highest indicative risk tier.',
+  normal: 'Risk not evaluated — no valid anomaly baseline exists.',
+  elevated: 'Inactive risk tier — no valid anomaly baseline exists.',
+  watch: 'Inactive risk tier — no valid anomaly baseline exists.',
+  warning: 'Inactive risk tier — no valid anomaly baseline exists.',
 }
 
 export const RISK_MEANING_TH = {
-  normal: 'ปกติของฤดูกาล',
-  elevated: 'สูงกว่าเกณฑ์ปกติ',
-  watch: 'เสี่ยงเพิ่มขึ้นต่อเนื่อง',
-  warning: 'เสี่ยงสูง พบผิดปกติมาก',
+  normal: 'ยังประเมินไม่ได้ — ยังไม่มีค่าฐานความผิดปกติที่ถูกต้อง',
+  elevated: 'เกณฑ์ยังไม่ทำงาน — ยังไม่มีค่าฐานที่ถูกต้อง',
+  watch: 'เกณฑ์ยังไม่ทำงาน — ยังไม่มีค่าฐานที่ถูกต้อง',
+  warning: 'เกณฑ์ยังไม่ทำงาน — ยังไม่มีค่าฐานที่ถูกต้อง',
 }
+
+export const ANOMALY_NOT_COMPUTED = 'Not computed — no valid baseline exists'
 
 // detect()/cache status values that mean "no reading", never merged with
 // a real risk_level colour. status: "ok" is the only one that gets a
@@ -107,7 +109,8 @@ export const STATUS_EXPLAINER_TH = {
   error: 'ระบบไม่สามารถดึงข้อมูลรอบล่าสุดได้ กำลังแสดงข้อมูลที่อ่านได้ล่าสุดแทน',
 }
 
-// Bucketing anomaly_z onto the same ramp used by risk_level, for the
+// Bucketing the dimensionally valid /timeseries chlor_a anomaly_z onto
+// the same ramp used by risk_level, for the
 // AnomalyStrip. This is a display convention (z <= 0 reads as clear,
 // z > 2 as severe) — not a rule from detection/src/config.yaml, and never
 // presented as a calibrated threshold.
@@ -126,21 +129,20 @@ export function formatZ(z) {
 
 // Plain-language text for each triggered_rules entry. `/risk-map` and
 // `/detect` return level names only (e.g. "watch"), not the rule's
-// condition text — mirrors detection/src/config.yaml `escalation_rules.*
-// .description` verbatim so a viewer never has to read raw condition
-// syntax like "anomaly_z >= 1.5". Kept in sync manually with that file;
+// condition text — explains detection/src/config.yaml `escalation_rules.*
+// .description` so a viewer never has to read raw condition
+// syntax like "spatial_anomaly_z >= 1.5". Kept in sync manually with that file;
 // there is no API field that exposes the description text itself.
 export const RULE_DESCRIPTION = {
-  elevated: 'Chlorophyll anomaly is at least 1.5 standard deviations above the seasonal norm.',
-  watch: 'Anomaly is elevated and the 14-day trend is rising.',
-  warning:
-    'Anomaly has reached 2.0 std above normal, the 14-day trend is rising, and sea surface temperature is above its seasonal normal.',
+  elevated: 'Inactive — no valid anomaly statistic exists for the spectral indices.',
+  watch: 'Inactive — the anomaly input required alongside the 14-day trend is not computed.',
+  warning: 'Inactive — the anomaly input required alongside trend and sea surface temperature is not computed.',
 }
 
 export const RULE_DESCRIPTION_TH = {
-  elevated: 'คลอโรฟิลล์สูงกว่าค่าเฉลี่ยตามฤดูกาลเกิน 1.5 เท่าของส่วนเบี่ยงเบนมาตรฐาน (z ≥ 1.5)',
-  watch: 'คลอโรฟิลล์สูงผิดปกติและแนวโน้ม 14 วันมีทิศทางเพิ่มขึ้นต่อเนื่อง',
-  warning: 'คลอโรฟิลล์สูงมาก (z ≥ 2.0), แนวโน้มเพิ่มขึ้น และอุณหภูมิน้ำทะเลสูงกว่าปกติ',
+  elevated: 'ยังไม่ทำงาน — ยังไม่มีสถิติความผิดปกติที่ถูกต้องสำหรับค่าดัชนี',
+  watch: 'ยังไม่ทำงาน — ยังไม่ได้คำนวณค่าความผิดปกติที่ใช้ร่วมกับแนวโน้ม 14 วัน',
+  warning: 'ยังไม่ทำงาน — ยังไม่ได้คำนวณค่าความผิดปกติที่ใช้ร่วมกับแนวโน้มและอุณหภูมิผิวน้ำ',
 }
 
 const THAI_MONTHS_SHORT = [

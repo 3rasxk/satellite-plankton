@@ -1,6 +1,6 @@
 # Index comparison -- NDCI vs 2BDA vs 3BDA vs B2/B3
 
-**Cannot be compared against the 14 validation events** -- see `event_table.md`: 1 of 14 events produces a real matched satellite reading, and one event cannot rank four indices against each other, so there is still no per-event ground truth to score any index against. What follows instead is a live demonstration that all four indices compute correctly on real Sentinel-2 data, at non-event points/dates chosen only because they returned cloud-clear imagery during this build -- **not a validation result.**
+**All 14 events cannot be evaluated for detection.** No valid anomaly baseline exists for the spectral indices. The former comparison with a MODIS `chlor_a` concentration baseline mixed incompatible units and supplies no result for any index. th_010 has a real satellite reading, but no valid anomaly statistic; it is not a miss. The table below preserves previously recorded live Sentinel-2 index readings at three non-event points/dates. It demonstrates that the index functions ran on real data, **not that their outputs detect blooms or rank the indices**. No new live extraction was performed for this documentation correction.
 
 | point | date | actual_date | cloud_fraction | NDCI | 2BDA | 3BDA | B2/B3 |
 |---|---|---|---|---|---|---|---|
@@ -8,13 +8,13 @@
 | offshore_gulf_center | 2020-02-05 | 2020-02-06 | 0.15 | 0.0369 | 1.0767 | 0.0749 | 1.0223 |
 | offshore_gulf_center | 2019-12-15 | 2019-12-13 | 0.00 | 0.0606 | 1.1289 | 0.0955 | 1.3112 |
 
-## 14-event validation attempt -- still not a real comparison, but for a new reason
+## Satellite availability is separate from anomaly evaluation
 
-As of 2026-08-22, 7 of the 14 events (`data/validation/events.csv` commit d9811d7) have a real coordinate and were genuinely queried against live Sentinel-2 (see `reports/event_table.md`'s 'newly-coordinate events' section for the full per-event detail). 1 of the 7 (th_010) produces a usable Sentinel-2 band reading; the other six do not -- four predate Sentinel-2's 2015 launch, one hit a tiling gap, one hit full cloud cover. One event cannot rank four indices against each other, and th_010 is the weakest possible basis for trying: its species is karenia_sp rather than the Noctiluca the B2/B3 feature targets, and its reading exists only via the ETOPO1 water-mask fallback over a turbid near-shore buffer. So there is still no real per-event NDCI/2BDA/3BDA/B2-B3 comparison to score against a documented bloom outcome. The demo-point table above remains the only real, live confirmation that the four index functions compute correctly end-to-end.
+Seven of the 14 events have documented coordinates. The recorded satellite checks recovered a reading for th_010 on `actual_date` 2020-02-16; of the other six, four predate Sentinel-2, one has a coverage gap, and one has total cloud rejection. The remaining seven have no coordinate. **All 14 lack a valid anomaly statistic**, independently of these availability findings. th_010's reading has three qualifiers: `n=1`; `karenia_sp`, not the B2/B3 *Noctiluca* target; and recovery through the ETOPO1 fallback where JRC returns zero pixels, ETOPO1 averages +3.1 m with about 35% below sea level, and bands are 1040–1660 versus 200–560 in open Gulf water. None changes the invalid statistic into a detection result.
 
 ## What these numbers do and don't show
 
 - Confirms all four index functions in `src/indices.py` run against real band values pulled live from Google Earth Engine (`COPERNICUS/S2_SR_HARMONIZED`) -- not synthetic test fixtures.
-- Does NOT show which index best discriminates a real documented bloom, because none of the three demo points/dates above coincide with a documented event, and only one coordinate-bearing event (th_010) produces a real Sentinel-2 reading -- too few, and too qualified, to rank indices against (see the section above and `event_table.md`).
-- Per `docs/DETECTION_PLAN.md` §2, 3BDA is expected to outperform NDCI/2BDA specifically near river mouths (turbid water) -- still untested against a real event: th_003/th_008/th_012 (Tha Chin river mouth, the site this prediction is specifically about) all predate Sentinel-2 or hit an archive gap this run.
+- Does NOT show which index best discriminates a documented bloom. No valid anomaly statistic exists for any of the 14 events, and none of the demo points/dates is a documented event.
+- The proposed benefit of 3BDA near turbid river mouths remains unvalidated here. th_003/th_008/th_012 at Tha Chin all predate Sentinel-2, and no event has an evaluable anomaly statistic.
 - B2/B3 (green *Noctiluca* discrimination) is secondary/lower-confidence by design (`.claude/agents/bloom-detection.md` §1) and, per `data/validation/CALIBRATION_NOTES.md` §2, is only expected to be meaningful for *Noctiluca* events specifically -- none of the demo points above are events at all, so this column is shown only to confirm the function runs, not that it discriminates anything.

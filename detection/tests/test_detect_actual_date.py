@@ -10,11 +10,9 @@ scene date and then discarded it, leaving every consumer to either omit
 it or re-derive it with a second GEE round-trip
 (backend/src/satellite_meta.py).
 
-GEE is never touched here: `get_sentinel2_bands` and
-`build_climatology` are monkeypatched on the `src.prediction` module
-namespace -- the same typed boundary the rest of this suite avoids
-crossing. `compute_all_indices` and `z_score` are left REAL, so the
-tests exercise the actual code path, not a stub of it.
+GEE is never touched here: `get_sentinel2_bands` is monkeypatched at the
+typed boundary. Real index math runs; climatology and z-score calls are
+forbidden because no dimensionally valid index baseline exists.
 
 The safety rule under test: `actual_date` is either a real scene date or
 None. The requested date is never substituted for a missing one.
@@ -45,9 +43,6 @@ _BANDS = {
     "actual_date": SCENE_DATE,
 }
 
-_CLIMATOLOGY = {"mean": 0.0, "std": 0.1, "n": 20, "reliable": True}
-
-
 @pytest.fixture(scope="module")
 def config():
     """The real config.yaml -- pinned to what actually ships, same as
@@ -68,12 +63,6 @@ def _patch_bands_raising(monkeypatch, exc: Exception) -> None:
     monkeypatch.setattr(prediction, "get_sentinel2_bands", _raise)
 
 
-def _patch_climatology(monkeypatch, climatology) -> None:
-    monkeypatch.setattr(
-        prediction, "build_climatology", lambda lat, lng, date, window_days: climatology
-    )
-
-
 # --------------------------------------------------------------------------
 # status == 'ok' -- imagery resolved, so a real scene date must come back.
 # --------------------------------------------------------------------------
@@ -81,7 +70,6 @@ def _patch_climatology(monkeypatch, climatology) -> None:
 
 def test_detect_ok_returns_the_real_scene_date_not_the_requested_date(monkeypatch, config):
     _patch_bands(monkeypatch, _BANDS)
-    _patch_climatology(monkeypatch, _CLIMATOLOGY)
 
     result = detect(13.4, 100.6, REQUESTED_DATE, config)
 
@@ -92,37 +80,36 @@ def test_detect_ok_returns_the_real_scene_date_not_the_requested_date(monkeypatc
 
 
 # --------------------------------------------------------------------------
-# status == 'no_climatology' -- Sentinel-2 DID resolve; only the MODIS
-# baseline is missing. This path must still carry the real scene date.
+# No baseline is consulted; successful imagery remains a real index reading.
 # --------------------------------------------------------------------------
 
 
-def test_detect_no_climatology_still_carries_the_scene_date(monkeypatch, config):
-    # build_climatology returning None is what z_score converts into
-    # z=None / reason='no_climatology_data_for_this_location_and_window'.
+def test_detect_never_calls_climatology_or_z_score(monkeypatch, config):
     _patch_bands(monkeypatch, _BANDS)
-    _patch_climatology(monkeypatch, None)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("detect must not compute an index anomaly")
+
+    # raising=False also catches accidentally reintroducing either old call.
+    monkeypatch.setattr(prediction, "build_climatology", forbidden, raising=False)
+    monkeypatch.setattr(prediction, "z_score", forbidden, raising=False)
 
     result = detect(13.4, 100.6, REQUESTED_DATE, config)
 
-    assert result["status"] == "no_climatology"
-    assert result["anomaly_z"] is None
-    # Imagery succeeded on this path, so index_values and the scene date
-    # behind them are both real -- only the anomaly baseline is missing.
+    assert result["status"] == "ok"
+    assert "anomaly_z" not in result
+    assert "spatial_anomaly_z" not in result
+    assert "detected" not in result
     assert result["index_values"] is not None
     assert result["actual_date"] == SCENE_DATE
 
 
-def test_detect_zero_variance_climatology_also_carries_the_scene_date(monkeypatch, config):
-    # The other route into 'no_climatology': a degenerate baseline with
-    # std == 0 (z undefined). Imagery still resolved.
+def test_detect_needs_only_index_configuration(monkeypatch):
     _patch_bands(monkeypatch, _BANDS)
-    _patch_climatology(monkeypatch, {"mean": 0.05, "std": 0.0, "n": 3, "reliable": False})
-
-    result = detect(13.4, 100.6, REQUESTED_DATE, config)
-
-    assert result["status"] == "no_climatology"
-    assert result["reason"] == "zero_historical_variance_z_undefined"
+    result = detect(13.4, 100.6, REQUESTED_DATE, {"indices": {"primary": "ndci"}})
+    assert result["status"] == "ok"
+    assert result["reason"] is None
+    assert result["index_values"]["ndci"] == pytest.approx((0.07 - 0.06) / (0.07 + 0.06))
     assert result["actual_date"] == SCENE_DATE
 
 
@@ -164,7 +151,6 @@ def test_detect_no_water_pixels_returns_null_scene_date(monkeypatch, config):
     "expected_status,bands_setup",
     [
         ("ok", "ok"),
-        ("no_climatology", "no_climatology"),
         ("no_imagery", "no_imagery"),
         ("no_water_pixels", "no_water_pixels"),
     ],
@@ -180,11 +166,11 @@ def test_every_detect_return_path_includes_actual_date(
         _patch_bands_raising(monkeypatch, prediction.NoWaterPixelsError("forced for test"))
     else:
         _patch_bands(monkeypatch, _BANDS)
-        _patch_climatology(
-            monkeypatch, None if bands_setup == "no_climatology" else _CLIMATOLOGY
-        )
 
     result = detect(13.4, 100.6, REQUESTED_DATE, config)
 
     assert result["status"] == expected_status
     assert "actual_date" in result
+    assert "detected" not in result
+    assert "anomaly_z" not in result
+    assert "spatial_anomaly_z" not in result
