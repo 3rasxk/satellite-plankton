@@ -66,7 +66,7 @@ cp .env.example .env   # blank is fine — falls back to local SQLite
 # frontend
 cd ../frontend
 npm install
-cp .env.example .env   # VITE_API_BASE_URL=http://localhost:8000 by default
+cp .env.example .env   # VITE_API_BASE_URL=/api by default -- Vite proxies it to :8000
 ```
 
 ### 3. Run the dev stack
