@@ -2,7 +2,7 @@
 
 Software-only early-warning system for harmful algal blooms (green *Noctiluca* / red tide) in the upper Gulf of Thailand, targeting SDG 14. **Physics-based, not machine learning** — spectral indices, a MODIS climatology baseline, anomaly z-scores, and rule-based risk escalation. See `CLAUDE.md` for the full spec and `docs/DETECTION_PLAN.md` §0 for why supervised ML was rejected for this problem.
 
-**Read `LIMITATIONS.md` before trusting any output of this system.** The short version: detection (is there a satellite anomaly right now) is standard, high-confidence remote sensing; prediction (is risk rising) is rule-based and indicative, not a validated forecast; and the 14-event validation set currently has **0 events matchable to a real satellite reading** (all are named-place or province-level locations — coordinates are never invented). This is a real, load-bearing finding from the build, not a caveat added after the fact.
+**Read `LIMITATIONS.md` before trusting any output of this system.** The short version: detection (is there a satellite anomaly right now) is standard, high-confidence remote sensing; prediction (is risk rising) is rule-based and indicative, not a validated forecast; and the 14-event set is a **record of documented blooms, not a validation gate** — 1 of the 14 has produced a real satellite reading, and one event is not evidence that detection works or that it fails. This is a real, load-bearing finding from the build, not a caveat added after the fact.
 
 ## Layout
 
@@ -115,9 +115,9 @@ Regenerates `detection/reports/event_table.md`, `index_comparison.md`, and `thre
 
 Lives at `data/validation/events.csv` — 14 documented Thai HAB events (1981–2020), extracted from Luang-on et al. (2023, *Frontiers in Marine Science* 10:1031901), a SEAFDEC-archived 1984 paper, and a 2018 MOAC bulletin. **This set is locked — no further data collection is in scope** (`CLAUDE.md` §4, `data/validation/README.md`).
 
-**Current match status: 0 of 14.** Every row's `location_precision` is `named_site` or `province_level`, never `coordinates` — the sources describe events by place name, and this project never invents a lat/lng for a place name (`docs/DETECTION_PLAN.md` §3). One regional-proxy attempt (`th_001`, at the scale the source actually supports — "upper Gulf of Thailand," not a named site) found zero Sentinel-2 scenes and a real ~2-month MODIS `chlor_a` gap for that window. See:
+**Current match status: 1 of 14**, and that one settles nothing — see `LIMITATIONS.md` §1 for the three qualifiers that apply to it together. 7 rows carry a real, human-confirmed coordinate; the other 7 are `named_site` or `province_level`, because the sources describe events by place name and this project never invents a lat/lng for one (`docs/DETECTION_PLAN.md` §3). Of the 7 with coordinates, 4 predate Sentinel-2, 1 hit a coverage gap, 1 was entirely cloud-covered, and 1 (th_010) produces a reading. One regional-proxy attempt (`th_001`, at the scale the source actually supports — "upper Gulf of Thailand," not a named site) found zero Sentinel-2 scenes and a real ~2-month MODIS `chlor_a` gap for that window. See:
 - `data/validation/README.md` — schema and folder guide.
-- `data/validation/CALIBRATION_NOTES.md` — the methodology decisions this 0/14 reality forces (same-episode cluster hold-out grouping for leave-one-out, species diversity across the 14 events, historical-event weighting, date-precision tiers, `cell_count` range handling).
+- `data/validation/CALIBRATION_NOTES.md` — the methodology decisions this reality forces (same-episode cluster hold-out grouping for leave-one-out, species diversity across the 14 events, historical-event weighting, date-precision tiers, `cell_count` range handling).
 - `detection/reports/event_table.md` — the live per-event table, all 14 rows.
 - `detection/src/config.yaml` — states plainly that escalation thresholds are literature/convention defaults, not empirically calibrated, and why.
 - `GET /validation` — the same table, served live from the running API.

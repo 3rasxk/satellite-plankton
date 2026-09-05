@@ -4,31 +4,24 @@ import { formatZ } from '../constants.js'
 import SatelliteImage from '../components/SatelliteImage.jsx'
 
 /**
- * Validation view — not named in docs/FRONTEND_PLAN.md's route table
- * (written before /validation existed on the backend); added as its own
- * route (`/validation`, linked from the nav) rather than folded into the
- * summary page, because its central fact — "0 of 14 events currently
- * matchable to a real satellite reading" — is a distinct claim from
- * either page and would get lost as a subsection. See report for this
- * choice.
+ * Validation view — its own route (`/validation`, linked from the nav)
+ * rather than a section of the summary page, because what this set is
+ * and is not is a distinct claim that would get lost as a subsection.
  *
- * The honest baseline this page must render correctly *right now*:
- * every one of the 14 events has `matchable: false` because
- * `location_precision` is `named_site` or `province_level` on all of
- * them, never `coordinates` (CLAUDE.md/DETECTION_PLAN.md forbid
- * inventing a coordinate for a place name). This is not a loading state
- * or a bug — it's `n_matchable: 0` for real. The table below reads
- * straight from the response's counts and per-row fields, so it will
- * also render correctly, unchanged, once some events do get real
- * coordinates later.
+ * The page is fully data-driven: every count and row comes from
+ * /validation, so it renders correctly as the underlying numbers change
+ * and has needed no edit as they have. What it must never do is present
+ * this set as a pass/fail gate. 7 of the 14 events carry a real
+ * coordinate; 1 (th_010, Ang Sila) has produced a real satellite
+ * reading. Neither number is a score — see LIMITATIONS.md §1 for why
+ * that single reading is not evidence in either direction.
  *
  * The "Satellite image" column follows the same rule: it renders a real
  * image only when `ev.matchable && ev.anomaly_z != null` (a real
  * satellite reading exists — see backend/src/routers/validation.py),
  * using `ev.true_color_image_url`/`ev.ndci_heatmap_image_url`, which the
- * backend itself only populates under that exact condition. All 14 rows
- * show "no satellite image available" today because 0 of them meet it
- * yet; no "5" or "7" is hardcoded anywhere in this file.
+ * backend itself only populates under that exact condition. No count is
+ * hardcoded anywhere in this file.
  */
 export default function ValidationPage() {
   const { data, loading, error, refetch } = useApi(getValidation, [])
@@ -36,7 +29,7 @@ export default function ValidationPage() {
   return (
     <div className="page">
       <div className="page-header">
-        <h1>Validation against 14 documented Thai events</h1>
+        <h1>The 14 documented Thai events</h1>
         <span className="updated-line">
           {data ? `Calibration status: ${data.calibration_status}` : 'Leave-one-out calibration attempt'}
         </span>

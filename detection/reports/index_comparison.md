@@ -1,12 +1,12 @@
 # Index comparison -- NDCI vs 2BDA vs 3BDA vs B2/B3
 
-**Cannot be compared against the 14 validation events** -- see `event_table.md`: 0 of 14 events produced a real matched satellite reading in this run, so there is no per-event ground truth to score any index against yet. What follows instead is a live demonstration that all four indices compute correctly on real Sentinel-2 data, at non-event points/dates chosen only because they returned cloud-clear imagery during this build -- **not a validation result.**
+**Cannot be compared against the 14 validation events** -- see `event_table.md`: 1 of 14 events produces a real matched satellite reading, and one event cannot rank four indices against each other, so there is still no per-event ground truth to score any index against. What follows instead is a live demonstration that all four indices compute correctly on real Sentinel-2 data, at non-event points/dates chosen only because they returned cloud-clear imagery during this build -- **not a validation result.**
 
 | point | date | actual_date | cloud_fraction | NDCI | 2BDA | 3BDA | B2/B3 |
 |---|---|---|---|---|---|---|---|
-| koh_sichang_area | 2020-01-15 | 2020-01-17 | 0.00 | 0.0859 | 1.1880 | 0.1759 | 0.8486 |
-| offshore_gulf_center | 2020-02-05 | 2020-02-06 | 0.12 | 0.0400 | 1.0834 | 0.0814 | 1.0236 |
-| offshore_gulf_center | 2019-12-15 | 2019-12-13 | 0.00 | 0.0519 | 1.1095 | 0.0834 | 1.3063 |
+| koh_sichang_area | 2020-01-15 | 2020-01-17 | 0.00 | 0.0863 | 1.1889 | 0.1767 | 0.8533 |
+| offshore_gulf_center | 2020-02-05 | 2020-02-06 | 0.15 | 0.0369 | 1.0767 | 0.0749 | 1.0223 |
+| offshore_gulf_center | 2019-12-15 | 2019-12-13 | 0.00 | 0.0606 | 1.1289 | 0.0955 | 1.3112 |
 
 ## 14-event validation attempt -- still not a real comparison, but for a new reason
 

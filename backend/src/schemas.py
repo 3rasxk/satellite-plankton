@@ -27,20 +27,15 @@ DISCLAIMER_TEXT = (
 # CLAUDE.md is explicit that the two must not be blurred together.
 CALIBRATION_CAVEAT_TEXT = (
     "Escalation thresholds in config.yaml are literature/convention defaults, "
-    "not empirically calibrated against Thai events: 7 of the 14 documented "
-    "events in data/validation/events.csv now have a real, human-confirmed "
-    "coordinate (added 2026-08-22), but all 7 still failed to produce a "
-    "usable satellite reading, each for its own verified reason -- four "
-    "predate Sentinel-2's 2015 launch, one hit a coverage gap, one hit "
-    "monsoon cloud cover, one failed the water-pixel mask at a near-shore "
-    "site. The remaining 7 events still have no coordinate at all (named-"
-    "place or province-level locations only; CLAUDE.md/docs/DETECTION_PLAN.md "
-    "§3 forbid inventing one). Net result across all 14: still 0 real "
-    "matched (index value, known outcome) pairs, so thresholds remain "
-    "uncalibrated -- see detection/src/config.yaml's own header and "
-    "detection/reports/event_table.md for the full per-event detail. "
-    "Results below are reported per-event, never as a percentage — n=14 "
-    "cannot support one."
+    "not calibrated against Thai events. Of the 14 documented events in "
+    "data/validation/events.csv, 7 carry a real human-confirmed coordinate "
+    "and 1 (th_010, Ang Sila) has produced a real satellite reading. The "
+    "other 13 cannot: 7 have no coordinate in any source, 4 predate "
+    "Sentinel-2's 2015 launch, 1 hit a coverage gap, 1 was entirely "
+    "cloud-covered. One matched pair is not a calibration set, so thresholds "
+    "remain uncalibrated. This set is a record of documented blooms, not "
+    "evidence that detection works or that it fails -- results are reported "
+    "per-event, never as a percentage, because n=14 cannot support one."
 )
 
 
@@ -139,9 +134,10 @@ class DetectResponse(DisclaimerMixin):
         default=None, description="Whether the two threshold values above are "
         "config.yaml's literature/convention defaults or a real value from a "
         "leave-one-out calibration run. Always 'literature_default' as of this "
-        "build -- see /validation's calibration_caveat for why (0 of 14 "
-        "validation events have produced a usable satellite reading yet, so no "
-        "calibrated_* value exists in config.yaml to prefer over the default). "
+        "build -- see /validation's calibration_caveat for why (1 of 14 "
+        "validation events has produced a usable satellite reading, which is "
+        "not a calibration set, so no calibrated_* value exists in config.yaml "
+        "to prefer over the default). "
         "Read live, not hardcoded, so this flips automatically the moment a "
         "future calibration run does populate a real value."
     )
@@ -348,9 +344,9 @@ class ValidationEventRow(BaseModel):
         default=None, description="GET /satellite-image URL (true-color RGB PNG) for "
         "this event's own coordinate and the actual Sentinel-2 scene date the matching "
         "attempt used. Null unless `matchable` is true AND a real satellite reading "
-        "exists (`anomaly_z` is not null) -- currently null for all 14 events, since "
-        "none has produced a usable reading yet (see `calibration_caveat`). Never a "
-        "placeholder image; becomes non-null automatically the moment a future event "
+        "exists (`anomaly_z` is not null) -- null for 13 of the 14 events, which have "
+        "produced no usable reading (see `calibration_caveat`). Never a "
+        "placeholder image; becomes non-null automatically the moment an event "
         "does produce one, no frontend change required."
     )
     ndci_heatmap_image_url: str | None = Field(

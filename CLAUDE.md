@@ -18,7 +18,7 @@ Public HAB databases (HAEDAT, FWC, HABSOS, PMN — 836K rows) contain **zero usa
 - Detection is at **satellite pixel resolution** (Sentinel-2 ~10 m, MODIS ~1 km) — water colour signatures only, never individual organisms.
 - Small or dispersed blooms may be **missed**; state this.
 - **Detection and prediction are separate claims.** Detection (is there an anomaly now) is high-confidence standard remote sensing. Prediction (is risk rising) is rule-based and indicative — never presented as a validated forecast.
-- Validation uses **14 documented Thai events**. Always report **per-event, never as a percentage** — with n=14, a percentage implies precision the sample cannot support.
+- The **14 documented Thai events** are a historical record, not a validation gate. 1 of 14 has produced a real satellite reading; 13 cannot, for verified reasons (7 have no coordinate, 4 predate Sentinel-2, 1 coverage gap, 1 total cloud cover). Never cite this set as evidence that detection works — or that it fails. Always report **per-event, never as a percentage**: with n=14, a percentage implies precision the sample cannot support.
 
 ## 1. Locked decisions (do not propose alternatives unless the human asks)
 
@@ -29,7 +29,7 @@ Public HAB databases (HAEDAT, FWC, HABSOS, PMN — 836K rows) contain **zero usa
 | Baseline | MODIS `chlor_a` 2002–present climatology, per location per day-of-year | |
 | Primary satellite | Sentinel-2 (10 m) via GEE | |
 | Secondary satellite | MODIS via GEE — climatology + SST | |
-| Ground truth | 14 documented Thai events only | ❌ labels derived from a satellite threshold |
+| Ground truth | 14 documented Thai events — a record, not a pass/fail gate (§0) | ❌ labels derived from a satellite threshold |
 | Validation | Leave-one-out over the 14 events, reported per-event | ❌ 70/30 split on self-generated labels |
 | Frontend | React (Vite) + Leaflet/MapLibre | |
 | Backend | FastAPI (Python) | |
@@ -82,9 +82,9 @@ satellite-data ──► bloom-detection
 ## 6. Definition of Done
 
 - [ ] Sentinel-2 + MODIS pipeline pulling real data for the upper Gulf
-- [ ] All three indices implemented and compared against the 14 events
+- [ ] All three indices implemented, with per-event results published for the 14 documented events — a record, not a pass/fail gate (§0)
 - [ ] MODIS climatology built, anomaly z-scores computed
-- [ ] Leave-one-out threshold calibration complete, 14-row per-event table published
+- [ ] Leave-one-out calibration **attempted and its outcome reported honestly**: 1 of 14 matchable, so no calibration is possible and thresholds stay literature defaults
 - [ ] Rule-based prediction layer with every rule readable in config
 - [ ] Web: map + click-to-chart + summary page
 - [ ] LIMITATIONS.md states the truth boundary; no percentage claims on n=14; no overclaiming

@@ -8,60 +8,39 @@
 #
 # ---------------------------------------------------------------------
 # CALIBRATION STATUS -- read this before trusting any number below.
-# Updated 2026-08-22 -- re-run after 7 of the 14 events gained real
-# coordinates (data/validation/events.csv commit d9811d7). See
-# detection/reports/event_table.md's "newly-coordinate events" section
-# for the full per-event detail behind the summary below.
+# Updated 2026-09-05, after the water-mask fix (see LIMITATIONS.md 5).
 # ---------------------------------------------------------------------
-# docs/DETECTION_PLAN.md §4 calls for thresholds calibrated by sweeping
-# against the 14 documented Thai events (leave-one-out). This STILL could
-# not be done, but for a different, more specific reason than before.
+# docs/DETECTION_PLAN.md 4 calls for thresholds calibrated by sweeping
+# against the 14 documented Thai events (leave-one-out). This still
+# cannot be done. 1 of the 14 now produces a real satellite reading;
+# 13 cannot, for verified reasons:
+#   - 7 have no coordinate in any source (named place / province only;
+#     this project does not invent one).
+#   - th_003 (2009), th_008 (2010), th_012 (1981), th_014 (1983)
+#     predate Sentinel-2's 2015-06-23 launch.
+#   - th_004 (2016-01, Cha-am): zero Sentinel-2 scenes for the whole
+#     recorded month -- an early-era coverage gap.
+#   - th_006 (2019-08-27, Koh Loy): 20 real candidates, all cloud-
+#     rejected -- genuine monsoon cover.
 #
-# Before 2026-08-22: every one of the 14 rows had a blank lat/lng, so 0 of
-# 14 events were even matchable to a satellite pixel.
+# th_010 (Ang Sila) was listed here until 2026-09-05 as failing the JRC
+# land/water mask, described as "a real near-shore/pier site
+# characteristic". That was wrong -- it was the defect fixed in
+# LIMITATIONS.md 5, and the report quoted the defect's own error string
+# as its evidence. It now returns a real reading with strongly negative
+# z-scores. It does not calibrate anything: n=1, the species is
+# karenia_sp rather than the Noctiluca the B2/B3 feature targets, and
+# the reading exists only via the ETOPO1 fallback over a buffer whose
+# bands look like a turbid pier strip.
 #
-# As of 2026-08-22: 7 of the 14 rows (th_003, th_004, th_006, th_008,
-# th_010, th_012, th_014) have a real, human-confirmed coordinate and were
-# each genuinely queried against live Sentinel-2 + MODIS via
-# `thresholds.attempt_satellite_reading` (one generic function, called
-# identically for all 7 -- no event's search window/buffer was hand-tuned
-# to force a match). ALL 7 STILL FAILED TO PRODUCE A USABLE READING, each
-# for its own real, individually verified reason:
-#   - th_003 (2009), th_008 (2010), th_012 (1981), th_014 (1983): predate
-#     Sentinel-2's 2015-06-23 launch -- structurally no scene exists.
-#   - th_004 (2016-01, Cha-am Coast): zero Sentinel-2 scenes returned for
-#     the entire recorded month -- an early-era tiling/coverage gap,
-#     confirmed by a direct Earth Engine collection query.
-#   - th_006 (2019-08-27, Koh Loy): 20 real Sentinel-2 candidates exist in
-#     the search window (confirmed by direct query) but every one is
-#     cloud-rejected -- genuine Aug-2019 monsoon cloud cover.
-#   - th_010 (2020-02-11..20, Ang Sila): Sentinel-2 imagery passes the
-#     cloud check but the sample buffer fails the JRC Global Surface
-#     Water land/water mask at every tested radius (30-250 m) -- a real
-#     near-shore/pier site characteristic, not a fluke; the coordinate is
-#     not moved to force a fit (CLAUDE.md forbids inventing/adjusting a
-#     coordinate to make the pipeline succeed).
-# th_001's regional-proxy attempt (still no coordinate of its own) is
-# unchanged: no usable Sentinel-2 scene, a genuine ~2-month MODIS gap.
-#
-# Net: the sweep/leave-one-out in thresholds.py ran again with ZERO real
-# matched (index_value, flagged_by_source) pairs -- same empty result as
-# before, but now for seven distinct, verified satellite-data-
-# availability reasons instead of "no coordinate at all." This is real,
-# new information about where this pipeline can and cannot currently
-# operate (pre-2015 dates; this specific river-mouth tiling gap; this
-# specific near-shore mask limitation) -- not a repeat of the prior
-# finding.
-#
-# Because there is still no matched subset to calibrate against, the
-# z-score cutoffs below remain LITERATURE/CONVENTION DEFAULTS (the same
-# illustrative shape docs/DETECTION_PLAN.md §3 and
-# .claude/agents/bloom-detection.md §5 give as an example), not values
-# empirically calibrated against the 14 events. A `calibrated_*` sibling
-# key is included per threshold, explicitly `null`, so the shape is ready
-# for a real value the moment any event does produce a matched pair --
-# but no number is forced out of insufficient data now. This is a
-# limitation to state plainly, not to paper over -- see
+# One matched pair is not a calibration set. The z-score cutoffs below
+# remain LITERATURE/CONVENTION DEFAULTS (the illustrative shape from
+# docs/DETECTION_PLAN.md 3 and .claude/agents/bloom-detection.md 5),
+# not values calibrated against Thai data. A `calibrated_*` sibling key
+# is included per threshold, explicitly `null`, so the shape is ready
+# for a real value the moment enough matched pairs exist -- but no
+# number is forced out of insufficient data now. This is a limitation
+# to state plainly, not to paper over -- see
 # detection/reports/event_table.md and index_comparison.md.
 
 indices:
@@ -93,8 +72,9 @@ climatology:
 # recoverable even after a future real calibration overwrites
 # `elevated_z`/`warning_z`. `calibrated_*` is the value this run's
 # leave-one-out calibration would have produced -- explicitly `null`
-# here because the matched subset is still empty (0 of 14 events; see
-# CALIBRATION STATUS above), not because the field was forgotten. When a
+# here because 1 of 14 events has produced a real reading and one pair
+# is not a calibration set (see CALIBRATION STATUS above), not because
+# the field was forgotten. When a
 # future run does produce a real matched subset, the intended convention
 # is: `calibrated_*` gets the real number, `elevated_z`/`warning_z` (the
 # operating value) is updated to match it, and `literature_default_*` is

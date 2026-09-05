@@ -34,10 +34,13 @@ called generically for any matchable row -- not hand-written per event),
 in addition to th_001's original regional-proxy attempt (kept, unchanged
 in kind, since th_001 still has no coordinate of its own).
 
-RESULT OF THIS RUN (live-tested 2026-08-22, see reports/event_table.md
-for the full per-event detail): 0 of these 7 newly-coordinate-bearing
-events produced a real matched (index_value, z-score) pair, but for
-seven DIFFERENT, DOCUMENTED reasons, not one blanket "no data":
+RESULT (live-tested 2026-08-22, revised 2026-09-05 after the water-mask
+fix; see reports/event_table.md for the full per-event detail): 1 of
+these 7 coordinate-bearing events produces a real matched
+(index_value, z-score) pair -- th_010, which was previously counted a
+failure because of the JRC water-mask defect (LIMITATIONS.md 5), not
+because of anything about the site. The other six fail for six
+DIFFERENT, DOCUMENTED reasons, not one blanket "no data":
   - th_003 (2009-03), th_008 (2010-07), th_012 (1981-02), th_014
     (1983-05): all predate Sentinel-2's launch (2015-06-23) -- there is
     structurally no Sentinel-2 scene to find, not a cloud/quality
@@ -52,14 +55,14 @@ seven DIFFERENT, DOCUMENTED reasons, not one blanket "no data":
   - th_006 (2019-08-27, Koh Loy): Sentinel-2 scenes exist (20 candidates
     in the searched window, confirmed by direct GEE query) but every one
     was cloud-rejected -- genuine, heavy monsoon-season cloud cover.
-  - th_010 (2020-02-11..20, Ang Sila): Sentinel-2 imagery exists and
-    passes the cloud check, but the sample buffer fails the JRC Global
-    Surface Water land/water mask (`NoWaterPixelsError`) at this
-    near-shore/pier coordinate -- confirmed at multiple buffer radii
-    (30/50/100/150/250 m), so this is a real site characteristic (a
-    narrow, GSW-mask-ambiguous coastal strip), not a one-off fluke; the
-    coordinate itself is not moved to force a fit (CLAUDE.md: never
-    invent/adjust a coordinate to fit the pipeline).
+th_010 (2020-02-11..20, Ang Sila) was in that failure list until
+2026-09-05, recorded as failing the JRC land/water mask at every radius
+from 30 to 250 m and described as "a real site characteristic". That was
+the water-mask defect in LIMITATIONS.md 5, not the site: JRC has no data
+over open ocean and the mask read that as land. With the mask fixed it
+returns real bands, and it is the one matched pair this run has. Its
+coordinate was never moved to force a fit (CLAUDE.md: never
+invent/adjust a coordinate to fit the pipeline).
 
 MODIS climatology, attempted independently of the Sentinel-2 outcome for
 every matchable row (a Sentinel-2 failure does not skip the climatology
@@ -69,12 +72,16 @@ reliable) and th_014 (n=10, reliable) even where Sentinel-2 failed --
 this is reported per-event as a genuinely partial, not all-or-nothing,
 result.
 
-Together with th_001 (still 0/0, unchanged), the honest match count for
-this run is 0 of 14 events with a full (index_value, z-score) pair.
-`sweep_thresholds` and `leave_one_out` below are fully implemented and
-ready to run the moment any event does produce a real pair; this run's
-`matched_pairs` is still empty, for the reasons above, not because the
-code path is unfinished.
+Together with th_001 (still 0/0, unchanged), the honest match count is
+1 of 14 events with a full (index_value, z-score) pair: th_010, which
+began producing one on 2026-09-05 after the JRC water-mask defect that
+had been blocking it was fixed (LIMITATIONS.md 5). One pair is not a
+calibration set -- `sweep_thresholds` and `leave_one_out` below run
+against it and report per-event, but no cutoff is derived from it, and
+th_010's own qualifiers (n=1, karenia_sp rather than the Noctiluca the
+B2/B3 feature targets, and a reading that exists only via the ETOPO1
+fallback over a turbid near-shore buffer) are recorded in LIMITATIONS.md
+1 so it is never read as evidence in either direction.
 """
 
 from __future__ import annotations
