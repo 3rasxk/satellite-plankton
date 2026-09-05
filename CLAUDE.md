@@ -127,7 +127,7 @@ Regenerate `detection/reports/*` from a live run (slow, needs real GEE auth):
 cd detection && source venv/bin/activate && python src/generate_reports.py
 ```
 
-Deployed: frontend on Vercel (project `satellite-plankton`, behind Vercel Authentication), backend at `https://satellite-plankton.onrender.com`. Both auto-deploy from `origin/main` on push. The live Render service was renamed in Render's dashboard at some point and `render.yaml` was left naming `plankton-backend`, a hostname that resolves to nothing; the blueprint's `name:` has since been corrected to match the live service. Renaming it in the blueprint does **not** rename the running service — that only matters if the backend is ever re-provisioned from this file.
+Runs locally only. There is no deployed instance: the Render backend and Vercel frontend were dropped on 2026-09-05, and `render.yaml`/`vercel.json` deleted with them. Render's free tier destroyed the SQLite database on every idle spin-down (measured: `first_refresh` went from `state: "complete", sites_attempted: 7` back to `state: "not_started", sites_attempted: 0`, with a 53-second cold start), so the deployed copy re-ran its whole scheduler and recomputed `/validation` live on every wake, and served superseded code besides. For demos, `scripts/dev.sh` plus one tunnel to `:5173` is enough — Vite proxies `/api` to the backend (see `frontend/vite.config.js`), so only one port needs exposing and there is no rebuild per demo.
 
 ## 8. Architecture: cross-project import bridges
 
