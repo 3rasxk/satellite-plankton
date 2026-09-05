@@ -214,6 +214,27 @@ def test_missing_actual_date_key_is_treated_as_unknown_not_as_same_day():
     assert c["scene_date_span_days"] is None
 
 
+def test_empty_string_member_scene_date_is_treated_as_unknown():
+    """`actual_date=""` must behave like None, not like an unparseable
+    date and not like a real date. `_scene_date_range`'s `if not raw`
+    branch already catches it before `date.fromisoformat` is reached --
+    which matters, because reaching `fromisoformat("")` would log the
+    "something upstream is wrong" warning reserved for a genuinely
+    malformed date. An empty string is a missing value, so it takes the
+    same silent all-or-nothing path as None and a missing key."""
+    points = [
+        _point("0_0", 0, 0, 1.6, "elevated", "2026-06-15"),
+        _point("0_1", 0, 1, 1.7, "elevated", ""),
+    ]
+    c = cluster_points(points)[0]
+    assert c["cell_count"] == 2
+    assert c["oldest_scene_date"] is None
+    assert c["newest_scene_date"] is None
+    # Not 0 -- an empty string must never read as "shares the other
+    # member's date".
+    assert c["scene_date_span_days"] is None
+
+
 def test_unparseable_member_scene_date_nulls_all_three_fields():
     points = [
         _point("0_0", 0, 0, 1.6, "elevated", "2026-06-15"),

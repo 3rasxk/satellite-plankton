@@ -452,7 +452,18 @@ class RegionalScanRunMeta(BaseModel):
     status: Literal["running", "ok", "partial_error", "error"]
     grid_spacing_km: float
     date_used: str
-    newest_scene_date: str | None
+    newest_scene_date: str | None = Field(
+        description="The triggering scene poll's maximum Sentinel-2 scene "
+        "acquisition timestamp for the whole run — one ISO 8601 UTC "
+        "timestamp covering the entire study-area polygon, recorded when "
+        "the poll decided this scan was worth running, and read back by "
+        "the next poll as its comparison baseline. Not the same quantity "
+        "as a cluster's `newest_scene_date`, which is a date-only "
+        "(YYYY-MM-DD) maximum over one cluster's member cells, each of "
+        "which resolved its own nearest cloud-free scene independently. "
+        "Null when the run was not poll-triggered, or the poll found no "
+        "scene in its lookback window."
+    )
     total_points: int
     count_ok: int
     count_no_imagery: int

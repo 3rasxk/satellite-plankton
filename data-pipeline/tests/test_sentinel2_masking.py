@@ -1,7 +1,28 @@
 """
 Unit tests for the GEE-free cloud/land-water masking logic in
-`src/sentinel2.py`, exercised entirely with synthetic pixel arrays — no
-Earth Engine session required or contacted.
+`src/sentinel2.py`, exercised entirely with synthetic pixel arrays and
+synthetic `reduceRegion` result dicts — no Earth Engine session required
+or contacted.
+
+Two kinds of function are covered here, and the distinction matters when
+reading a failure:
+
+  - `cloud_fraction_from_stats` / `band_means_from_stats` are *executed in
+    production*. They parse the plain dict `reduceRegion(...).getInfo()`
+    returns (numbers, strings and None — no `ee` objects), which is the
+    typed boundary CLAUDE.md §7 relies on to keep these suites offline. A
+    failure here is a real production bug.
+  - `compute_cloud_fraction` / `water_pixel_mask` are plain-numpy
+    *reference implementations* of the two masking rules the pipeline now
+    evaluates server-side as `ee.Image` expressions. A failure here means
+    the stated rule is broken; it does not by itself prove the `ee`
+    expression is broken, because the two are written separately (see
+    `sentinel2.py`'s module docstring — the drift risk is acknowledged
+    there). The rule is the thing worth testing, and an `ee` expression
+    cannot be evaluated without a live session.
+
+The 499-point fixture gate for the water rule lives in
+`test_water_mask_fixture.py`.
 """
 
 import sys
@@ -13,12 +34,20 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.sentinel2 import (
+    BANDS,
     NoWaterPixelsError,
-    build_water_cloud_mask,
+    band_means_from_stats,
+    cloud_fraction_from_stats,
     compute_cloud_fraction,
-    masked_band_mean,
     water_pixel_mask,
 )
+
+NAN = float("nan")
+
+
+# --------------------------------------------------------------------------
+# compute_cloud_fraction — reference implementation of the SCL cloud rule.
+# --------------------------------------------------------------------------
 
 
 def test_cloud_fraction_all_clear():
@@ -59,6 +88,11 @@ def test_tight_buffer_cloud_fraction_can_be_zero_while_wider_region_has_real_clo
     its (smaller) sampled ground area. This test locks that shape in with
     synthetic SCL pixels so it can't silently regress into looking like a
     calculation bug later.
+
+    Still stated over SCL pixel arrays even though the pipeline now
+    computes the same ratio server-side, because the finding is about the
+    *rule* applied to two different pixel sets -- which is exactly what
+    this reference implementation expresses.
     """
     # Tight ~30 m buffer sample: entirely clear water (SCL=6, not a
     # cloud class).
@@ -82,95 +116,198 @@ def test_tight_buffer_cloud_fraction_can_be_zero_while_wider_region_has_real_clo
     assert compute_cloud_fraction(tight_scl) == 0.0
 
 
-def test_water_pixel_mask_threshold():
-    occurrence = np.array([0, 20, 49, 50, 80, 100])
-    mask = water_pixel_mask(occurrence, min_occurrence_pct=50.0)
+# --------------------------------------------------------------------------
+# water_pixel_mask — reference implementation of the JRC-else-ETOPO1 rule.
+# --------------------------------------------------------------------------
+
+
+def test_water_mask_jrc_present_and_water():
+    """JRC has data and says water (>= 50% occurrence) -> water. ETOPO1
+    is not consulted, even when it disagrees."""
+    occurrence = np.array([50.0, 80.0, 100.0])
+    etopo = np.array([5.0, 5.0, 5.0])  # ETOPO1 says land at all three
+    assert list(water_pixel_mask(occurrence, etopo)) == [True, True, True]
+
+
+def test_water_mask_jrc_present_and_land():
+    """JRC has data and says land (< 50%) -> land, even where ETOPO1 says
+    below sea level. JRC is authoritative wherever it has an opinion --
+    near shore is exactly where a 30 m water product beats a ~1.85 km
+    bathymetry grid."""
+    occurrence = np.array([0.0, 20.0, 49.0])
+    etopo = np.array([-30.0, -30.0, -30.0])  # ETOPO1 says water at all three
+    assert list(water_pixel_mask(occurrence, etopo)) == [False, False, False]
+
+
+def test_water_mask_threshold_is_inclusive_at_fifty():
+    occurrence = np.array([0, 20, 49, 50, 80, 100], dtype=float)
+    mask = water_pixel_mask(occurrence, None, min_occurrence_pct=50.0)
     assert list(mask) == [False, False, False, True, True, True]
 
 
-def test_water_pixel_mask_treats_nan_as_land():
-    occurrence = np.array([np.nan, 100.0])
-    mask = water_pixel_mask(occurrence, min_occurrence_pct=50.0)
-    assert list(mask) == [False, True]
+def test_water_mask_jrc_absent_and_etopo_negative_is_water():
+    """THE NEW PATH. JRC Global Surface Water is a Landsat-derived
+    *surface water* product with no data over open ocean; reading its
+    silence as "land" discarded ~19% of the upper-Gulf scan grid, and the
+    further offshore a point sat the more certainly it was thrown away.
+    Where JRC has nothing, ETOPO1 below sea level means water."""
+    occurrence = np.array([NAN, NAN, NAN])
+    etopo = np.array([-1.0, -7.0, -60.0])
+    assert list(water_pixel_mask(occurrence, etopo)) == [True, True, True]
 
 
-def test_masked_band_mean_basic():
-    band = np.array([100.0, 200.0, 300.0, 400.0])
-    mask = np.array([True, False, True, False])
-    assert masked_band_mean(band, mask) == pytest.approx(200.0)  # mean(100, 300)
+def test_water_mask_jrc_absent_and_etopo_positive_is_land():
+    """JRC silent inland/on a beach: ETOPO1 above sea level -> land. Sea
+    level itself (0 m) is land, not water -- the test is strictly < 0."""
+    occurrence = np.array([NAN, NAN, NAN])
+    etopo = np.array([0.0, 8.0, 40.0])
+    assert list(water_pixel_mask(occurrence, etopo)) == [False, False, False]
 
 
-def test_masked_band_mean_all_excluded_raises():
-    band = np.array([100.0, 200.0])
-    mask = np.array([False, False])
-    with pytest.raises(NoWaterPixelsError):
-        masked_band_mean(band, mask)
+def test_water_mask_partial_jrc_coverage_decides_per_pixel():
+    """Partial JRC coverage across one buffer -- 24 of the 499 fixture
+    points look like this. The JRC-covered pixels are decided by JRC, the
+    uncovered ones by ETOPO1, independently. This is the documented
+    per-pixel choice: a buffer-level rule would let the two JRC-covered
+    pixels here decide the fate of the two JRC has never seen."""
+    occurrence = np.array([90.0, 10.0, NAN, NAN])
+    etopo = np.array([-5.0, -5.0, -5.0, 12.0])
+    #                  ^JRC water  ^JRC land  ^ETOPO water  ^ETOPO land
+    assert list(water_pixel_mask(occurrence, etopo)) == [True, False, True, False]
 
 
-def test_masked_band_mean_shape_mismatch_raises():
+def test_water_mask_etopo_none_falls_back_to_land():
+    """No bathymetry available at all (etopo_values=None) -> JRC's
+    no-data pixels are land, i.e. exactly the pre-fallback behaviour.
+    Missing data never invents water."""
+    occurrence = np.array([90.0, NAN, 10.0])
+    assert list(water_pixel_mask(occurrence, None)) == [True, False, False]
+
+
+def test_water_mask_etopo_nan_pixel_falls_back_to_land():
+    """Per-pixel missing bathymetry (NaN) is land too -- a pixel neither
+    layer covers is excluded, not admitted."""
+    occurrence = np.array([NAN, NAN])
+    etopo = np.array([NAN, -5.0])
+    assert list(water_pixel_mask(occurrence, etopo)) == [False, True]
+
+
+def test_water_mask_accepts_a_scalar_etopo_for_the_whole_buffer():
+    """The validation fixture stores one ETOPO1 elevation per grid point,
+    not one per pixel; a scalar broadcasts across the buffer."""
+    occurrence = np.array([NAN, 90.0, 10.0, NAN])
+    assert list(water_pixel_mask(occurrence, -7)) == [True, True, False, True]
+
+
+def test_water_mask_every_pixel_masked_out():
+    """All-land buffer: the mask is all-False. Producing the empty mask is
+    this function's job; turning it into NoWaterPixelsError is
+    `band_means_from_stats`'s (server-side: count == 0)."""
+    occurrence = np.array([0.0, NAN, 10.0])
+    etopo = np.array([3.0, 8.0, 2.0])
+    mask = water_pixel_mask(occurrence, etopo)
+    assert not mask.any()
+
+
+def test_water_mask_shape_mismatch_is_a_caller_error_not_a_data_condition():
+    """A mis-shaped ETOPO1 array is a programming mistake, so it raises
+    ValueError. It must NOT be laundered into NoWaterPixelsError -- that
+    conflation (a length mismatch reported as "this buffer is land") is
+    the exact bug this rewrite removed."""
     with pytest.raises(ValueError):
-        masked_band_mean(np.array([1.0, 2.0]), np.array([True]))
+        water_pixel_mask(np.array([90.0, 10.0]), np.array([-5.0]))
 
 
-def test_combined_cloud_and_water_mask_realistic_buffer():
-    """Simulate a 3x3 buffer straddling a river mouth: some land, some
-    cloud, some clear water — only the clear-water pixels should survive.
-    """
-    scl = np.array([6, 6, 9, 4, 6, 6, 6, 3, 6])  # index 2=cloud, 3=veg(land), 7=shadow
-    occurrence = np.array([90, 85, 90, 5, 95, 88, 92, 90, 91])
-    band = np.array([120, 130, 999, 999, 140, 135, 128, 999, 132], dtype=float)
-
-    cloud_mask = ~np.isin(scl, (0, 1, 3, 7, 8, 9, 10))
-    water_mask = water_pixel_mask(occurrence, 50.0)
-    combined = cloud_mask & water_mask
-
-    # Expect indices 0,1,4,5,6,8 to survive (6 pixels); 2 (cloud), 3 (land),
-    # 7 (shadow) excluded.
-    assert combined.sum() == 6
-    mean_val = masked_band_mean(band, combined)
-    expected = np.mean([120, 130, 140, 135, 128, 132])
-    assert mean_val == pytest.approx(expected)
+def test_water_mask_no_length_coupling_between_layers_remains():
+    """There is no longer any "same number of pixels" contract between
+    the cloud layer and the water layer: the mask is built server-side as
+    an image, so a JRC-empty buffer is just a buffer ETOPO1 answers for.
+    A 30-pixel buffer JRC knows nothing about now yields 30 water pixels
+    offshore -- where the old parallel-list code raised
+    NoWaterPixelsError purely because occurrence's list came back empty."""
+    occurrence = np.full(30, NAN)
+    mask = water_pixel_mask(occurrence, -12.0)
+    assert mask.sum() == 30
 
 
-def test_build_water_cloud_mask_empty_occurrence_raises_typed_error():
-    """Regression test for a live bug: a land/beach point returns a
-    full-length SCL list (GEE's per-band toList reducer still classifies
-    every pixel) but an EMPTY occurrence list, because JRC Global Surface
-    Water has no data outside historically-water pixels. The old code did
-    `cloud_mask & water_mask[: cloud_mask.size]`, which numpy cannot
-    broadcast when water_mask is shorter (e.g. shape (30,) vs (0,)),
-    crashing with a raw ValueError instead of the typed
-    NoWaterPixelsError the docstring already promises for an all-land
-    buffer. This must raise NoWaterPixelsError, not ValueError.
-    """
-    scl = np.array([6] * 30)  # 30 pixels, all "water" per SCL classification
-    occurrence = np.array([])  # JRC occurrence band returned nothing at all
+# --------------------------------------------------------------------------
+# cloud_fraction_from_stats — executed in production.
+# --------------------------------------------------------------------------
 
+
+def _stats(cloud_mean=0.0, cloud_count=28, band_mean=500.0, band_count=28):
+    """A synthetic `reduceRegion(mean.combine(count)).getInfo()` result."""
+    out = {"cloud_flag_mean": cloud_mean, "cloud_flag_count": cloud_count}
+    for band in BANDS:
+        out[f"{band}_mean"] = band_mean
+        out[f"{band}_count"] = band_count
+    return out
+
+
+def test_cloud_fraction_from_stats_reads_the_mean_of_the_flag_band():
+    assert cloud_fraction_from_stats(_stats(cloud_mean=0.25)) == pytest.approx(0.25)
+
+
+def test_cloud_fraction_from_stats_zero_count_is_fully_unusable():
+    """No valid SCL pixel in the buffer -> 1.0, the same "can't trust this
+    reading" answer `compute_cloud_fraction` gives for an empty array. The
+    candidate loop then rejects the scene on max_cloud_fraction."""
+    assert cloud_fraction_from_stats(_stats(cloud_mean=None, cloud_count=0)) == 1.0
+
+
+def test_cloud_fraction_from_stats_null_mean_is_fully_unusable():
+    """GEE returns null (None) for a mean over zero pixels."""
+    assert cloud_fraction_from_stats(_stats(cloud_mean=None, cloud_count=12)) == 1.0
+
+
+def test_cloud_fraction_from_stats_missing_keys_are_fully_unusable():
+    assert cloud_fraction_from_stats({}) == 1.0
+
+
+def test_cloud_fraction_from_stats_clamps_into_zero_one():
+    assert cloud_fraction_from_stats(_stats(cloud_mean=1.0000001)) == 1.0
+    assert cloud_fraction_from_stats(_stats(cloud_mean=-1e-9)) == 0.0
+
+
+# --------------------------------------------------------------------------
+# band_means_from_stats — executed in production.
+# --------------------------------------------------------------------------
+
+
+def test_band_means_from_stats_returns_all_five_bands():
+    means = band_means_from_stats(_stats(band_mean=421.5))
+    assert set(means) == set(BANDS)
+    assert all(v == pytest.approx(421.5) for v in means.values())
+
+
+def test_band_means_from_stats_zero_surviving_pixels_raises_typed_error():
+    """The all-land buffer. `updateMask` left nothing, so GEE reports
+    count 0 and a null mean, and this must be NoWaterPixelsError --
+    `no_water_pixels` is a real API status and the candidate loop's
+    continue-on-failure depends on the type."""
     with pytest.raises(NoWaterPixelsError):
-        build_water_cloud_mask(scl, occurrence)
+        band_means_from_stats(_stats(band_mean=None, band_count=0))
 
 
-def test_build_water_cloud_mask_shorter_occurrence_raises_typed_error():
-    """Same gotcha, but occurrence returns some pixels -- just fewer than
-    SCL, rather than zero. Any length mismatch is untrustworthy (no valid
-    positional correspondence between the two independently-reduced
-    lists), so this must also raise NoWaterPixelsError, not silently
-    truncate/broadcast or raise a bare ValueError.
-    """
-    scl = np.array([6] * 30)
-    occurrence = np.array([90.0] * 12)  # shorter than scl, not empty
-
+def test_band_means_from_stats_one_bad_band_still_raises():
+    """B5/B6 are 20 m bands resampled to 10 m; if any single band came
+    back empty the reading is not trustworthy, so it fails as a whole
+    rather than returning four bands and a hole."""
+    stats = _stats()
+    stats["B5_mean"] = None
+    stats["B5_count"] = 0
     with pytest.raises(NoWaterPixelsError):
-        build_water_cloud_mask(scl, occurrence)
+        band_means_from_stats(stats)
 
 
-def test_build_water_cloud_mask_matched_lengths_still_works():
-    """Sanity check: when SCL and occurrence lists are the same length
-    (the normal/expected case), build_water_cloud_mask still produces the
-    correct combined boolean mask instead of always raising.
-    """
-    scl = np.array([6, 6, 9, 6])  # index 2 = cloud
-    occurrence = np.array([90.0, 20.0, 95.0, 80.0])  # index 1 = land (<50%)
+def test_band_means_from_stats_missing_keys_raise_typed_error():
+    with pytest.raises(NoWaterPixelsError):
+        band_means_from_stats({})
 
-    mask = build_water_cloud_mask(scl, occurrence)
-    assert list(mask) == [True, False, False, True]
+
+def test_band_means_from_stats_reports_which_band_failed():
+    stats = _stats()
+    stats["B4_mean"] = None
+    stats["B4_count"] = 0
+    with pytest.raises(NoWaterPixelsError, match="B4"):
+        band_means_from_stats(stats)
