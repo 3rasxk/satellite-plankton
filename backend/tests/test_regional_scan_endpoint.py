@@ -159,3 +159,64 @@ def test_regional_scan_serves_last_good_clusters_when_latest_run_aborted(client)
         ), f"expected the good_run cluster among clusters, got {body['clusters']}"
     finally:
         db.close()
+
+
+def test_regional_scan_serves_per_point_actual_date(client):
+    """Each point carries its OWN Sentinel-2 scene date. A single scan
+    legitimately mixes scene vintages (the nearest cloud-free scene is
+    searched within +/-10 days of the target date), so a run-level date
+    cannot stand in for any individual pin's."""
+    db = SessionLocal()
+    try:
+        run = RegionalScanRun(
+            started_at=datetime(2026, 9, 1, 6, 0, 0, tzinfo=timezone.utc),
+            completed_at=datetime(2026, 9, 1, 6, 5, 0, tzinfo=timezone.utc),
+            status="ok", grid_spacing_km=5.0, date_used="2026-09-01",
+            newest_scene_date="2026-08-31T10:00:00+00:00", total_points=3,
+            count_ok=2, count_no_imagery=1, count_no_water_pixels=0,
+            count_no_climatology=0, count_error=0,
+        )
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+
+        # Two 'ok' points from scenes SIX DAYS APART inside one scan, plus
+        # a no-imagery point that never resolved a scene at all.
+        db.add(RegionalScanPoint(
+            point_id="7_0", lat=13.0, lng=100.5, row_idx=7, col_idx=0,
+            status="ok", index_values={"ndci": 0.2}, anomaly_z=2.5,
+            threshold_tier="warning", actual_date="2026-08-31", run_id=run.id,
+        ))
+        db.add(RegionalScanPoint(
+            point_id="7_1", lat=13.05, lng=100.5, row_idx=7, col_idx=1,
+            status="ok", index_values={"ndci": 0.19}, anomaly_z=2.4,
+            threshold_tier="warning", actual_date="2026-08-25", run_id=run.id,
+        ))
+        db.add(RegionalScanPoint(
+            point_id="7_2", lat=13.1, lng=100.5, row_idx=7, col_idx=2,
+            status="no_imagery", index_values=None, anomaly_z=None,
+            threshold_tier=None, actual_date=None, run_id=run.id,
+        ))
+        db.commit()
+
+        resp = client.get("/regional-scan")
+        assert resp.status_code == 200
+        body = resp.json()
+
+        served = {p["point_id"]: p for p in body["points"]}
+        assert served["7_0"]["actual_date"] == "2026-08-31"
+        assert served["7_1"]["actual_date"] == "2026-08-25"
+        # Never backfilled with the run's target date.
+        assert served["7_2"]["actual_date"] is None
+        assert served["7_2"]["actual_date"] != body["run"]["date_used"]
+    finally:
+        db.close()
+
+
+def test_regional_scan_point_schema_documents_actual_date(client):
+    """OpenAPI must describe actual_date as this point's own scene date --
+    the field is meaningless (and misleading) without that caveat."""
+    schema = client.get("/openapi.json").json()
+    prop = schema["components"]["schemas"]["RegionalScanPointSchema"]["properties"]
+    assert "actual_date" in prop
+    assert "description" in prop["actual_date"]

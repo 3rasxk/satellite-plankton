@@ -114,6 +114,10 @@ def run_scan(
                 row_idx=point["row_idx"], col_idx=point["col_idx"],
                 status=status, index_values=result.get("index_values"),
                 anomaly_z=result.get("anomaly_z"), threshold_tier=tier,
+                # Per-point scene date from detect(), not the run's target
+                # date -- .get() because the per-point error dict built
+                # above carries no scene at all (stays null).
+                actual_date=result.get("actual_date"),
                 run_id=run.id,
             )
             if existing is None:

@@ -151,12 +151,21 @@ def detect(lat: float, lng: float, date: str, config: dict | None = None) -> dic
     Returns:
         {'anomaly_z': float | None, 'index_values': dict | None,
          'detected': bool, 'index_used': str, 'status': str,
-         'reason': str | None}
+         'reason': str | None, 'actual_date': str | None}
         `status` is one of: 'ok', 'no_imagery' (cloud/no scene in
         window), 'no_water_pixels' (on land/shore), 'no_climatology'
         (MODIS archive gap at this location/date). `detected` is False
         (never True) whenever `status != 'ok'` -- absence of data is
         never reported as absence of a bloom.
+        `actual_date` is the real Sentinel-2 scene date this reading came
+        from ("YYYY-MM-DD"), which may differ from the requested `date`
+        by up to the search window -- get_sentinel2_bands resolves the
+        nearest cloud-free scene, so two points scanned on the same
+        `date` can be backed by scenes days apart. It is None only on
+        the two statuses where no imagery was ever obtained
+        ('no_imagery', 'no_water_pixels'); 'no_climatology' happens
+        after a successful Sentinel-2 pull and so carries a real date.
+        Never substitute the requested `date` for it.
 
     Raises:
         GEEAuthError: propagated, never caught (CLAUDE.md "never
@@ -177,6 +186,8 @@ def detect(lat: float, lng: float, date: str, config: dict | None = None) -> dic
             "index_used": primary_index,
             "status": "no_imagery",
             "reason": str(exc),
+            # No scene was resolved at all -- null, never the requested date.
+            "actual_date": None,
         }
     except NoWaterPixelsError as exc:
         return {
@@ -186,6 +197,9 @@ def detect(lat: float, lng: float, date: str, config: dict | None = None) -> dic
             "index_used": primary_index,
             "status": "no_water_pixels",
             "reason": str(exc),
+            # Raised from inside get_sentinel2_bands, before it returns a
+            # band dict -- no resolved scene date is available here.
+            "actual_date": None,
         }
 
     index_values = compute_all_indices(bands)
@@ -200,6 +214,10 @@ def detect(lat: float, lng: float, date: str, config: dict | None = None) -> dic
             "index_used": primary_index,
             "status": "no_climatology",
             "reason": z["reason"],
+            # Sentinel-2 DID resolve here -- the gap is in the MODIS
+            # climatology, not the imagery -- so this carries the real
+            # scene date, the one the index_values above came from.
+            "actual_date": bands["actual_date"],
         }
 
     cutoff = config["thresholds"][primary_index]["elevated_z"]
@@ -210,6 +228,8 @@ def detect(lat: float, lng: float, date: str, config: dict | None = None) -> dic
         "index_used": primary_index,
         "status": "ok",
         "reason": None,
+        # The real scene backing this reading -- may be days from `date`.
+        "actual_date": bands["actual_date"],
     }
 
 

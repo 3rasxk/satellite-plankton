@@ -399,6 +399,15 @@ class RegionalScanPointSchema(BaseModel):
     index_values: dict[str, float] | None = None
     anomaly_z: float | None = None
     threshold_tier: Literal["elevated", "warning"] | None = None
+    actual_date: str | None = Field(
+        default=None, description="Real Sentinel-2 scene date behind THIS point's "
+        "reading (YYYY-MM-DD) — per point, not per run. It is often older than the "
+        "run's `date_used`: the nearest cloud-free scene is searched within a "
+        "±10-day window, so points in one scan are routinely backed by scenes of "
+        "different dates. Null when no scene was resolved for this point "
+        "(`status` no_imagery / no_water_pixels / error); never substituted with "
+        "`date_used`."
+    )
 
 
 class RegionalScanClusterSchema(BaseModel):

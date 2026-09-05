@@ -155,3 +155,75 @@ def test_run_scan_gee_auth_error_mid_loop_does_not_overwrite_earlier_points_this
         )
     finally:
         db.close()
+
+
+def _fake_detect_with_scene_date(lat, lng, date):
+    """detect() resolving a scene 6 days before the scan's target date --
+    the normal case, not an edge case: get_sentinel2_bands searches +/-10
+    days for the nearest cloud-free scene, so points in one scan are
+    routinely backed by scenes of different vintages."""
+    return {
+        "status": "ok", "detected": True, "anomaly_z": 2.5,
+        "index_used": "ndci", "index_values": {"ndci": 0.3}, "reason": None,
+        "actual_date": "2026-08-09",
+    }
+
+
+def test_run_scan_persists_per_point_actual_date(client, monkeypatch):
+    monkeypatch.setattr(scan_module.bridge, "detect", _fake_detect_with_scene_date)
+
+    db = SessionLocal()
+    try:
+        run = scan_module.run_scan(db, "2026-08-15", grid_spacing_km=20.0)
+
+        points = db.execute(
+            select(RegionalScanPoint).where(RegionalScanPoint.run_id == run.id)
+        ).scalars().all()
+        assert len(points) == run.total_points
+        assert all(p.actual_date == "2026-08-09" for p in points)
+        # Stored as the scene's own date, never overwritten with the run's
+        # target date.
+        assert all(p.actual_date != run.date_used for p in points)
+    finally:
+        db.close()
+
+
+def test_run_scan_persists_null_actual_date_when_no_scene_resolved(client, monkeypatch):
+    """no_imagery means no scene existed at all for this point -- the
+    column must stay null rather than be backfilled with the scan date."""
+    monkeypatch.setattr(scan_module.bridge, "detect", _fake_detect_no_imagery)
+
+    db = SessionLocal()
+    try:
+        run = scan_module.run_scan(db, "2026-08-15", grid_spacing_km=20.0)
+
+        points = db.execute(
+            select(RegionalScanPoint).where(RegionalScanPoint.run_id == run.id)
+        ).scalars().all()
+        assert len(points) == run.total_points
+        assert all(p.actual_date is None for p in points)
+    finally:
+        db.close()
+
+
+def test_run_scan_per_point_error_leaves_actual_date_null(client, monkeypatch):
+    """The per-point error dict scan.py builds itself carries no scene
+    date at all -- reading it must not raise, and must persist null."""
+
+    def _raise_non_auth(lat, lng, date):
+        raise RuntimeError("forced for test -- per-point failure")
+
+    monkeypatch.setattr(scan_module.bridge, "detect", _raise_non_auth)
+
+    db = SessionLocal()
+    try:
+        run = scan_module.run_scan(db, "2026-08-15", grid_spacing_km=20.0)
+
+        assert run.count_error == run.total_points
+        points = db.execute(
+            select(RegionalScanPoint).where(RegionalScanPoint.run_id == run.id)
+        ).scalars().all()
+        assert all(p.status == "error" for p in points)
+        assert all(p.actual_date is None for p in points)
+    finally:
+        db.close()

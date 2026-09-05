@@ -75,7 +75,7 @@ async def get_regional_scan(db: Session = Depends(get_db)) -> RegionalScanRespon
             RegionalScanPointSchema(
                 point_id=p.point_id, lat=p.lat, lng=p.lng, status=p.status,
                 index_values=p.index_values, anomaly_z=p.anomaly_z,
-                threshold_tier=p.threshold_tier,
+                threshold_tier=p.threshold_tier, actual_date=p.actual_date,
             )
             for p in points
         ],

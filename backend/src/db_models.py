@@ -189,6 +189,14 @@ class RegionalScanPoint(Base):
     index_values: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     anomaly_z: Mapped[float | None] = mapped_column(Float, nullable=True)
     threshold_tier: Mapped[str | None] = mapped_column(String, nullable=True)  # elevated|warning|null
+    # The real Sentinel-2 scene date backing THIS point's reading, straight
+    # from detect() (detection/src/prediction.py). It routinely differs from
+    # the run's `date_used`: get_sentinel2_bands resolves the nearest
+    # cloud-free scene within a +/-10-day window, so one scan's points are
+    # normally backed by scenes of several different vintages. Null when no
+    # scene was ever resolved for this point (status no_imagery /
+    # no_water_pixels / error) -- never backfilled with `date_used`.
+    actual_date: Mapped[str | None] = mapped_column(String, nullable=True)
     run_id: Mapped[int] = mapped_column(ForeignKey("regional_scan_runs.id"))
 
 

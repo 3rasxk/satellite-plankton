@@ -67,15 +67,34 @@ export default function RegionalScanLayer({ data }) {
   if (!data?.run) return null
 
   const run = data.run
-  // date_used is the target date handed to detect(), not a measured scene
-  // timestamp; newest_scene_date is the real one but is only set when a
-  // poll triggered the scan. Label whichever one is actually being shown
-  // rather than passing one off as the other.
-  const sceneLine = run.newest_scene_date
-    ? `scene ${run.newest_scene_date.slice(0, 10)}`
-    : run.date_used
-      ? `scan target date ${run.date_used}`
-      : null
+  // Run-level fallback only, for points with no scene date of their own.
+  // Neither run-level date is any particular pin's scene: date_used is the
+  // target date handed to detect(), and newest_scene_date is a poll-level
+  // measurement -- both are the same string for all 501 pins. So label this
+  // as the scan target date and never as a scene date.
+  const runFallbackLine = run.date_used ? `scan target date ${run.date_used}` : null
+
+  // This pin's own Sentinel-2 scene. get_sentinel2_bands resolves the
+  // nearest cloud-free scene within ±10 days, so a single scan is routinely
+  // backed by scenes several days apart from each other -- show each pin's
+  // real vintage and its offset instead of implying one scan-wide date.
+  const sceneLineFor = (point) => {
+    const actual = point.actual_date
+    if (!actual) return runFallbackLine
+    const scene = actual.slice(0, 10)
+    if (!run.date_used || scene === run.date_used) return `scene ${scene}`
+    const offsetDays = Math.round(
+      (Date.parse(`${run.date_used}T00:00:00Z`) - Date.parse(`${scene}T00:00:00Z`)) / 86400000,
+    )
+    // Unparseable date: show the scene, never a made-up offset.
+    if (!Number.isFinite(offsetDays) || offsetDays === 0) return `scene ${scene}`
+    const magnitude = Math.abs(offsetDays)
+    const unit = magnitude === 1 ? 'day' : 'days'
+    // The search window is ±10 days, so a scene can also post-date the scan.
+    return offsetDays > 0
+      ? `scene ${scene} · ${magnitude} ${unit} before scan date`
+      : `scene ${scene} · ${magnitude} ${unit} after scan date`
+  }
 
   return (
     <>
@@ -128,6 +147,7 @@ export default function RegionalScanLayer({ data }) {
         const others = Object.entries(point.index_values).filter(
           ([key, value]) => key !== REGIONAL_PRIMARY_INDEX && typeof value === 'number',
         )
+        const sceneLine = sceneLineFor(point)
         return (
           <Fragment key={point.point_id}>
             <CircleMarker
