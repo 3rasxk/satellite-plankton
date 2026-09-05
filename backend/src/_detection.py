@@ -14,7 +14,7 @@ loaded package's own relative imports still resolve.
 
 `detection/src` (unlike `data-pipeline/src`) has no `__init__.py` -- it is
 not a package, just a directory of loose modules (`prediction.py`,
-`thresholds.py`, `climatology.py`, `indices.py`, `_data_pipeline.py`).
+`climatology.py`, `indices.py`, `_data_pipeline.py`).
 Each of those modules already inserts its own directory onto `sys.path`
 at import time (see the `_THIS_DIR = Path(__file__).resolve().parent;
 sys.path.insert(...)` header every one of them carries) specifically so
@@ -25,10 +25,9 @@ where. That means loading `detection/src/prediction.py` directly via
 sys.path bootstrap before its internal imports run, so nothing extra is
 needed here beyond pointing importlib at the file.
 
-We still load `prediction.py` and `thresholds.py` under explicit,
-namespaced module names (`detection_src_prediction`,
-`detection_src_thresholds`) rather than letting them register under their
-bare names (`prediction`, `thresholds`) in `sys.modules` -- bare generic
+We load `prediction.py` under the explicit namespaced module name
+`detection_src_prediction` rather than letting it register under its
+bare name (`prediction`) in `sys.modules` -- bare generic
 names are exactly the kind of thing a `backend/` dependency could someday
 collide with, and CLAUDE.md's "detection/ and backend/ are separate
 projects" boundary is easiest to keep obvious if `backend/` never lets
@@ -40,7 +39,7 @@ re-exported under names `backend/` code can import without ambiguity.
 
 Environment: GEE needs `EE_PROJECT_ID` set. This bridge does not load any
 .env itself -- `detection/src/_data_pipeline.py` (loaded transitively,
-here, as part of `prediction.py`/`thresholds.py`'s own import chain)
+here, as part of `prediction.py`'s own import chain)
 already does that (reading `detection/.env`, falling back to
 `data-pipeline/.env`), so by the time this module returns, GEE auth env
 vars are already in `os.environ`. `backend/.env` is a separate concern
@@ -83,19 +82,12 @@ def _load_detection_module(filename: str, module_name: str):
 
 
 _prediction = _load_detection_module("prediction.py", "detection_src_prediction")
-_thresholds = _load_detection_module("thresholds.py", "detection_src_thresholds")
+_climatology_bridge = _load_detection_module("climatology.py", "detection_src_climatology")
 
-# `prediction.py`'s own header (`from _data_pipeline import ...`, `from
-# climatology import ...`) already imported these as bare-named modules
-# and registered them in sys.modules -- detection/src's own design (every
-# module there inserts detection/src onto sys.path and imports its
-# siblings by bare name). We reuse those already-loaded module objects
-# rather than loading `_data_pipeline.py`/`climatology.py` a second time
-# under yet another name, which would just duplicate work (their own
-# internal idempotency guards would no-op it, but there is no reason to
-# rely on that).
+# `prediction.py` imports `_data_pipeline` under its bare sibling name.
+# Reuse that loaded object. Climatology is loaded explicitly above because
+# prediction no longer imports it after anomaly scoring was removed.
 _data_pipeline_bridge = sys.modules["_data_pipeline"]
-_climatology_bridge = sys.modules["climatology"]
 
 # --- Detection / prediction (Phase 2 public API) --------------------------
 # Re-exported, unmodified, from detection/src/prediction.py. backend/
@@ -103,15 +95,6 @@ _climatology_bridge = sys.modules["climatology"]
 detect = _prediction.detect
 risk_level = _prediction.risk_level
 load_prediction_config = _prediction.load_config
-
-# --- Validation / calibration (Phase 2 reporting API) ----------------------
-# Re-exported, unmodified, from detection/src/thresholds.py. Used by the
-# /validation router. `run()` makes a real (slow) GEE call as part of the
-# th_001 regional-proxy attempt -- backend caches its output in the DB
-# (see src/db_models.py ValidationCache) rather than calling it on every
-# request.
-threshold_run = _thresholds.run
-load_events = _thresholds.load_events
 
 # --- Errors / lower-level pipeline calls -----------------------------------
 # GEEAuthError must always propagate out of backend routers too (never
@@ -157,8 +140,6 @@ __all__ = [
     "detect",
     "risk_level",
     "load_prediction_config",
-    "threshold_run",
-    "load_events",
     "GEEAuthError",
     "NoCloudFreeImageryError",
     "NoWaterPixelsError",

@@ -301,8 +301,7 @@ deterministic test suite and must not be required in CI.
 - No claim that the water mask measures salinity; Gulf-connected
   estuarine water can remain.
 - No persistent GeoTIFF/COG archive or new object-storage service.
-- No replacement of the existing point detection, validation set, or
-  rule-based summary endpoints.
+- No replacement of the existing point-reading or rule-based summary endpoints.
 
 ## Acceptance Criteria
 

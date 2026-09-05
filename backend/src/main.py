@@ -1,7 +1,6 @@
 """
-FastAPI app entrypoint. Wires up: DB init, monitored-grid seed,
-validation-events seed (read-only mirror of data/validation/events.csv),
-the scheduler, and the five routers.
+FastAPI app entrypoint. Wires up DB init, monitored-grid seed, the
+scheduler, and the API routers.
 
 Run with: `uvicorn src.main:app --reload` from `backend/` (see README.md).
 """
@@ -18,8 +17,8 @@ from sqlalchemy import func, select
 
 from . import _detection as bridge
 from .db import SessionLocal, get_db, init_db  # noqa: F401  (get_db re-exported for routers/tests)
-from .db_models import DetectionCache, MonitoredSite, ValidationEvent
-from .routers import alerts, detect, regional_scan, risk_map, satellite, satellite_image, summary, timeseries, validation
+from .db_models import DetectionCache, MonitoredSite
+from .routers import alerts, detect, regional_scan, risk_map, satellite, satellite_image, summary, timeseries
 from .scheduler import create_scheduler, ensure_monitored_sites
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -54,9 +53,6 @@ async def lifespan(_app: FastAPI):
     init_db()
     logger.info("startup: ensure_monitored_sites")
     ensure_monitored_sites()
-    logger.info("startup: seed_validation_events")
-    _seed_validation_events()
-
     logger.info("startup: starting scheduler")
     _scheduler = create_scheduler()
     _scheduler.start()
@@ -102,41 +98,7 @@ app.include_router(detect.router)
 app.include_router(satellite.router)
 app.include_router(satellite_image.router)
 app.include_router(summary.router)
-app.include_router(validation.router)
 app.include_router(regional_scan.router)
-
-
-def _seed_validation_events() -> None:
-    """Upsert data/validation/events.csv into validation_events -- read-
-    only relative to the file; never written to via any API route."""
-    rows = bridge.load_events()
-    db = SessionLocal()
-    try:
-        for row in rows:
-            existing = db.get(ValidationEvent, row["event_id"])
-            fields = dict(
-                date=row.get("date") or None,
-                date_start=row.get("date_start") or None,
-                date_end=row.get("date_end") or None,
-                lat=float(row["lat"]) if row.get("lat") else None,
-                lng=float(row["lng"]) if row.get("lng") else None,
-                location_name=row["location_name"],
-                location_precision=row["location_precision"],
-                species=row["species"],
-                cell_count=row.get("cell_count") or None,
-                event_type=row["event_type"],
-                source_type=row["source_type"],
-                source_citation=row["source_citation"],
-                confidence=row["confidence"],
-            )
-            if existing is None:
-                db.add(ValidationEvent(event_id=row["event_id"], **fields))
-            else:
-                for key, value in fields.items():
-                    setattr(existing, key, value)
-        db.commit()
-    finally:
-        db.close()
 
 
 @app.exception_handler(bridge.GEEAuthError)
@@ -209,7 +171,6 @@ def root() -> dict:
             "/detect",
             "/satellite-image",
             "/summary",
-            "/validation",
             "/regional-scan",
         ],
     }

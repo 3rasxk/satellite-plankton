@@ -1,35 +1,21 @@
-"""Legacy dimensionally invalid caches are discarded, never backfilled.
-
-Tests use isolated SQLite files, preserving source site/event rows and
-proving that a second startup retains newly computed index-only caches.
-"""
+"""Legacy dimensionally invalid caches are discarded, never backfilled."""
 
 from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.orm import Session
 
 from src import db
-from src.db_models import DetectionCache, MonitoredSite, ValidationCache, ValidationEvent
+from src.db_models import DetectionCache, MonitoredSite
 
 
-def test_legacy_caches_reset_without_losing_sites_or_validation_events(tmp_path, monkeypatch):
+def test_legacy_caches_reset_without_losing_sites(tmp_path, monkeypatch):
     engine = create_engine(f"sqlite:///{tmp_path / 'legacy.db'}")
     monkeypatch.setattr(db, "engine", engine)
     db.init_db()
     with Session(engine) as session:
         session.add(MonitoredSite(site_id="real_site", name="Real site", lat=13, lng=101))
-        session.add(ValidationEvent(
-            event_id="retained_event", location_name="Confirmed site",
-            location_precision="exact", species="karenia_sp", event_type="bloom",
-            source_type="paper", source_citation="Original citation", confidence="high",
-        ))
-        session.add(ValidationCache(id=1, payload={
-            "events": [{"anomaly_z": -4.5, "flagged": False}],
-            "leave_one_out": [{"caught": False}],
-        }))
         session.commit()
 
     with engine.begin() as connection:
-        # Simulate the old columns and previously published invalid values.
         connection.execute(text("DROP TABLE detection_cache"))
         connection.execute(text("CREATE TABLE detection_cache (id INTEGER PRIMARY KEY, anomaly_z FLOAT)"))
         connection.execute(text("INSERT INTO detection_cache VALUES (1, -4.5)"))
@@ -49,7 +35,7 @@ def test_legacy_caches_reset_without_losing_sites_or_validation_events(tmp_path,
     inspector = inspect(engine)
     with engine.connect() as connection:
         for table in (
-            "detection_cache", "validation_cache", "regional_scan_points",
+            "detection_cache", "regional_scan_points",
             "regional_scan_clusters", "regional_scan_runs",
         ):
             assert connection.execute(text(f"SELECT COUNT(*) FROM {table}")).scalar_one() == 0
@@ -59,16 +45,11 @@ def test_legacy_caches_reset_without_losing_sites_or_validation_events(tmp_path,
             )
     with Session(engine) as session:
         assert session.get(MonitoredSite, "real_site").name == "Real site"
-        assert session.get(ValidationEvent, "retained_event").source_citation == "Original citation"
         session.add(DetectionCache(
             site_id="real_site", target_date="2026-01-05", status="ok",
             spatial_anomaly_z=None, detected=None, level=None,
             index_values={"ndci": 0.2}, actual_date="2026-01-03",
         ))
-        session.add(ValidationCache(id=1, payload={
-            "events": [{"z_score_status": "not_computed_no_valid_baseline", "flagged": None}],
-            "leave_one_out": [{"caught": None}],
-        }))
         session.commit()
 
     db.init_db()
@@ -77,21 +58,4 @@ def test_legacy_caches_reset_without_losing_sites_or_validation_events(tmp_path,
         assert cached.index_values == {"ndci": 0.2}
         assert cached.actual_date == "2026-01-03"
         assert cached.spatial_anomaly_z is None
-        assert session.get(ValidationCache, 1) is not None
-    engine.dispose()
-
-
-def test_legacy_validation_payload_resets_even_without_legacy_sql_columns(tmp_path, monkeypatch):
-    engine = create_engine(f"sqlite:///{tmp_path / 'validation.db'}")
-    monkeypatch.setattr(db, "engine", engine)
-    db.init_db()
-    with Session(engine) as session:
-        session.add(ValidationCache(id=1, payload={
-            "events": [{"anomaly_z": -4.5, "flagged": False}],
-            "leave_one_out": [{"caught": False}],
-        }))
-        session.commit()
-    db.init_db()
-    with Session(engine) as session:
-        assert session.get(ValidationCache, 1) is None
     engine.dispose()

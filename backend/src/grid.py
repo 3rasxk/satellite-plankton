@@ -2,13 +2,9 @@
 The monitored grid -- a small, fixed set of points across the upper Gulf
 of Thailand that `/risk-map`, `/summary`, and the scheduler operate over.
 
-This is NOT the validation set (`data/validation/events.csv`, 14
-historical events, seven with recorded coordinates -- see
-`src/_detection.py` / the `/validation` router). These are new,
-deliberately chosen monitoring points, picked to be representative of the
+These are deliberately chosen monitoring points, picked to represent the
 study area CLAUDE.md §0/§4 describes (upper Gulf of Thailand, focus sites
-e.g. Chonburi/Bang Saen) -- not tied to any historical bloom's exact
-pixel. The validation coordinates remain separate from this monitoring grid.
+e.g. Chonburi/Bang Saen).
 
 Seven points. Five of them were live-tested against real Sentinel-2/MODIS
 during this build (2026-08-22, detect() at date 2024-03-15):
@@ -29,12 +25,6 @@ returns index readings and scene dates without consulting climatology.
 bangpakong_mouth and pattaya were added later (commit b15af00) and were
 NOT part of that 2026-08-22 live test -- no per-site result is claimed
 for them here rather than one being assumed from the others.
-
-A sixth site, upper_gulf_open_water, was in this grid when the list above
-was written and has since been removed. thresholds.py still defines its
-own upper_gulf_open_water_1/_2 regional-proxy coordinates for th_001;
-those are hardcoded there and never read from this module, so they are
-unaffected by that removal.
 
 Keeping the non-'ok' points in the grid deliberately, rather than swapping
 in easier coordinates until everything reads 'ok': this is the honest

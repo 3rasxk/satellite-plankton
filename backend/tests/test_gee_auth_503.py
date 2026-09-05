@@ -21,9 +21,8 @@ Two calls in `routers/detect.py` are exercised:
    assert the fixed behavior (router-level message, not the generic
    app-level one) as a regression guard.
 
-For completeness: `routers/timeseries.py` and `routers/validation.py`
-each wrap their sole GEE-calling line in their own try/except already;
-`routers/risk_map.py`/`routers/summary.py` never call into `bridge` at
+For completeness: `routers/timeseries.py` wraps its GEE-calling line in
+its own try/except; `routers/risk_map.py`/`routers/summary.py` never call into `bridge` at
 all (DB-cache only) -- so `/detect` was the only endpoint with a
 GEE-calling line outside a router-level guard.
 """

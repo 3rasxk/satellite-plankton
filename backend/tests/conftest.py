@@ -51,9 +51,8 @@ def client(monkeypatch):
     """TestClient wired to the isolated SQLite file above (never
     backend/data/app.db), with the scheduler swapped for a no-op so
     merely constructing the client never triggers a live GEE call.
-    Triggers real startup (init_db/ensure_monitored_sites/
-    seed_validation_events) and shutdown events each test -- all
-    idempotent upserts, so re-running them per test is safe."""
+    Triggers real startup (init_db/ensure_monitored_sites) and shutdown
+    events each test -- both are idempotent, so re-running is safe."""
     monkeypatch.setattr(main_module, "create_scheduler", lambda: _NoopScheduler())
     with TestClient(main_module.app) as c:
         yield c

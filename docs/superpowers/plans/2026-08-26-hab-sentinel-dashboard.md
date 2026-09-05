@@ -1,12 +1,12 @@
 # HAB Sentinel Dashboard Implementation Plan
 
-> Correction, 2026-09-06: current detection-anomaly displays, gauge/risk verdicts and validation-image gates in this historical plan are superseded. The former statistic mixed dimensionless spectral indices with MODIS concentrations and is removed. Current detection output is indices/status/actual_date only, with null API `spatial_anomaly_z`; display "Not computed — no valid baseline exists". Validation images follow raw-reading availability, not anomaly values. `/timeseries` `anomaly_z` remains the valid MODIS `chlor_a` calculation. Numeric detection examples below are withdrawn implementation instructions, not evidence.
+> Correction, 2026-09-06: current detection-anomaly displays and gauge/risk verdicts in this historical plan are superseded. The former statistic mixed dimensionless spectral indices with MODIS concentrations and is removed. Current detection output is indices/status/actual_date only, with null API `spatial_anomaly_z`; display "Not computed — no valid baseline exists". `/timeseries` `anomaly_z` remains the valid MODIS `chlor_a` calculation. Numeric detection examples below are withdrawn implementation instructions, not evidence.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace the current 3-page top-nav frontend (`/`, `/summary`, `/validation`) with the 5-screen sidebar-nav "HAB Sentinel" dashboard, in the macOS-Sequoia-style design system, with no loss of any real data currently surfaced and no new fabricated data.
+**Goal:** Replace the former top-nav frontend with the 5-screen sidebar-nav "HAB Sentinel" dashboard, with no fabricated data.
 
-**Architecture:** Frontend-only change (`/frontend`), zero backend changes — every screen is built from the six existing endpoints (`/risk-map`, `/timeseries`, `/detect`, `/satellite-image`, `/summary`, `/validation`) plus `backend/src/grid.py`'s fixed 6-site list (already mirrored into the frontend today). New nav shell (sidebar replaces top header), five route-backed page components, and a handful of new presentational/computed-client-side components (NDCI canvas overlay, per-site anomaly-strip bucketing, day-of-year climatology baseline). Existing data-fetch hooks (`useApi`, `useSatelliteImage`) and API client are reused unchanged.
+**Architecture:** Frontend-only historical plan using the active monitoring endpoints and fixed monitoring grid. Validation-specific work from the original plan was retired on 2026-09-06.
 
 **Tech Stack:** React 19 + Vite, react-router-dom v7, react-leaflet v5 + Leaflet, recharts v3, axios, oxlint (no JS test runner in this repo — verification is `npm run lint` + manual dev-server check via the Chrome browser tool, not unit tests).
 
@@ -14,9 +14,8 @@
 
 ## Global Constraints
 
-- No backend changes. Every number shown must trace to one of: `/risk-map`, `/timeseries`, `/detect`, `/satellite-image`, `/summary`, `/validation`, or `backend/src/grid.py`'s static 6-site list.
+- No backend changes. Every number shown must trace to an active API response or `backend/src/grid.py`.
 - Never fabricate a value. Where the spec calls for a field with no backend source (SST, aquaculture cell density, live service-health checks, scan history), render an explicit no-data / "ไม่มีข้อมูล" state — never a placeholder number.
-- `/validation` counts (`n_events`, `n_matchable`, `n_with_real_satellite_reading`) must always be read live from the API response, never hardcoded, since `n_matchable` already changed once (0→7) and is expected to change again.
 - Truth-boundary disclaimer banner (`Disclaimer.jsx`, driven by `DISCLAIMER_TEXT`) stays mounted in the shared layout shell on every route, unconditionally.
 - Colors: `--risk-*` tokens mean chlorophyll-concentration tier ONLY, never decorative. `--accent` is interactive-elements-only, never a data color. Both existing rules (tokens.css header comment) carry forward unchanged.
 - IBM Plex Mono (`--font-mono` / `.mono`) for every number, coordinate, date. Inter + Noto Sans Thai for all UI text/labels.
@@ -111,7 +110,7 @@ git commit -m "Add HAB Sentinel design tokens: card surface, dividers, glass chr
 - Produces: `Sidebar` component (no props — self-contained: renders nav + live connectivity pill), routes `/`, `/ndci`, `/anomaly`, `/aquaculture`, `/reports` registered in `main.jsx`. `RISK_LABEL_TH` (Thai risk-tier labels) exported from `constants.js` — every later Thai-copy screen (Tasks 3, 4, 5, 7) imports this same map rather than each defining its own.
 - Consumes: `getMeta()` (new API client function) for the connectivity pill.
 
-This task stands up the shell and routing skeleton. To keep the app buildable and click-through-able at every step, the 5 routes point at the **existing** page components as temporary placeholders (`RiskMapPage` at `/`, `SummaryPage` at `/anomaly`, `ValidationPage` at `/reports`) plus two trivial inline stub components for `/ndci` and `/aquaculture`. Tasks 3–8 replace each placeholder with its real page and delete the superseded old page file.
+This task stands up the shell and routing skeleton. Temporary placeholders are replaced by the final route components in later tasks.
 
 **Bounded Thai-copy scope for this whole plan:** risk-tier labels (`RISK_LABEL_TH`), nav items, headings, and card chrome are translated to Thai throughout. Longer explanatory sentences already defined in English in `constants.js` (`RISK_MEANING`, `STATUS_LABEL`, `STATUS_EXPLAINER`, `RULE_DESCRIPTION`) are left as-is and reused verbatim — translating multi-clause truth-boundary sentences risks introducing a subtle meaning drift, which is a bigger risk than a mixed-language sentence. This is a deliberate scope line, not an oversight.
 
@@ -128,7 +127,7 @@ export const RISK_LABEL_TH = {
 }
 ```
 
-`frontend/src/api/client.js` already exports `getRiskMap`, `getTimeseries`, `detect`, `getSummary`, `getValidation`, all calling `client.get(path)`. Add, following the same pattern:
+`frontend/src/api/client.js` already exports the monitoring API helpers. Add, following the same pattern:
 
 ```js
 export async function getMeta() {
@@ -238,7 +237,6 @@ Replace the existing `<Routes>` block:
 ```jsx
 import RiskMapPage from './pages/RiskMapPage.jsx'
 import SummaryPage from './pages/SummaryPage.jsx'
-import ValidationPage from './pages/ValidationPage.jsx'
 
 function NdciStub() {
   return <div className="page"><h1>Sentinel-2 NDCI</h1><p className="no-rules">Coming in Task 5.</p></div>
@@ -253,7 +251,6 @@ function AquacultureStub() {
   <Route path="ndci" element={<NdciStub />} />
   <Route path="anomaly" element={<SummaryPage />} />
   <Route path="aquaculture" element={<AquacultureStub />} />
-  <Route path="reports" element={<ValidationPage />} />
 </Route>
 ```
 
@@ -1731,208 +1728,7 @@ git commit -m "Add Aquaculture Zones page with nearest-grid-site proxy distances
 
 ## Task 8: Reports & Exports page
 
-**Files:**
-- Create: `frontend/src/pages/ReportsPage.jsx`
-- Modify: `frontend/src/main.jsx`
-- Delete: `frontend/src/pages/ValidationPage.jsx`
-- Modify: `frontend/src/styles/global.css`
-
-**Interfaces:**
-- Produces: `ReportsPage` (no props).
-- Consumes: `getValidation()` (existing). Reuses the full 14-row table + leave-one-out list markup from the deleted `ValidationPage.jsx` verbatim (satisfies CLAUDE.md's Definition of Done: the per-event table and LOO calibration table must stay published somewhere).
-
-- [ ] **Step 1: Write `ReportsPage.jsx`**
-
-Combine: (a) new presentational chrome (export actions, service status, scan history — all explicitly non-live per spec), (b) the validation summary callout reading live counts, (c) the full validation table + LOO list moved from `ValidationPage.jsx` unchanged.
-
-```jsx
-import { useApi } from '../hooks/useApi.js'
-import { getValidation } from '../api/client.js'
-import { formatZ } from '../constants.js'
-import SatelliteImage from '../components/SatelliteImage.jsx'
-
-const EXPORT_ACTIONS = [
-  { name: 'รายงาน PDF รายสัปดาห์', detail: 'สรุปสถานะทุกจุดตรวจวัด รายสัปดาห์' },
-  { name: 'CSV ข้อมูลดิบ', detail: 'ค่าดัชนีและ z-score รายจุด รายวัน' },
-  { name: 'CSV เหตุการณ์อ้างอิง 14 รายการ', detail: 'data/validation/events.csv ทั้งหมด' },
-  { name: 'JSON บันทึกตัวจัดตารางเวลา', detail: 'ประวัติการรันของ scheduler' },
-]
-
-const SERVICE_STATUS = [
-  { name: 'Google Earth Engine', status: 'เชื่อมต่อ (ไม่ใช่การตรวจสอบสด)' },
-  { name: 'FastAPI backend', status: 'ทำงานปกติ (ไม่ใช่การตรวจสอบสด)' },
-  { name: 'Scheduler', status: 'ทำงานปกติ (ไม่ใช่การตรวจสอบสด)' },
-  { name: 'MODIS climatology', status: 'พร้อมใช้งาน (ไม่ใช่การตรวจสอบสด)' },
-]
-
-export default function ReportsPage() {
-  const { data, loading, error, refetch } = useApi(getValidation, [])
-
-  return (
-    <div className="page">
-      <div className="page-header">
-        <h1>รายงานและการส่งออก</h1>
-        <span className="updated-line">ส่งออกข้อมูลและตรวจสอบสถานะระบบ</span>
-      </div>
-
-      <div className="card">
-        <div className="section-title">การส่งออกข้อมูล</div>
-        {EXPORT_ACTIONS.map((a) => (
-          <div className="export-row" key={a.name}>
-            <div>
-              <div>{a.name}</div>
-              <div className="stat-detail">{a.detail}</div>
-            </div>
-            <button type="button" className="retry-btn" disabled>ส่งออก</button>
-          </div>
-        ))}
-      </div>
-
-      <div className="two-col-row">
-        <div className="card">
-          <div className="section-title">สถานะบริการ</div>
-          {SERVICE_STATUS.map((svc) => (
-            <div className="service-status-row" key={svc.name}>
-              <span className="dot ok" /> {svc.name} — <span className="stat-detail">{svc.status}</span>
-            </div>
-          ))}
-        </div>
-        <div className="card">
-          <div className="section-title">ประวัติการสแกน</div>
-          <p className="no-rules">ยังไม่มีบันทึกประวัติการสแกนที่เชื่อมต่อกับหน้านี้ (presentational placeholder)</p>
-        </div>
-      </div>
-
-      {loading && <div className="state-panel"><h3>กำลังโหลด…</h3></div>}
-      {error && (
-        <div className="state-panel error">
-          <h3>เชื่อมต่อไม่สำเร็จ</h3>
-          <button type="button" className="retry-btn" onClick={refetch}>ลองใหม่</button>
-        </div>
-      )}
-
-      {data && (
-        <>
-          <div className="card validation-callout">
-            <span className="headline">
-              {data.n_matchable} จาก {data.n_events} เหตุการณ์มีพิกัดพร้อมสำหรับจับคู่กับค่าดาวเทียม
-              — {data.n_with_real_satellite_reading} รายการมีค่าดาวเทียมจริง
-            </span>
-            <p>{data.calibration_caveat}</p>
-            <div className="match-counts">
-              <div className="match-count"><span className="n mono">{data.n_events}</span><span className="label">เหตุการณ์ที่บันทึกไว้</span></div>
-              <div className="match-count"><span className="n mono">{data.n_matchable}</span><span className="label">มีพิกัดใช้งานได้</span></div>
-              <div className="match-count"><span className="n mono">6</span><span className="label">ชนิดแพลงก์ตอน</span></div>
-            </div>
-          </div>
-
-          <section className="summary-section">
-            <div className="section-title">เหตุการณ์ทั้ง 14 รายการ</div>
-            <div className="table-scroll">
-              <table className="events-table">
-                <thead>
-                  <tr>
-                    <th>Event</th><th>Date</th><th>Location</th><th>Precision</th><th>Species</th>
-                    <th>Cell count</th><th>Match</th><th>Anomaly z</th><th>Satellite image</th><th>Notes</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.events.map((ev) => (
-                    <tr key={ev.event_id}>
-                      <td className="mono">{ev.event_id}{ev.low_evidentiary_weight && <div className="low-weight-flag">low evidentiary weight</div>}</td>
-                      <td className="mono">{ev.date_display}</td>
-                      <td>{ev.location_name}</td>
-                      <td className="mono">{ev.location_precision}</td>
-                      <td>{ev.species}</td>
-                      <td className="mono">{ev.cell_count_raw || (ev.cell_count_representative != null ? ev.cell_count_representative : '—')}</td>
-                      <td>
-                        <span className={`match-badge${ev.matchable ? ' matched' : ''}`}>{ev.matchable ? ev.match_method || 'matched' : 'not matched'}</span>
-                        {ev.match_reason && <div className="stat-detail" style={{ marginTop: 4 }}>{ev.match_reason}</div>}
-                      </td>
-                      <td className="mono">{ev.spatial_anomaly_z != null ? formatZ(ev.spatial_anomaly_z) : '—'}</td>
-                      <td className="event-image-cell">
-                        {ev.matchable && ev.spatial_anomaly_z != null ? (
-                          <SatelliteImage trueColorUrl={ev.true_color_image_url} ndciHeatmapUrl={ev.ndci_heatmap_image_url} noImageMessage="No satellite image available for this event." compact />
-                        ) : (
-                          <span className="no-rules">No satellite image available for this event.</span>
-                        )}
-                      </td>
-                      <td>{ev.notes}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          <section className="summary-section">
-            <div className="section-title">การสอบเทียบแบบ leave-one-out ({data.leave_one_out.length} รอบ)</div>
-            <ul className="loo-list">
-              {data.leave_one_out.map((row) => (
-                <li key={row.iteration_label}>
-                  <span className="loo-label mono">{row.iteration_label} — held out: {row.held_out_event_ids.join(', ')}</span>
-                  <span>{row.caught === null ? 'Could not run — ' : row.caught ? 'Would have been caught — ' : 'Would have been missed — '}{row.reason}</span>
-                </li>
-              ))}
-            </ul>
-          </section>
-        </>
-      )}
-    </div>
-  )
-}
-```
-
-- [ ] **Step 2: Wire the route, delete the old page**
-
-In `main.jsx`: import `ReportsPage`, replace `<Route path="reports" element={<ValidationPage />} />` with `<Route path="reports" element={<ReportsPage />} />`, remove the `ValidationPage` import. Delete `frontend/src/pages/ValidationPage.jsx`.
-
-- [ ] **Step 3: CSS**
-
-Append to `global.css`:
-
-```css
-.export-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--divider-soft);
-}
-.export-row:last-child {
-  border-bottom: none;
-}
-.two-col-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  margin: 16px 0;
-}
-.service-status-row {
-  padding: 6px 0;
-  font-size: 13px;
-}
-.service-status-row .dot.ok {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--status-ok);
-  margin-right: 6px;
-}
-```
-
-- [ ] **Step 4: Verify**
-
-`npm run lint`. In Chrome: navigate to `/reports`, confirm export list (buttons visibly disabled/inert), service status + scan history cards, the validation summary callout showing the LIVE `n_matchable` (currently 7) and `n_with_real_satellite_reading` (currently 0) — not "0/14" — and the full 14-row table + LOO list below it, unchanged from the old `/validation` page's content. Check console.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add frontend/src/pages/ReportsPage.jsx frontend/src/main.jsx frontend/src/styles/global.css
-git rm frontend/src/pages/ValidationPage.jsx
-git commit -m "Add Reports and Exports page, fold in full validation table"
-```
+The Reports page retains service status, scan history, and inactive export chrome. The retired bloom-event dataset, endpoint, table, and export action are intentionally absent.
 
 ---
 
@@ -1943,7 +1739,7 @@ git commit -m "Add Reports and Exports page, fold in full validation table"
 
 - [ ] **Step 1: Dead CSS sweep**
 
-`grep -rn "class=\"" frontend/src` (and JSX `className` usages) to confirm every CSS class still referenced by some component; remove any rule in `global.css` left over from the deleted `RiskMapPage`/`SummaryPage`/`ValidationPage`/`SitePanel`/old-nav era that no live component references. Do not remove anything still used by `AlertCard`, `SpectralMetricsCard`, `NdciTrendCard`, `SatelliteImageCard`, `ReportsPage`, `AquaculturePage`, `NdciPage`, `SeasonalAnomalyPage`, or `Sidebar` (Tasks 2–8 reused several existing class names on purpose — e.g. `.state-panel`, `.retry-btn`, `.no-rules`, `.section-title`, `.mono`, `.risk-pill`, `.events-table`, `.match-badge`, `.loo-list`).
+Search JSX `className` usages to confirm every CSS class remains referenced; remove dead rules from superseded pages.
 
 - [ ] **Step 2: Full lint pass**
 
@@ -1957,7 +1753,7 @@ Expected: 0 errors.
 In the Chrome browser tool, with both the backend and `npm run dev` running:
 1. Navigate to `/` — map loads, all 3 view modes work, marker click populates all 4 right-panel cards.
 2. Click each of the other 4 sidebar nav items in turn (`/ndci`, `/anomaly`, `/aquaculture`, `/reports`) — each renders without a blank page or console error.
-3. On `/reports`, confirm the validation callout's numbers match what `GET /validation` actually returns (cross-check via a direct request, e.g. `curl -s http://localhost:8000/validation | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['n_events'], d['n_matchable'], d['n_with_real_satellite_reading'])"`).
+3. On `/reports`, confirm the page renders service status, scan history, and inactive export actions without retired dataset content.
 4. Confirm the disclaimer banner is present on every route.
 5. Read console messages (`read_console_messages`) on each route and confirm no errors/warnings introduced by this work.
 

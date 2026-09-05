@@ -4,13 +4,13 @@
 
 Date: 2026-08-26
 Status: Approved, proceeding to implementation plan
-Scope: `/frontend` only. No backend changes — existing routers (`/risk-map`, `/timeseries`, `/detect`, `/satellite-image`, `/summary`, `/validation`) cover all real data needs.
+Scope: `/frontend` only. This is a historical design; retired dataset features are no longer requirements.
 
 ## Why
 
-Replace the current 3-page top-nav app (RiskMapPage, SummaryPage, ValidationPage) with a 5-screen sidebar-nav dashboard, "HAB Sentinel", styled as a macOS Sequoia-style native app. Consolidates existing components into richer per-screen layouts and adds two new screens (Aquaculture Zones, Reports & Exports) that were previously out of scope.
+Replace the former top-nav app with a 5-screen sidebar-nav dashboard, "HAB Sentinel", styled as a macOS Sequoia-style native app.
 
-Truth-boundary rules from CLAUDE.md carry over unchanged: no fabricated data, no percentage claims on n=14, rule-based (non-ML) framing stated wherever risk/confidence is shown, per-pixel resolution caveat present.
+Truth-boundary rules from CLAUDE.md carry over unchanged: no fabricated data, rule-based (non-ML) framing wherever risk/confidence is shown, and a per-pixel resolution caveat.
 
 ## Design System
 
@@ -90,15 +90,13 @@ Zone names/locations are illustrative placeholders (no real aquaculture-zone reg
 
 ## Screen 5 — รายงานและการส่งออก (Reports & Exports)
 
-Title + subtitle. List card of export actions (Weekly PDF, raw CSV, 14-event reference CSV, scheduler log JSON), each with a detail line and action button — presentational only, not wired, per current scope.
+Title + subtitle. List card of inactive Weekly PDF, raw CSV, and scheduler-log export actions.
 
 Two-column row:
 - Service Status card: GEE, FastAPI, Scheduler, MODIS climatology — dot + status text (presentational; no live health-check endpoint exists).
 - Scan History log: timestamped entries — presentational.
 
-Bottom card: 14-event historical reference dataset callout, reading `n_events` / `n_matchable` / `n_with_real_satellite_reading` live from `/validation` — **do not hardcode "0/14 matched"**: as of this spec, 7 of 14 events already carry a real coordinate (`n_matchable`, recalibration landed 2026-08-22) but 0 of those 7 produced a usable satellite reading (`n_with_real_satellite_reading`), each for its own documented reason (see `calibration_caveat`). The card must read these three counts from the response every time, not restate a point-in-time number, since `n_matchable` is expected to keep changing as more events get coordinates. 3 summary stats: `n_events`, `n_matchable`, 6 plankton species (species count is a static fact about the dataset, not from the API).
-
-Additionally — CLAUDE.md's Definition of Done requires the full 14-row per-event table and leave-one-out calibration table to remain published somewhere in the UI (not just 3 summary stats). Screen 5's bottom card holds the summary callout; immediately below it, this screen also carries the full events table and leave-one-out list, reusing the existing `ValidationPage.jsx` table/list markup verbatim (all 10 columns, LOO iterations), restyled to match the card system. This is additive to the screen list above, not a new screen.
+The retired bloom-event dataset, endpoint, and tables are intentionally absent.
 
 ## Interaction Scope
 

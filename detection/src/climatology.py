@@ -42,7 +42,7 @@ from _data_pipeline import (  # noqa: E402
 # mean/std is reported but flagged low-confidence -- a handful of points
 # from a handful of years is not the same evidentiary weight as a dense
 # multi-decade sample. Not a hard cutoff (no observation is discarded),
-# just a confidence flag callers (thresholds.py, prediction.py) must
+# just a confidence flag callers must
 # surface rather than silently trust every n the same.
 MIN_RELIABLE_N = 5
 

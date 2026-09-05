@@ -1,6 +1,6 @@
 """
 Manual trigger for one regional scan, without waiting on the poll/
-cooldown cycle -- mirrors detection/src/generate_reports.py's manual-
+cooldown cycle -- provides a manual-
 trigger pattern (docs/superpowers/specs/2026-08-31-regional-scan-design.md
 §8). Makes real, live GEE calls -- up to ~500 Sentinel-2/MODIS reads,
 measured 1-3.6hr range (spec §2).

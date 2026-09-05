@@ -88,13 +88,6 @@ def today_str() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
-# How long a cached /validation result (src/db_models.py ValidationCache)
-# is served before thresholds.run() is re-run. run() makes a real (slow)
-# GEE call via the th_001 regional-proxy attempt, so this avoids hitting
-# GEE on every /validation request -- the underlying events.csv/config.yaml
-# don't change on their own between requests.
-VALIDATION_CACHE_TTL_HOURS: int = int(os.environ.get("VALIDATION_CACHE_TTL_HOURS", "24"))
-
 # Regional bloom scan (docs/superpowers/specs/2026-08-31-regional-scan-design.md
 # §8). Same env-override convention as SCHEDULER_INTERVAL_MINUTES above.
 REGIONAL_SCAN_GRID_SPACING_KM: float = float(os.environ.get("REGIONAL_SCAN_GRID_SPACING_KM", "5"))

@@ -2,16 +2,16 @@
 
 Software-only monitoring system for harmful algal blooms (green *Noctiluca* / red tide) in the upper Gulf of Thailand, targeting SDG 14. **Physics-based, not machine learning** — the detection path reports spectral index values with actual scene dates. Anomaly scoring and rule-based risk evaluation are disabled: no valid baseline exists for those indices. MODIS `chlor_a` history and its same-quantity seasonal anomalies remain available separately. See `CLAUDE.md` and `LIMITATIONS.md` for the current scope, and `docs/DETECTION_PLAN.md` §0 for why supervised ML was rejected.
 
-**Read `LIMITATIONS.md` before trusting any output.** The detection path supplies index readings only; it has no valid anomaly statistic or presence/absence verdict. Its prediction rules cannot evaluate risk without that input. The 14-event set is a **record of documented blooms, not a validation gate**: one event has a satellite reading, but all 14 cannot be evaluated. th_010's former miss claim rested on an invalid calculation and is withdrawn.
+**Read `LIMITATIONS.md` before trusting any output.** The detection path supplies index readings only; it has no valid anomaly statistic or presence/absence verdict. Its prediction rules cannot evaluate risk without that input.
 
 ## Layout
 
 ```
 data-pipeline/   Sentinel-2 + MODIS + rainfall via Google Earth Engine
-detection/       spectral indices, MODIS climatology, threshold calibration, rule-based prediction
-backend/         FastAPI service (5 endpoints + scheduler + SQLite/Postgres DB)
+detection/       spectral indices, MODIS climatology, rule-based prediction
+backend/         FastAPI service + scheduler + SQLite/Postgres DB
 frontend/        React + Leaflet dashboard
-data/validation/ the 14-event Thai ground-truth set (locked scope — see data/validation/README.md)
+data/validation/ water-mask regression fixture
 docs/            detection & frontend build plans
 scripts/dev.sh   one-command local dev run (backend + frontend)
 ```
@@ -75,7 +75,7 @@ cp .env.example .env   # VITE_API_BASE_URL=/api by default -- Vite proxies it to
 ./scripts/dev.sh
 ```
 
-Starts the backend (`uvicorn src.main:app --reload`, port 8000) and frontend (`npm run dev`, Vite — default port 5173, auto-increments if taken) together, backgrounded, with a single Ctrl-C stopping both. The script checks for the three venvs, `frontend/node_modules`, and an `EE_PROJECT_ID` in `detection/.env`/`data-pipeline/.env` before starting, and warns (not fails) if GEE auth looks unset — the backend still boots either way, but every satellite-backed endpoint (`/detect`, `/risk-map` after its first scheduled refresh, `/validation`, `/timeseries`) will return a 503 until auth is fixed, per the never-fabricate-data rule above.
+Starts the backend (`uvicorn src.main:app --reload`, port 8000) and frontend (`npm run dev`, Vite — default port 5173, auto-increments if taken) together. The script checks dependencies and Earth Engine configuration; satellite-backed endpoints return a clear 503 when authentication is unavailable.
 
 Once running:
 - API: http://localhost:8000 (interactive docs at `/docs`)
@@ -94,42 +94,22 @@ cd frontend && npm run dev
 ### 4. Run the tests
 
 ```bash
-cd data-pipeline && ./venv/bin/python -m pytest tests/ -q   # 28 tests, pure logic, no live GEE needed
-cd detection      && ./venv/bin/python -m pytest tests/ -q   # 50 tests, pure logic, no live GEE needed
-cd backend        && ./venv/bin/python -m pytest tests/ -q   # 23 tests, TestClient + isolated SQLite,
-                                                                # GEE mocked at the bridge boundary
+cd data-pipeline && ./venv/bin/python -m pytest tests/ -q   # 82 tests
+cd detection      && ./venv/bin/python -m pytest tests/ -q   # 59 tests
+cd backend        && ./venv/bin/python -m pytest tests/ -q   # 127 tests
+cd frontend       && npm test
 ```
 
-101 tests total, all real (no live GEE credentials required to run any of them — GEE calls are mocked or bypassed at a typed boundary, per this project's existing per-file test convention). No automated frontend test suite exists (no Vitest/React Testing Library configured) — see "What's not automated" below.
-
-### 5. Regenerate the detection reports (optional, needs live GEE)
-
-```bash
-cd detection && source venv/bin/activate
-python src/generate_reports.py
-```
-
-Regenerates `detection/reports/event_table.md`, `index_comparison.md`, and `threshold_sweep.png` from a live run against real Sentinel-2/MODIS data and `data/validation/events.csv`. Slow (real GEE round-trips) and requires GEE auth from step 1.
-
-## The 14-event validation set
-
-Lives at `data/validation/events.csv` — 14 documented Thai HAB events (1981–2020), extracted from Luang-on et al. (2023, *Frontiers in Marine Science* 10:1031901), a SEAFDEC-archived 1984 paper, and a 2018 MOAC bulletin. **This set is locked — no further data collection is in scope** (`CLAUDE.md` §4, `data/validation/README.md`).
-
-**Current match status: 1 of 14**, and that one settles nothing — see `LIMITATIONS.md` §1 for the three qualifiers that apply to it together. 7 rows carry a real, human-confirmed coordinate; the other 7 are `named_site` or `province_level`, because the sources describe events by place name and this project never invents a lat/lng for one (`docs/DETECTION_PLAN.md` §3). Of the 7 with coordinates, 4 predate Sentinel-2, 1 hit a coverage gap, 1 was entirely cloud-covered, and 1 (th_010) produces a reading. One regional-proxy attempt (`th_001`, at the scale the source actually supports — "upper Gulf of Thailand," not a named site) found zero Sentinel-2 scenes and a real ~2-month MODIS `chlor_a` gap for that window. See:
-- `data/validation/README.md` — schema and folder guide.
-- `data/validation/CALIBRATION_NOTES.md` — the methodology decisions this reality forces (same-episode cluster hold-out grouping for leave-one-out, species diversity across the 14 events, historical-event weighting, date-precision tiers, `cell_count` range handling).
-- `detection/reports/event_table.md` — the live per-event table, all 14 rows.
-- `detection/src/config.yaml` — states plainly that escalation thresholds are literature/convention defaults, not empirically calibrated, and why.
-- `GET /validation` — the same table, served live from the running API.
+The service suites need no live GEE credentials; external calls are mocked or bypassed at typed boundaries.
 
 ## Manual end-to-end verification
 
-In addition to the 101 automated tests, this build was verified against a real running stack during Phase 5: `scripts/dev.sh` started, backend confirmed serving real GEE-backed data (`/risk-map` returning 6 real monitored-grid readings, `/summary` and `/validation` returning live-computed payloads), and the frontend loaded against the real running backend in an actual Chrome browser (not a mock server) — map rendered, a site marker was clicked, no console errors. The one thing this could **not** confirm: whether the site panel correctly renders as a full-width bottom sheet at a genuine 375px mobile viewport — the available browser-automation tooling in this environment cannot actually shrink the rendered viewport below the desktop breakpoint (confirmed directly: after a resize call, `window.innerWidth` still read 976px). The CSS rule itself (`frontend/src/styles/global.css`, `@media (max-width: 720px)`, `.site-panel` -> full-width slide-up sheet) was read and is logically correct, but this specific behavior remains **unconfirmed by an actual narrow-viewport render** — verify by hand with real Chrome DevTools' device toolbar if this matters for a release.
+The stack has been manually exercised against real Earth Engine-backed data. Automated service suites mock or bypass external calls at typed boundaries; frontend lint, unit tests, and production build are separate gates.
 
 ## What's not automated
 
-There is no Vitest/React Testing Library (or any other frontend unit/component test) set up in `frontend/`. Frontend correctness was instead verified by hand — a real browser driven against the real running backend during Phase 4's build (two real bugs found and fixed that way: a z-index overlap, and a chart incorrectly rendering no-history sites as a flat zero line instead of excluding them) and again briefly during Phase 5 (above). This is a real gap, not a hidden one: a regression in `frontend/src/` today would only be caught by a human looking at the running app, not by `npm test`. Left as-is rather than retrofitted, because introducing a first test framework and a real test suite for five pages/nine components is a project-shaping decision (which pages get real coverage vs. smoke-only, whether to mock the API or run against a test backend) that deserves its own review, not a quick pass at the end of Phase 5.
+Frontend tests currently cover map bounds and visibility of unevaluated monitoring pins. Component-level interaction coverage remains limited, so UI changes still require a browser check against the running API.
 
 ## Design decisions, locked
 
-See `CLAUDE.md` §1 for the full table (physics not ML, NDCI/2BDA/3BDA/B2-B3, MODIS climatology baseline, 14-event ground truth, leave-one-out validation reported per-event, React+Leaflet, FastAPI, no LINE/push). Not re-litigated here.
+See `CLAUDE.md` §1 for the full decision table.

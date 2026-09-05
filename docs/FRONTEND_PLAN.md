@@ -150,7 +150,7 @@ Type scale is larger and roomier than before: 13 / 15 / 17 / 22 / 32 / 44px (was
 
 ### Cards
 
-Every panel-like surface (state panels, stat cards, the risk legend, the site panel's detect block and chart wrap, the validation table's LOO list items) is a white or light-grey card: `border-radius: 12–16px` (`--radius-lg: 14px`), a subtle shadow `0 1px 3px rgba(0,0,0,0.08)` (`--shadow-card`), and a `1px solid var(--border)` hairline. This replaces the old flat hairline-only look entirely — no more `border-radius: 2px` sharp corners or glow-style coloured borders on hover states (interactive borders now use `--accent` directly, not a translucent glow). Small interactive chrome (buttons, nav pills, toggles) uses the tighter `--radius: 8px`.
+Every panel-like surface (state panels, stat cards, the risk legend, and the site panel's reading/chart blocks) is a white or light-grey card: `border-radius: 12–16px` (`--radius-lg: 14px`), a subtle shadow `0 1px 3px rgba(0,0,0,0.08)` (`--shadow-card`), and a `1px solid var(--border)` hairline. This replaces the old flat hairline-only look entirely. Small interactive chrome uses the tighter `--radius: 8px`.
 
 ### Signature element — the anomaly strip
 

@@ -1,10 +1,8 @@
-"""
-SQLAlchemy ORM models. Four tables:
+"""SQLAlchemy ORM models for monitoring sites and regional scans.
 
 - MonitoredSite     the grid `/risk-map`, `/summary`, and the scheduler
                     operate over (src/grid.py MONITORED_GRID, upserted at
-                    startup). New, deliberately-chosen monitoring points --
-                    NOT the validation set.
+                    startup). Deliberately chosen monitoring points.
 - DetectionCache    one row per MonitoredSite, upserted by the scheduler
                     (src/scheduler.py) with the latest risk_level()/
                     detect() result. This is what /risk-map and /summary
@@ -19,18 +17,6 @@ SQLAlchemy ORM models. Four tables:
                     (`true_color_png`/`ndci_heatmap_png`) refreshed on the
                     same cycle -- see scheduler.py for why this bounded
                     7-site grid is cached rather than rendered on demand.
-- ValidationEvent   mirrors data/validation/events.csv (14 rows), upserted
-                    read-only at startup from that file. Not editable via
-                    any API route -- events.csv is the single source of
-                    truth (CLAUDE.md §5), this table exists so /validation
-                    can query event metadata by the same event_id the
-                    live thresholds.run() result uses, without re-parsing
-                    the CSV on every request.
-- ValidationCache   caches thresholds.run()'s output (src/_detection.py
-                    threshold_run) -- see src/config.py
-                    VALIDATION_CACHE_TTL_HOURS. run() makes a real GEE
-                    call (th_001 regional-proxy attempt), so this avoids
-                    repeating it on every /validation request.
 """
 
 from __future__ import annotations
@@ -111,40 +97,6 @@ class DetectionCache(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     site: Mapped["MonitoredSite"] = relationship(back_populates="cache")
-
-
-class ValidationEvent(Base):
-    """Mirrors data/validation/events.csv verbatim -- read-only relative
-    to that file, never written to via any API route."""
-
-    __tablename__ = "validation_events"
-
-    event_id: Mapped[str] = mapped_column(String, primary_key=True)
-    date: Mapped[str | None] = mapped_column(String, nullable=True)
-    date_start: Mapped[str | None] = mapped_column(String, nullable=True)
-    date_end: Mapped[str | None] = mapped_column(String, nullable=True)
-    lat: Mapped[float | None] = mapped_column(Float, nullable=True)
-    lng: Mapped[float | None] = mapped_column(Float, nullable=True)
-    location_name: Mapped[str] = mapped_column(String)
-    location_precision: Mapped[str] = mapped_column(String)
-    species: Mapped[str] = mapped_column(String)
-    cell_count: Mapped[str | None] = mapped_column(String, nullable=True)  # raw string, see thresholds.parse_cell_count
-    event_type: Mapped[str] = mapped_column(String)
-    source_type: Mapped[str] = mapped_column(String)
-    source_citation: Mapped[str] = mapped_column(Text)
-    confidence: Mapped[str] = mapped_column(String)
-
-
-class ValidationCache(Base):
-    """Cached thresholds.run() output. Single row (id=1, upserted) --
-    this is a point-in-time snapshot of the calibration attempt, not a
-    history table."""
-
-    __tablename__ = "validation_cache"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
-    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
-    payload: Mapped[dict] = mapped_column(JSON)
 
 
 class RegionalScanRun(Base):

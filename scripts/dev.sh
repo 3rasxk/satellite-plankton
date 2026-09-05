@@ -59,7 +59,7 @@ warn() {
   "backend/venv is missing or incomplete. Run: cd backend && /opt/homebrew/bin/python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt"
 
 [ -d "$DETECTION_DIR/venv" ] || warn \
-  "detection/venv not found -- fine if you only need the API/frontend to boot, but /detect, /risk-map, /validation will 503 (backend imports detection/src directly, in-process, not via detection/venv -- see backend/README.md 'Cross-project imports'; backend/venv itself is what matters for those routes, this is just a heads-up that detection/'s own tests/scripts won't run without it)."
+  "detection/venv not found -- fine if you only need the API/frontend to boot, but /detect and /risk-map will 503 (backend imports detection/src directly, in-process, not via detection/venv; backend/venv itself is what matters for those routes)."
 
 [ -d "$DATA_PIPELINE_DIR/venv" ] || warn \
   "data-pipeline/venv not found -- same note as above: backend/venv carries its own earthengine-api install for the in-process import chain, so this alone won't block the API, but data-pipeline/'s own tests/scripts won't run without it."
@@ -76,7 +76,7 @@ for env_file in "$DETECTION_DIR/.env" "$DATA_PIPELINE_DIR/.env"; do
 done
 if [ -z "$EE_PROJECT_SET" ]; then
   warn "No EE_PROJECT_ID found in detection/.env or data-pipeline/.env, and 'earthengine authenticate' may not have been run."
-  warn "The backend will still start, but every satellite-backed request (/detect, /risk-map after the scheduler's first pass, /validation, /timeseries) will fail loudly with a 503 GEEAuthError -- not silently fake data."
+  warn "The backend will still start, but every satellite-backed request (/detect, /risk-map after the scheduler's first pass, /timeseries) will fail loudly with a 503 GEEAuthError -- not silently fake data."
   warn "Fix: see root README.md 'Google Earth Engine setup', or data-pipeline/src/auth.py's FIX_IT_MESSAGE."
 fi
 

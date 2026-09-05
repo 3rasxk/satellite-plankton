@@ -96,9 +96,8 @@ def three_bda(bands: dict) -> float:
 
     Adds a third band (B6, 740 nm) to correct for backscatter dominated
     by suspended sediment rather than chlorophyll -- the DETECTION_PLAN.md
-    §2 rationale for why this is likely the best-performing index near
-    river mouths (Tha Chin, Chao Phraya, Mae Klong, Bang Pakong), which is
-    precisely where several of the 14 validation events are located.
+    rationale for why it may be useful near turbid river mouths (Tha Chin,
+    Chao Phraya, Mae Klong, Bang Pakong).
 
     Raises:
         Returns math.inf if B4 == 0 or B5 == 0 (degenerate reading),
@@ -122,14 +121,9 @@ def b2_b3_ratio(bands: dict) -> float:
     water. This ratio is a coarse proxy for that elevation, not a
     validated species classifier.
 
-    Species scope (per `data/validation/CALIBRATION_NOTES.md` §2): this
-    feature is *Noctiluca*-specific. It is not expected to behave
-    consistently, or fire at all, for the other 7 taxa in the validation
-    set (Ceratium furca, Karenia sp., Leptocylindrus sp. [a diatom],
-    Trichodesmium erythraeum [a cyanobacterium], Protogonyaulax sp.,
-    unknown, or the mixed Noctiluca miliaris/Ceratium furca event).
-    Callers must not report a miss on a non-Noctiluca event as if it
-    reflects on this feature's validity.
+    This feature is *Noctiluca*-specific. It is not expected to behave
+    consistently for other taxa, and must not be presented as a general
+    species classifier.
 
     Raises:
         Returns math.inf if B3 == 0.

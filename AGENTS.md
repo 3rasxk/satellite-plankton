@@ -8,7 +8,7 @@ This repository monitors harmful algal blooms in the upper Gulf of Thailand.
 - `detection/src/` computes spectral indices, climatology, thresholds, and rule-based risk; tests are in `detection/tests/`, reports in `detection/reports/`.
 - `backend/src/` contains the FastAPI service, database models, scheduler, and routers; tests are in `backend/tests/`.
 - `frontend/src/` contains the React/Vite dashboard, components, pages, hooks, and styles; static assets are in `frontend/public/`.
-- `data/validation/` contains the locked 14-event validation set; `docs/` contains design and implementation plans.
+- `data/validation/water_mask_truth.json` is the retained water-mask regression fixture; `docs/` contains design and implementation plans.
 
 Keep the three Python services as separate projects and virtual environments. Preserve the existing namespaced `importlib` bridges between their `src/` directories.
 
@@ -24,7 +24,7 @@ Use Python 3.11+, four-space indentation, descriptive `snake_case` names, and mo
 
 ## Testing Guidelines
 
-Add pytest tests under the relevant service’s `tests/`, using `test_*.py` files and `test_*` functions. Keep tests deterministic: suites mock or bypass live Earth Engine at typed boundaries. No frontend test framework is configured; manually verify dashboard changes against the running API.
+Add pytest tests under the relevant service’s `tests/`, using `test_*.py` files and `test_*` functions. Keep tests deterministic: suites mock or bypass live Earth Engine at typed boundaries. Run the frontend Node tests and manually verify dashboard changes against the running API.
 
 ## Commit & Pull Request Guidelines
 
@@ -32,4 +32,4 @@ Use short, imperative commit subjects, preferably with a Conventional Commit pre
 
 ## Security & Configuration
 
-Never commit `.env` files, Earth Engine credentials, API keys, database URLs, or generated local databases. Copy `.env.example` files for setup. Read `LIMITATIONS.md` before changing user-facing claims: detection and indicative rule-based prediction remain separate, and validation results are reported per event, not as a percentage.
+Never commit `.env` files, Earth Engine credentials, API keys, database URLs, or generated local databases. Copy `.env.example` files for setup. Read `LIMITATIONS.md` before changing user-facing claims: detection and indicative rule-based prediction remain separate.

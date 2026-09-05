@@ -3,24 +3,19 @@
 # Every threshold and rule the detection/prediction engine uses, in one
 # human-readable place (CLAUDE.md §5, .claude/agents/bloom-detection.md
 # "Non-negotiable rules": "Every threshold and rule lives in config.yaml").
-# src/thresholds.py and src/prediction.py read this file; nothing tunable
-# is hard-coded in either module.
+# src/prediction.py reads this file; nothing tunable is hard-coded there.
 #
 # ---------------------------------------------------------------------
-# CALIBRATION STATUS — anomaly scoring disabled, 2026-09-05.
+# ANOMALY STATUS — scoring disabled, 2026-09-05.
 # Sentinel-2 indices cannot be standardized against MODIS chlor_a:
-# their units differ. No valid index baseline exists yet, so all 14
-# events and every leave-one-out unit cannot be evaluated.
-# th_010 supplies real indices, not an anomaly score or a hit/miss result.
-# Its n=1, karenia_sp and ETOPO1 near-shore reading qualifiers remain;
-# see LIMITATIONS.md 1.
+# their units differ. No valid index baseline exists yet.
 # Numeric cutoffs below are inactive historical convention placeholders.
-# calibrated_* remains null pending a valid statistic and calibration.
+# calibrated_* remains null pending a valid statistic.
 # ---------------------------------------------------------------------
 
 indices:
   primary: ndci            # docs/DETECTION_PLAN.md §2: NDCI is the primary chlorophyll proxy
-  compare: [ndci, 2bda, 3bda]   # all three swept/compared in reports/index_comparison.md
+  compare: [ndci, 2bda, 3bda]
   secondary_discrimination: b2_b3_ratio  # Noctiluca-only, lower confidence -- see indices.py docstring
 
 climatology:
@@ -54,54 +49,7 @@ thresholds:
     calibrated_warning_z: null
     note: >
       Historical convention placeholders only; no valid index anomaly
-      statistic or Thai event calibration exists yet.
-
-# cell_count handling (data/validation/CALIBRATION_NOTES.md §5): stored in
-# events.csv as a blank, a single number, or a literal range string like
-# "684-8700". thresholds.py's parser makes this explicit choice rather
-# than silently taking one number out of a range string:
-cell_count_range_policy: midpoint
-  # midpoint of [lower, upper] used as the single representative value
-  # for any severity-ordering display in event_table.md; lower and upper
-  # bounds are both still shown verbatim in the table itself so a reader
-  # is never shown a single number the source did not report. "midpoint"
-  # was chosen over "lower" or "upper" because neither bound alone has
-  # any documented reason to be closer to the true peak concentration --
-  # a bloom sampled at multiple sites/times naturally spans a range, and
-  # the midpoint is the least-biased single-number summary of a range
-  # with no other information to weight it. Never used as an input to
-  # any threshold decision -- cell_count is reported alongside the
-  # satellite result for context, not fed into the detection pipeline
-  # (the pipeline runs on satellite reflectance only, never on the
-  # ground-truth label it is being validated against, per
-  # docs/DETECTION_PLAN.md §5 "never validate against the same family").
-
-# Same-episode cluster hold-out grouping for leave-one-out calibration
-# (data/validation/CALIBRATION_NOTES.md §1). Each cluster's rows are
-# held out together as one unit, never split, turning 14 events into
-# 11 leave-one-out iterations (9 singles + 2 clusters).
-leave_one_out_clusters:
-  chonburi_aug2019:
-    members: [th_005, th_006, th_007]
-    reason: >
-      Same physical bloom, 19-29 Aug 2019, multiple Chonburi sites
-      (Wonnapha Beach/Laem Thaen, Koh Loy, Tham Phang Beach), all
-      noctiluca_scintillans. th_005's date range contains th_006/th_007's
-      exact date (27 Aug).
-  chonburi_feb2020:
-    members: [th_009, th_010]
-    reason: >
-      Same physical bloom, 11-20 Feb 2020, Phli Pier Bridge and Ang Sila
-      (both Chonburi), both karenia_sp, identical date range.
-
-# Events given lower evidentiary weight when choosing an operating point
-# (data/validation/CALIBRATION_NOTES.md §3) -- pre-monitoring-era
-# (1981-1983), no cell count in any source, documented only as
-# "historical confirmation," not quantitative labels. Still run through
-# the pipeline and shown in event_table.md, per the note there; a miss on
-# one of these must not be reported with the same weight as a miss on a
-# cell-count-bearing event.
-historical_low_weight_events: [th_012, th_013, th_014]
+      statistic or empirical calibration exists yet.
 
 # ---------------------------------------------------------------------
 # Prediction layer -- rule-based risk escalation (docs/DETECTION_PLAN.md
@@ -139,8 +87,6 @@ trend:
 # Prediction confidence statement -- read literally by prediction.py's
 # docstring and never overridden per-call. Published ML forecasting has
 # reached ~96% accuracy at 8-day lead time (docs/DETECTION_PLAN.md §3);
-# this rule-based layer is not claimed to be comparable, and with only 14
-# validation events (1 of which has produced a real satellite reading --
-# not a calibration set, see status note above), no lead-time accuracy
-# figure is computed or reported anywhere in this codebase.
+# this rule-based layer is not claimed to be comparable. No lead-time
+# accuracy figure is computed or reported anywhere in this codebase.
 prediction_confidence_label: "indicative, rule-based -- not a validated forecast"

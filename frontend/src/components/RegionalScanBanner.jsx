@@ -22,7 +22,7 @@ import {
  * datasets, rather than letting the risk-map's date pill imply it also
  * describes the regional-scan pins now on screen.
  *
- * Visual pattern: reuses `.validation-callout` (see ValidationPage.jsx)
+ * Visual pattern: reuses the shared `.info-callout` callout chrome
  * for its box chrome -- a self-contained bordered/tinted callout that
  * already carries "here is a caveat the user must read" meaning
  * elsewhere in the dashboard. `.status-banner` (SatelliteImage.jsx) was
@@ -31,7 +31,7 @@ import {
  * `margin: 0` nested inside `.satellite-image-frame`; its visible box
  * comes entirely from that ambient parent) -- reusing it here would
  * mean inventing new border/background CSS from scratch, which is what
- * the spec explicitly says not to do. `.validation-callout` is
+ * the spec explicitly says not to do. The shared callout style is
  * self-contained and only needs new position/size rules (see
  * `.regional-scan-banner` in global.css) to work as a map overlay,
  * positioned as an absolute sibling of `map-date-pill` / `RiskLegend` /
@@ -88,7 +88,7 @@ export default function RegionalScanBanner({ data }) {
   const statusDotColor = isErrorLike ? 'var(--status-error)' : 'var(--status-ok)'
 
   return (
-    <div className="regional-scan-banner validation-callout" role="status">
+    <div className="regional-scan-banner info-callout" role="status">
       <div className="regional-scan-banner-status-row">
         <span className="regional-scan-banner-dot" style={{ background: statusDotColor }} aria-hidden="true" />
         <span className="headline">

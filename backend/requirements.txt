@@ -11,7 +11,7 @@ python-dotenv>=1.0
 # it needs these installed directly, the same way detection/venv needed
 # earthengine-api even though detection/requirements.txt doesn't list it
 # (data-pipeline/src/auth.py, modis.py, sentinel2.py, rainfall.py all
-# `import ee` directly; detection/src/prediction.py, thresholds.py,
+# `import ee` directly; detection/src/prediction.py and
 # climatology.py `import yaml`). Kept in sync with
 # data-pipeline/requirements.txt and detection/requirements.txt by hand
 # since the three projects intentionally don't share one requirements

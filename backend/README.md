@@ -1,8 +1,9 @@
 # backend
 
-FastAPI service — `/risk-map`, `/risk-map/{site_id}/image`, `/timeseries`, `/detect`, `/satellite-image`, `/summary`, `/validation` — + scheduler. Owned by the `backend-api` agent — see `.claude/agents/backend-api.md`. Wraps `detection/src`'s `detect()`/`risk_level()` (Phase 2) in HTTP responses — no detection/prediction logic lives here.
-
-`/detect` and `/satellite-image` render a true-color/NDCI-heatmap satellite image on demand (live GEE call, several seconds — no small enumerable key space to cache). `/risk-map`'s fixed 6-site grid instead gets its images pre-rendered and cached by the scheduler alongside the numeric refresh, then served from the DB in milliseconds via `/risk-map/{site_id}/image` — see `src/scheduler.py`'s module docstring for the real, measured-latency reasoning behind that split.
+FastAPI service for `/risk-map`, `/risk-map/{site_id}/image`, `/timeseries`,
+`/detect`, `/satellite-image`, `/summary`, `/regional-scan`, and alerts.
+It imports the physics-based detection engine through `src/_detection.py`;
+no detection logic is duplicated here.
 
 ## Setup
 
@@ -11,45 +12,30 @@ cd backend
 /opt/homebrew/bin/python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env   # fill in real Supabase keys later; blank is fine for now (see below)
+cp .env.example .env
 uvicorn src.main:app --reload
 ```
 
-Requires `detection/` and `data-pipeline/` to exist as sibling directories with their own `.env` files carrying `EE_PROJECT_ID` (see `data-pipeline/.env.example`) — `backend/src/_detection.py` loads `detection/src/prediction.py`/`thresholds.py` directly (see "Cross-project imports" below), which transitively load `data-pipeline/src`'s GEE-authenticated functions.
+`detection/` and `data-pipeline/` must remain sibling projects. The backend
+virtual environment needs their transitive runtime dependencies because the
+bridge loads `detection/src/prediction.py` directly.
 
-`backend/requirements.txt` includes `earthengine-api`, `numpy`, `PyYAML` in addition to the FastAPI/DB stack — these are transitive runtime dependencies of the detection/data-pipeline import chain, not backend's own logic. `backend/` has its own venv (CLAUDE.md §5: separate projects, separate venvs), so it needs these installed directly, same as `detection/venv` needed `earthengine-api` even though `detection/requirements.txt` doesn't list it.
+## Database
 
-## Cross-project imports
+With `DATABASE_URL` unset, the service uses the gitignored SQLite database
+`backend/data/app.db`. Set `DATABASE_URL` to switch to Postgres/Supabase.
+Active tables store monitored sites, their latest detection cache, and regional
+scan runs/points/clusters. Startup permanently drops the retired
+`validation_events` and `validation_cache` tables if an older database has them.
 
-`backend/` needs to call into `detection/src`, which itself calls into `data-pipeline/src` — three separate projects, two of which are both named `src`. `detection/src/_data_pipeline.py` already solved the `detection/` → `data-pipeline/` collision via `importlib.util.spec_from_file_location` under an explicit module name. `backend/src/_detection.py` replicates the same pattern for `backend/` → `detection/src`: it loads `prediction.py` and `thresholds.py` directly from `detection/src/*.py` under namespaced module names (`detection_src_prediction`, `detection_src_thresholds`), rather than letting them (or their own `_data_pipeline`/`climatology`/`indices` imports) register under bare names in `sys.modules`. No detection/prediction logic is duplicated — every function `backend/` calls is the exact object from `detection/src`.
+## Runtime behavior
 
-## DB — SQLite now, Postgres/Supabase later
+The scheduler refreshes the fixed monitoring grid every
+`SCHEDULER_INTERVAL_MINUTES` (default 360) and once at startup. `/risk-map` and
+`/summary` read that cache; `/detect` and `/satellite-image` call Earth Engine on
+demand. Every response carries a disclaimer.
 
-No real Supabase project exists yet (`backend/.env.example`'s `SUPABASE_URL`/`SUPABASE_KEY`/`DATABASE_URL` are blank) — a real gap, not a shortcut. Leaving `DATABASE_URL` unset makes `src/config.py` fall back to a local SQLite file at `backend/data/app.db` (gitignored), so the full DB-backed flow — schema, scheduler cache writes, `/risk-map`, `/summary` — can be built and tested now.
-
-**To swap to real Supabase/Postgres:** set `DATABASE_URL` to a real connection string (e.g. `postgresql+psycopg2://postgres:<password>@<host>:5432/postgres`) in `.env`. That is the entire swap — `src/db.py`/`src/db_models.py` never branch on "is this sqlite" (the one SQLite-specific line is `connect_args={"check_same_thread": False}` in `src/db.py`, applied only `if config.DATABASE_URL.startswith("sqlite")`). You would need to add `psycopg2-binary` to `requirements.txt` for a real Postgres URL to work — not added yet since there's nothing to connect to.
-
-Tables (`src/db_models.py`):
-- `monitored_sites` — the grid `/risk-map`/`/summary`/the scheduler operate over (`src/grid.py`, 6 points, upserted at startup). Not the validation set.
-- `detection_cache` — one row per site, upserted by the scheduler with the latest `risk_level()`/`detect()` result. `/risk-map` and `/summary` read this, never GEE live. `stale` + `error` distinguish "last refresh failed, this is old data" from "this is fresh." Also carries `true_color_png`/`ndci_heatmap_png` (BLOB, pre-rendered PNG bytes) + `image_status`/`image_error`, refreshed on the same cycle — see `src/scheduler.py`.
-- `validation_events` — mirrors `data/validation/events.csv` (14 rows), upserted read-only at startup. Never written to via any API route.
-- `validation_cache` — caches `thresholds.run()`'s output (`/validation`'s data source) for `VALIDATION_CACHE_TTL_HOURS`, since `run()` makes a real, slow GEE call.
-
-## Scheduler
-
-`src/scheduler.py`'s `refresh_grid()` job runs on `SCHEDULER_INTERVAL_MINUTES` (default 360 = 6h; satellite imagery doesn't update faster than that) and also fires once immediately at startup. Each site's refresh is independently guarded — a failure (network blip, `GEEAuthError`, anything) logs and marks that site's cache row `stale=True` with an `error` message, leaving every substantive field (including `fetched_at`) untouched, so a stale row never silently looks fresh.
-
-## Endpoints
-
-See `.claude/agents/backend-api.md` and `docs/FRONTEND_PLAN.md` §3 for the contract. Every response model carries a `disclaimer` field (enforced via Pydantic, visible in `/docs`). Detection (`detect()`) and prediction (`risk_level()`) fields are always kept in separate parts of the response shape — never merged into one score.
-
-## Current anomaly status
-
-The earlier `/watch-overlay` documentation described a proposal; this branch
-has no such route or implemented spectral-index anomaly overlay. `/detect`
-and the cached site/regional-scan endpoints expose real indices and actual
-scene dates, with `spatial_anomaly_z: null`. Detection verdicts, risk levels
-and scan tiers are not evaluated because no valid index baseline exists.
-All 14 validation events have `z_score_status: not_computed_no_valid_baseline`.
-The independent `/timeseries` `anomaly_z` remains the dimensionally valid
-comparison of MODIS `chlor_a` with a `chlor_a` baseline.
+No spectral-index anomaly statistic currently exists. Detection endpoints return
+real index values and actual scene dates with `spatial_anomaly_z: null`; risk
+levels and scan tiers are unavailable. `/timeseries` remains a separate,
+dimensionally valid comparison of MODIS `chlor_a` with a `chlor_a` baseline.

@@ -23,25 +23,6 @@ DISCLAIMER_TEXT = (
     "alone establish neither bloom presence nor absence."
 )
 
-# `/validation` needs an additional, separate caveat -- calibration status
-# is not the same claim as the pixel-resolution disclaimer above, and
-# CLAUDE.md is explicit that the two must not be blurred together.
-CALIBRATION_CAVEAT_TEXT = (
-    "Escalation thresholds in config.yaml are literature/convention defaults, "
-    "not calibrated against Thai events. Of the 14 documented events in "
-    "data/validation/events.csv, 7 carry a real human-confirmed coordinate "
-    "and 1 (th_010, Ang Sila) has produced a real satellite reading. The "
-    "other 13 cannot: 7 have no coordinate in any source, 4 predate "
-    "Sentinel-2's 2015 launch, 1 hit a coverage gap, 1 was entirely "
-    "cloud-covered. No valid spectral-index anomaly baseline exists, so "
-    "all 14 events cannot be evaluated, including th_010: its reading is "
-    "not a detection result or a miss. Thresholds remain uncalibrated and "
-    "inactive. This set is a record of documented blooms, not "
-    "evidence that detection works or that it fails -- results are reported "
-    "per-event, never as a percentage, because n=14 cannot support one."
-)
-
-
 class DisclaimerMixin(BaseModel):
     disclaimer: str = Field(
         default=DISCLAIMER_TEXT,
@@ -149,11 +130,7 @@ class RiskMapProperties(DisclaimerMixin):
     site_type: Literal["monitoring_grid"] = Field(
         default="monitoring_grid",
         description="Explicit, typed marker that this site is one of src/grid.py's "
-        "7 live-monitoring points, NOT a data/validation/events.csv historical event "
-        "-- some grid site names collide with (differently-coordinated) validated "
-        "event location names, e.g. grid site 'chaam' ('Cha-am coast, Phetchaburi', "
-        "12.75/100.05) vs. validated event th_004 ('Cha-am Coast, Phetchaburi', "
-        "12.794/99.984). Every /risk-map feature is a monitoring-grid site today, so "
+        "7 live-monitoring points. Every /risk-map feature is a monitoring-grid site, so "
         "this is currently a constant, but it's a real typed field (not a hardcoded "
         "frontend assumption) so it generalizes cleanly if this endpoint, or the "
         "SitePanel it feeds, ever surfaces a non-grid site type.",
@@ -303,79 +280,6 @@ class SummaryResponse(DisclaimerMixin):
     oldest_fetched_at: str | None
     newest_fetched_at: str | None
     prediction_confidence_label: str
-
-
-# --------------------------------------------------------------------------
-# /validation
-# --------------------------------------------------------------------------
-
-
-class ValidationEventRow(BaseModel):
-    """One row of the 14-event validation table. Never a percentage
-    anywhere in this model or its aggregation — reported per-event."""
-
-    event_id: str
-    date_display: str
-    location_name: str
-    location_precision: str
-    species: str
-    cell_count_raw: str | None
-    cell_count_representative: float | None
-    matchable: bool = Field(description="True only if events.csv itself carries a lat/lng.")
-    match_method: str | None
-    match_reason: str | None
-    low_evidentiary_weight: bool = Field(
-        description="th_012/th_013/th_014 — pre-monitoring-era, no cell count in any "
-        "source; shown for completeness, never averaged into a headline number with "
-        "the cell-count-bearing events."
-    )
-    index_used: str
-    spatial_anomaly_z: float | None = Field(
-        default=None, description="Not computed — no valid baseline exists."
-    )
-    z_score_status: Literal["not_computed_no_valid_baseline"] = "not_computed_no_valid_baseline"
-    reading_status: str | None = None
-    index_values: dict[str, float] | None = None
-    actual_date: str | None = Field(
-        default=None, description="Actual Sentinel-2 scene date for the index reading."
-    )
-    flagged: bool | None = Field(
-        description="Cannot be evaluated without a valid anomaly baseline. "
-        "Null for all 14 events, including th_010; not a miss."
-    )
-    notes: str
-
-    true_color_image_url: str | None = Field(
-        default=None, description="GET /satellite-image URL (true-color RGB PNG) for "
-        "this event's own coordinate and the actual Sentinel-2 scene date the matching "
-        "attempt used. Null unless `matchable` is true AND real index values "
-        "and an actual scene date exist. No anomaly score is required. Never a "
-        "placeholder image; becomes non-null automatically the moment an event "
-        "does produce one, no frontend change required."
-    )
-    ndci_heatmap_image_url: str | None = Field(
-        default=None, description="GET /satellite-image URL (NDCI heatmap PNG) for "
-        "this event. Same null rule as `true_color_image_url`."
-    )
-
-
-class LeaveOneOutRow(BaseModel):
-    iteration_label: str
-    held_out_event_ids: list[str]
-    caught: bool | None = Field(description="Null for every iteration: no valid "
-        "anomaly baseline exists, even when a held-out member has an index reading.")
-    reason: str
-
-
-class ValidationResponse(DisclaimerMixin):
-    calibration_status: Literal["uncalibrated"] = "uncalibrated"
-    calibration_caveat: str = Field(default=CALIBRATION_CAVEAT_TEXT)
-    n_events: int
-    n_matchable: int = Field(description="Events with a usable lat/lng in events.csv.")
-    n_with_real_satellite_reading: int
-    events: list[ValidationEventRow]
-    leave_one_out: list[LeaveOneOutRow]
-    computed_at: str = Field(description="When this (cached) calibration attempt was computed.")
 
 
 # --------------------------------------------------------------------------

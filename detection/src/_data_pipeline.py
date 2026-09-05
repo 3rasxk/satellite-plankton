@@ -105,7 +105,7 @@ get_rainfall_proxy = _dp.get_rainfall_proxy
 
 # Image rendering (data-pipeline/src/imagery.py) -- added for backend-api's
 # satellite-image endpoints (GET /satellite-image, /risk-map/{id}/image).
-# detection/src's own prediction.py/thresholds.py never call these (no
+# detection/src's prediction.py never calls these (no
 # detection/prediction logic uses rendered images, only numeric bands) --
 # re-exported here purely as a pass-through so backend/src/_detection.py
 # can reach them through this same bridge module rather than opening a

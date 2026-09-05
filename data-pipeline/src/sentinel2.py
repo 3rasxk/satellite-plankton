@@ -151,7 +151,7 @@ JRC_GSW_OCCURRENCE_BAND = "occurrence"
 #
 # Not all of it, though: JRC is also silent at some narrow near-shore
 # strips, and there ETOPO1 is at its worst. Live-checked 2026-09-05 at
-# Ang Sila (13.338, 100.925 -- validation event th_010): JRC returns
+# Ang Sila (13.338, 100.925): JRC returns
 # zero pixels in the 30 m buffer, and ETOPO1 averages +3.1 m across it
 # while still placing ~35% of it below sea level, because one ~1.85 km
 # cell straddles the shoreline. That buffer now yields a reading where it

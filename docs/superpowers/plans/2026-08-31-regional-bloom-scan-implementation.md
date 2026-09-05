@@ -68,7 +68,7 @@ Modified files:
 
 - [ ] **Step 1: Add the three ORM models to `backend/src/db_models.py`**
 
-Append after `ValidationCache`:
+Append after the existing cache models:
 
 ```python
 class RegionalScanRun(Base):
@@ -1402,7 +1402,7 @@ Expected: all tests still PASS (in particular `test_scheduler.py`, which also co
 ```python
 """
 Manual trigger for one regional scan, without waiting on the poll/
-cooldown cycle -- mirrors detection/src/generate_reports.py's manual-
+cooldown cycle -- provides a manual-
 trigger pattern (docs/superpowers/specs/2026-08-31-regional-scan-design.md
 §8). Makes real, live GEE calls -- up to ~500 Sentinel-2/MODIS reads,
 measured 1-3.6hr range (spec §2).
@@ -1457,7 +1457,7 @@ if __name__ == "__main__":
 - [ ] **Step 7: Smoke-check the script parses and imports cleanly (no live GEE call needed for this check)**
 
 Run: `cd backend && ./venv/bin/python -c "import ast; ast.parse(open('scripts/run_regional_scan.py').read())"`
-Expected: no output (parses cleanly). Do not run the script itself here — it makes real, slow GEE calls; that's a manual step for whoever has live GEE auth configured, same as `generate_reports.py`.
+Expected: no output (parses cleanly). Do not run the script itself here — it makes real, slow GEE calls; that is a manual step for whoever has live GEE auth configured.
 
 - [ ] **Step 8: Commit**
 
@@ -1727,16 +1727,16 @@ async def get_regional_scan(db: Session = Depends(get_db)) -> RegionalScanRespon
 Change the router import line:
 
 ```python
-from .routers import alerts, detect, regional_scan, risk_map, satellite, satellite_image, summary, timeseries, validation
+from .routers import alerts, detect, regional_scan, risk_map, satellite, satellite_image, summary, timeseries
 ```
 
-Add after `app.include_router(validation.router)`:
+Add alongside the existing router registrations:
 
 ```python
 app.include_router(regional_scan.router)
 ```
 
-Add `"/regional-scan"` to the `root()` route's `endpoints` list, after `"/validation"`:
+Add `"/regional-scan"` to the `root()` route's `endpoints` list:
 
 ```python
         "endpoints": [
@@ -1746,7 +1746,6 @@ Add `"/regional-scan"` to the `root()` route's `endpoints` list, after `"/valida
             "/detect",
             "/satellite-image",
             "/summary",
-            "/validation",
             "/regional-scan",
         ],
 ```
@@ -1785,7 +1784,7 @@ This is intentionally the lightest task in this plan — spec §10 scopes it as 
 
 - [ ] **Step 1: Add `getRegionalScan()` to `frontend/src/api/client.js`**
 
-Add after `getValidation()`:
+Add alongside the existing API helpers:
 
 ```javascript
 export async function getRegionalScan() {

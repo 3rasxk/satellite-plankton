@@ -1,7 +1,7 @@
 {
  "_meta": {
   "what": "Water/land ground truth for the 501-point regional-scan grid, used to test the Sentinel-2 buffer water mask. NOT a bloom-event dataset.",
-  "not_hab_events": "Unrelated to data/validation/events.csv. That file is the locked 14-event HAB validation set (CLAUDE.md 5). This file contains no bloom observations of any kind and is never used for threshold calibration.",
+  "not_hab_events": "This file contains no bloom observations and is used only for water-mask regression testing.",
   "grid": "generate_scan_grid(5) output, 501 points, 30 m sample buffer (DEFAULT_BUFFER_M) at 10 m scale -- the same geometry _resolve_sentinel2_scene samples.",
   "truth_source": "NDWI = (B3 - B8) / (B3 + B8), from each pixel's clearest observation in 2025-11-01..2026-04-30, selected by Cloud Score+ qualityMosaic on cs_cdf. is_water = ndwi > 0.",
   "why_not_scl": "Sentinel-2 SCL class 6 (WATER) was tried first and rejected: at points 4_9 and 5_9 (ETOPO1 -10 m, ~10 km offshore) the clearest observation is SCL 'thin cirrus', so class 6 is never assigned and an SCL-majority rule labels deep water as land. Measured NIR/green there: 0.03 and 0.00. NDWI is a physical contrast and does not depend on a per-scene classifier.",

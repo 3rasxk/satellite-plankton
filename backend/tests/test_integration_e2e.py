@@ -10,22 +10,14 @@ browser-driven test would, minus the actual pixels rendering, which was
 instead verified by hand with a live browser against a live-running
 backend (see root README.md's "Manual end-to-end verification" section).
 
-Three requirements this file is responsible for (root CLAUDE.md /
-.claude/agents/integration-docs.md, GATE 5):
+Two requirements this file is responsible for:
 
 1. `/risk-map` returns valid GeoJSON with `disclaimer` present on the
    collection and every feature -- test_disclaimer.py already checks
    `disclaimer` is present and non-empty; this file adds the GeoJSON
    *structural* checks (FeatureCollection/Feature/Point shape, coordinate
    order and plausible range) that file does not cover.
-2. `/validation` never emits a percentage and reports
-   `calibration_status: "uncalibrated"` -- already covered by
-   test_validation.py (Phase 3); this file does not duplicate that exact
-   check, but adds an OpenAPI-schema-level percentage/ratio-field audit
-   (a genuinely different angle: the *contract*, not just one response
-   instance) so a future field addition can't reintroduce a percentage
-   without a test noticing.
-3. `detect()`'s and `risk_level()`'s fields stay structurally separate
+2. `detect()`'s and `risk_level()`'s fields stay structurally separate
    all the way through satellite (mocked at the bridge boundary, same
    convention as test_gee_auth_503.py/test_scheduler.py) -> detection ->
    scheduler -> DB cache -> `/risk-map`/`/summary`, and satellite ->
@@ -35,8 +27,6 @@ Three requirements this file is responsible for (root CLAUDE.md /
 
 from __future__ import annotations
 
-import re
-
 from sqlalchemy import delete, select
 
 from src import _detection as bridge
@@ -45,8 +35,6 @@ from src.db import SessionLocal
 from src.db_models import DetectionCache, MonitoredSite
 from src.routers import detect as detect_router
 from src.scheduler import refresh_one_site
-
-_PERCENT_LIKE = re.compile(r"\d+(\.\d+)?\s*%")
 
 # Fields that would indicate detect()'s (high-confidence) and
 # risk_level()'s (rule-based, indicative) outputs had been merged into a
@@ -99,101 +87,7 @@ def test_risk_map_is_structurally_valid_geojson_with_disclaimer(client):
 
 
 # ---------------------------------------------------------------------------
-# 2. /validation -- schema-level percentage/ratio-field audit
-# ---------------------------------------------------------------------------
-
-
-def test_openapi_schema_never_declares_a_percentage_or_ratio_field(client):
-    """Contract-level check (distinct from test_validation.py's
-    response-instance check): walks the generated OpenAPI schema itself
-    -- every Pydantic model's declared field names, across the whole API,
-    not just one /validation response payload -- so a percentage/ratio
-    field added to *any* future schema (not only ValidationResponse) is
-    caught before it ships."""
-    resp = client.get("/openapi.json")
-    assert resp.status_code == 200
-    schema = resp.json()
-
-    banned_fragments = ("percent", "pct", "accuracy", "success_rate", "hit_rate", "recall")
-    schemas = schema.get("components", {}).get("schemas", {})
-    assert schemas, "OpenAPI schema unexpectedly has no component schemas"
-
-    offending = []
-    for model_name, model_def in schemas.items():
-        for field_name in model_def.get("properties", {}):
-            lowered = field_name.lower()
-            for fragment in banned_fragments:
-                if fragment in lowered:
-                    offending.append(f"{model_name}.{field_name}")
-
-    assert not offending, f"percentage/ratio-shaped field(s) found in OpenAPI schema: {offending}"
-
-
-def test_validation_response_is_uncalibrated_and_percentage_free(client, monkeypatch):
-    """Live smoke check that the actual /validation payload (not just the
-    schema) still holds both properties end to end, using the real
-    threshold_run() output SHAPE. The fixture is deliberately all-unmatched
-    (0/14) to exercise the empty-set path; that is NOT the current real
-    shape, which is 7 matchable and 1 with a real satellite reading
-    (th_010) as of 2026-09-05. Kept synthetic so this contract test does
-    not move whenever the real data does."""
-    from src.routers import validation as validation_router
-
-    def _fake_run() -> dict:
-        rows = [
-            {
-                "event_id": f"th_{i:03d}",
-                "date_display": "2020-01-01",
-                "location_name": "named place",
-                "location_precision": "named_site",
-                "species": "noctiluca_scintillans",
-                "cell_count": {"raw": None, "lower": None, "upper": None, "representative": None},
-                "matchable": False,
-                "match_method": "none",
-                "match_reason": "No lat/lng in events.csv.",
-                "low_weight": False,
-                "index_values": None,
-                "z_scores": None,
-                "z_score_status": "not_computed_no_valid_baseline",
-                "flagged": None,
-            }
-            for i in range(1, 15)
-        ]
-        return {
-            "config": {"indices": {"primary": "ndci"}},
-            "rows": rows,
-            "n_events": 14,
-            "n_matchable": 0,
-            "n_with_real_reading": 0,
-            "loo_results": [],
-        }
-
-    monkeypatch.setattr(validation_router.bridge, "threshold_run", _fake_run)
-
-    resp = client.get("/validation")
-    assert resp.status_code == 200
-    body = resp.json()
-
-    assert body["calibration_status"] == "uncalibrated"
-    assert body["n_events"] == 14
-
-    def _walk(obj):
-        if isinstance(obj, dict):
-            for v in obj.values():
-                yield from _walk(v)
-        elif isinstance(obj, list):
-            for v in obj:
-                yield from _walk(v)
-        else:
-            yield obj
-
-    for value in _walk(body):
-        if isinstance(value, str):
-            assert not _PERCENT_LIKE.search(value), f"percentage-shaped value: {value!r}"
-
-
-# ---------------------------------------------------------------------------
-# 3. detect() vs risk_level() -- structural separation through the full stack
+# 2. detect() vs risk_level() -- structural separation through the full stack
 # ---------------------------------------------------------------------------
 
 _TEST_SITE_ID = "pytest_e2e_separation_site"

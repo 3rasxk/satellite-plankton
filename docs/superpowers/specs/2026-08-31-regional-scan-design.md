@@ -180,7 +180,7 @@ tick is skipped rather than stacking.
 For manual testing without waiting on the poll/cooldown cycle, a small
 CLI script, **`backend/scripts/run_regional_scan.py`**, calls the same
 `run_scan()` the scheduler calls — mirrors the existing manual-trigger
-pattern in `detection/src/generate_reports.py`.
+pattern used by other manual operational scripts.
 
 New env-overridable constants in `backend/src/config.py`, following the
 existing `SCHEDULER_INTERVAL_MINUTES` convention:
@@ -253,5 +253,5 @@ field on every response) exists to prevent.
 Revisit if, once this design is running in production, real observed
 behavior (rate-limit errors, an actual need for sub-hour freshness) shows
 it is needed — evidence over projection, the same stance this project
-already takes on the "no ML, no usable labels" and "0/14 events reported
-honestly" decisions.
+already takes on the "no ML, no usable labels" and "report limited
+evidence honestly" decisions.

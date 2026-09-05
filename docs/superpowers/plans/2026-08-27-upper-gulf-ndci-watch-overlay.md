@@ -17,7 +17,7 @@
 - Preserve the dirty frontend worktree and edit only task-related lines. Do not revert the user's map bounds, True Color default, panel removal, or size changes.
 - Keep `STUDY_AREA_POLYGON_LATLNG` unchanged. The larger scan geometry is a separate constant.
 - Keep data-pipeline, detection, and backend as separate projects and preserve the current namespaced `importlib` bridges.
-- Do not add the watch overlay to `risk_level()`, `/risk-map`, `/summary`, or the 14-event validation calculation.
+- Do not add the watch overlay to `risk_level()`, `/risk-map`, or `/summary`.
 - Do not use trend, SST, rainfall, species inference, or cell-density estimates in this overlay.
 - Do not reuse `NdciRasterOverlay.jsx`; it is illustrative noise, not satellite evidence.
 - Do not make a live Earth Engine call from `GET /watch-overlay` or from a browser reload.

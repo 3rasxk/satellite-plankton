@@ -53,11 +53,6 @@ export async function getSummary() {
   return data
 }
 
-export async function getValidation() {
-  const { data } = await client.get('/validation')
-  return data
-}
-
 export async function getRegionalScan() {
   const { data } = await client.get('/regional-scan')
   return data

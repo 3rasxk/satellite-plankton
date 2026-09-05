@@ -1,5 +1,5 @@
 import { useApi } from '../hooks/useApi.js'
-import { getValidation, getMeta } from '../api/client.js'
+import { getMeta } from '../api/client.js'
 import Icon from '../components/Icon.jsx'
 
 /**
@@ -7,8 +7,7 @@ import Icon from '../components/Icon.jsx'
  *
  * Combines export actions (presentational — no download backend yet),
  * service status (partially real: GEE/FastAPI from GET /, others
- * presentational), scan history (presentational), and the existing
- * validation dataset callout (real data from /validation).
+ * presentational), and scan history (presentational).
  *
  * Export buttons are intentionally presentational per current scope —
  * they render but don't fire downloads. The service-status section
@@ -17,7 +16,6 @@ import Icon from '../components/Icon.jsx'
  * fabricating a status that has no backing endpoint.
  */
 export default function ReportsPage() {
-  const validation = useApi(getValidation, [])
   const meta = useApi(getMeta, [])
 
   const apiConnected = !!meta.data && !meta.error
@@ -35,13 +33,6 @@ export default function ReportsPage() {
       icon: 'chart',
       title: 'ข้อมูลค่าอ่านล่าสุด (CSV)',
       detail: 'ค่า NDCI และสถานะข้อมูลรายจุด — ยังไม่มีค่าความผิดปกติที่ถูกต้อง',
-      action: 'ดาวน์โหลด CSV',
-    },
-    {
-      id: 'events_csv',
-      icon: 'clipboard',
-      title: '14-Event Reference Dataset (CSV)',
-      detail: 'ข้อมูลเหตุการณ์สาหร่ายพิษ 14 เหตุการณ์ จาก Luang-on et al. (2023) และแหล่งอื่น',
       action: 'ดาวน์โหลด CSV',
     },
     {
@@ -86,8 +77,6 @@ export default function ReportsPage() {
   const SCAN_HISTORY = [
     { time: '—', message: 'ยังไม่มีบันทึกการสแกน (ข้อมูลตัวอย่าง)' },
   ]
-
-  const v = validation.data
 
   return (
     <div className="page">
@@ -157,49 +146,6 @@ export default function ReportsPage() {
           </div>
         </section>
       </div>
-
-      {/* Validation dataset callout */}
-      <section className="summary-section">
-        <div className="section-title">ชุดข้อมูลอ้างอิง — เหตุการณ์สาหร่ายพิษในอดีต</div>
-
-        {validation.loading && (
-          <div className="state-panel">
-            <h3>กำลังโหลดข้อมูล…</h3>
-          </div>
-        )}
-
-        {validation.error && (
-          <div className="state-panel error">
-            <h3>ไม่สามารถเชื่อมต่อบริการข้อมูลได้</h3>
-            <button type="button" className="retry-btn" onClick={validation.refetch}>
-              ลองอีกครั้ง
-            </button>
-          </div>
-        )}
-
-        {v && (
-          <div className="validation-callout">
-            <span className="headline">
-              {v.n_matchable} จาก {v.n_events} เหตุการณ์ มีพิกัดแม่นยำพอจะเทียบกับค่าอ่านดาวเทียม
-            </span>
-            <p>{v.calibration_caveat}</p>
-            <div className="match-counts">
-              <div className="match-count">
-                <span className="n mono">{v.n_events}</span>
-                <span className="label">เหตุการณ์ที่บันทึก</span>
-              </div>
-              <div className="match-count">
-                <span className="n mono">{v.n_matchable}</span>
-                <span className="label">มีพิกัดใช้ได้</span>
-              </div>
-              <div className="match-count">
-                <span className="n mono">6</span>
-                <span className="label">สายพันธุ์แพลงก์ตอน</span>
-              </div>
-            </div>
-          </div>
-        )}
-      </section>
     </div>
   )
 }

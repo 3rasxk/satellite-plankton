@@ -350,10 +350,8 @@ button {
   font-weight: 600;
 }
 
-/* Distinguishes a live monitoring-grid site (src/grid.py, "today's"
-   reading) from a validated historical event (data/validation/events.csv,
-   /validation page) -- some grid site names closely match a validated
-   event's name at a different coordinate. Deliberately styled with the
+/* Marks a live monitoring-grid site (src/grid.py, "today's" reading).
+   Deliberately styled with the
    neutral --no-data/--no-data-line tokens, not a risk-tier colour
    (tokens.css: the risk tokens mean chlorophyll concentration and
    nothing else, never used decoratively) -- this badge is chrome, not a
@@ -917,8 +915,7 @@ button {
   font-size: 11px;
 }
 
-/* Compact variant — used inline in the validation table, one row per
-   event, so the image reads as a thumbnail, not a full panel image. */
+/* Compact thumbnail variant. */
 .satellite-image-block.compact {
   min-width: 140px;
 }
@@ -1062,11 +1059,7 @@ button {
   gap: 10px;
 }
 
-/* ---------------------------------------------------------------------- */
-/* Validation page                                                        */
-/* ---------------------------------------------------------------------- */
-
-.validation-callout {
+.info-callout {
   border: 1px solid rgba(var(--risk-watch-rgb), 0.4);
   background: rgba(var(--risk-watch-rgb), 0.06);
   border-radius: var(--radius-lg);
@@ -1076,43 +1069,17 @@ button {
   gap: 8px;
 }
 
-.validation-callout .headline {
+.info-callout .headline {
   font-family: var(--font-display);
   font-size: var(--fs-20);
   font-weight: 600;
 }
 
-.validation-callout p {
+.info-callout p {
   color: var(--text-secondary);
   font-size: var(--fs-14);
   margin: 0;
   max-width: 820px;
-}
-
-.match-counts {
-  display: flex;
-  gap: 24px;
-  flex-wrap: wrap;
-}
-
-.match-count {
-  display: flex;
-  flex-direction: column;
-}
-
-.match-count .n {
-  font-family: var(--font-mono);
-  font-size: var(--fs-28);
-  color: var(--text);
-}
-
-.match-count .label {
-  font-family: var(--font-body);
-  font-weight: 500;
-  font-size: 12px;
-  color: var(--text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
 }
 
 .table-scroll {
@@ -1399,7 +1366,7 @@ table.events-table td.mono {
 
 /* Regional-scan last-scanned/status banner -- absolute map overlay,
    sibling to map-date-pill/RiskLegend/MapControls (RegionalScanBanner.jsx).
-   Reuses .validation-callout's box chrome (border/background/radius/
+   Reuses the shared callout box chrome (border/background/radius/
    padding/layout) for the caveat + disclaimer text; only position/sizing
    and the small status row below are new, per spec §10's "reuse an
    existing pattern" instruction. */
