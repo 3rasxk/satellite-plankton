@@ -85,6 +85,9 @@ async def get_regional_scan(db: Session = Depends(get_db)) -> RegionalScanRespon
                 cell_count=c.cell_count, mean_anomaly_z=c.mean_anomaly_z,
                 max_anomaly_z=c.max_anomaly_z, threshold_tier=c.threshold_tier,
                 member_point_ids=c.member_point_ids,
+                oldest_scene_date=c.oldest_scene_date,
+                newest_scene_date=c.newest_scene_date,
+                scene_date_span_days=c.scene_date_span_days,
             )
             for c in clusters
         ],

@@ -96,6 +96,23 @@ export default function RegionalScanLayer({ data }) {
       : `scene ${scene} · ${magnitude} ${unit} after scan date`
   }
 
+  // A cluster is built from grid adjacency alone, never from dates, so its
+  // member cells can come from Sentinel-2 scenes days apart (measured spans
+  // within one scan: 7, 5 and 10 days). Always state the range -- a wide-span
+  // cluster is still shown in full, but never as one undifferentiated pin
+  // implying a single date (spec §12).
+  const clusterSceneLine = (cluster) => {
+    const oldest = cluster.oldest_scene_date?.slice(0, 10)
+    const newest = cluster.newest_scene_date?.slice(0, 10)
+    const span = cluster.scene_date_span_days
+    // All three are null together when any member cell had no usable scene
+    // date. Say so; never fall back to the run date or to one member's.
+    if (!oldest || !newest || typeof span !== 'number') return 'scene date range unknown'
+    if (span === 0) return `all from ${oldest}`
+    const unit = span === 1 ? 'day' : 'days'
+    return `scenes ${oldest} to ${newest} (${span} ${unit} span)`
+  }
+
   return (
     <>
       {clusters.map((cluster, i) => (
@@ -116,6 +133,9 @@ export default function RegionalScanLayer({ data }) {
             </div>
             <div style={{ fontSize: '11.5px', marginTop: '2px', color: '#1d1d1f' }}>
               mean anomaly_z {cluster.mean_anomaly_z.toFixed(2)} · max {cluster.max_anomaly_z.toFixed(2)}
+            </div>
+            <div style={{ fontSize: '11px', marginTop: '2px', color: '#6e6e73' }}>
+              {clusterSceneLine(cluster)}
             </div>
           </Tooltip>
         </CircleMarker>

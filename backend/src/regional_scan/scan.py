@@ -132,6 +132,12 @@ def run_scan(
                         "point_id": point["point_id"], "lat": point["lat"], "lng": point["lng"],
                         "row_idx": point["row_idx"], "col_idx": point["col_idx"],
                         "anomaly_z": result["anomaly_z"], "threshold_tier": tier,
+                        # Adjacency alone decides membership, so a cluster can
+                        # merge cells backed by scenes days apart. Carrying each
+                        # member's own scene date in lets cluster_points report
+                        # that spread per cluster instead of hiding it under one
+                        # undifferentiated pin (spec §12).
+                        "actual_date": result.get("actual_date"),
                     }
                 )
     except bridge.GEEAuthError as exc:

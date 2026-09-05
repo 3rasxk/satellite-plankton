@@ -218,3 +218,22 @@ class RegionalScanCluster(Base):
     max_anomaly_z: Mapped[float] = mapped_column(Float)
     threshold_tier: Mapped[str] = mapped_column(String)  # elevated|warning
     member_point_ids: Mapped[list] = mapped_column(JSON)
+    # This cluster's scene-freshness range, from its members' own
+    # RegionalScanPoint.actual_date values (spec §12). Members are merged
+    # by grid adjacency alone, never by date, and a single scan's points
+    # are routinely backed by Sentinel-2 scenes several days apart
+    # (measured spans of 7, 5 and 10 days), so a cluster genuinely can
+    # mix vintages -- these columns state by how much rather than leaving
+    # one pin to imply a single date.
+    #
+    # Note `RegionalScanRun.newest_scene_date` above is a DIFFERENT
+    # quantity that happens to share a name: that one is the triggering
+    # poll's max scene timestamp for the whole run (a full ISO
+    # timestamp). This one is a date-only max over one cluster's members.
+    #
+    # All three are null together, and only together, when any member has
+    # no usable scene date -- never partially filled, never backfilled
+    # from the run's `date_used` (see clustering._scene_date_range).
+    oldest_scene_date: Mapped[str | None] = mapped_column(String, nullable=True)
+    newest_scene_date: Mapped[str | None] = mapped_column(String, nullable=True)
+    scene_date_span_days: Mapped[int | None] = mapped_column(Integer, nullable=True)

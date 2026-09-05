@@ -220,3 +220,88 @@ def test_regional_scan_point_schema_documents_actual_date(client):
     prop = schema["components"]["schemas"]["RegionalScanPointSchema"]["properties"]
     assert "actual_date" in prop
     assert "description" in prop["actual_date"]
+
+
+def test_regional_scan_serves_cluster_scene_date_range(client):
+    """A cluster is built from grid adjacency alone, never from dates, so
+    its cells can come from Sentinel-2 scenes days apart. The endpoint
+    must state that range rather than let one pin imply a single date."""
+    db = SessionLocal()
+    try:
+        run = RegionalScanRun(
+            started_at=datetime(2026, 9, 2, 6, 0, 0, tzinfo=timezone.utc),
+            completed_at=datetime(2026, 9, 2, 6, 5, 0, tzinfo=timezone.utc),
+            status="ok", grid_spacing_km=5.0, date_used="2026-09-02",
+            newest_scene_date="2026-09-01T10:00:00+00:00", total_points=4,
+            count_ok=4, count_no_imagery=0, count_no_water_pixels=0,
+            count_no_climatology=0, count_error=0,
+        )
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+
+        # A mixed-vintage cluster: 10 days between its two cells, the
+        # worst span measured in a real scan (2026-06-15).
+        db.add(RegionalScanCluster(
+            run_id=run.id, centroid_lat=13.2, centroid_lng=100.6, cell_count=2,
+            mean_anomaly_z=2.45, max_anomaly_z=2.5, threshold_tier="warning",
+            member_point_ids=["30_0", "30_1"],
+            oldest_scene_date="2026-08-23", newest_scene_date="2026-09-02",
+            scene_date_span_days=10,
+        ))
+        # A single-vintage cluster: span 0 is a real statement, not "unknown".
+        db.add(RegionalScanCluster(
+            run_id=run.id, centroid_lat=13.4, centroid_lng=100.8, cell_count=2,
+            mean_anomaly_z=1.7, max_anomaly_z=1.8, threshold_tier="elevated",
+            member_point_ids=["31_0", "31_1"],
+            oldest_scene_date="2026-09-01", newest_scene_date="2026-09-01",
+            scene_date_span_days=0,
+        ))
+        # Range unknown: a member had no usable scene date, so all three
+        # are null together -- never partially filled.
+        db.add(RegionalScanCluster(
+            run_id=run.id, centroid_lat=13.6, centroid_lng=100.9, cell_count=2,
+            mean_anomaly_z=1.9, max_anomaly_z=2.0, threshold_tier="elevated",
+            member_point_ids=["32_0", "32_1"],
+            oldest_scene_date=None, newest_scene_date=None,
+            scene_date_span_days=None,
+        ))
+        db.commit()
+
+        body = client.get("/regional-scan").json()
+        # The table also holds clusters seeded by earlier tests in this
+        # file, so look these up by their distinctive members.
+        served = {
+            tuple(sorted(c["member_point_ids"])): c for c in body["clusters"]
+        }
+
+        spanning = served[("30_0", "30_1")]
+        assert spanning["oldest_scene_date"] == "2026-08-23"
+        assert spanning["newest_scene_date"] == "2026-09-02"
+        assert spanning["scene_date_span_days"] == 10
+        # Shown in full -- a wide span is labelled, never suppressed.
+        assert spanning["cell_count"] == 2
+
+        same_day = served[("31_0", "31_1")]
+        assert same_day["scene_date_span_days"] == 0
+        assert same_day["oldest_scene_date"] == same_day["newest_scene_date"] == "2026-09-01"
+
+        unknown = served[("32_0", "32_1")]
+        assert unknown["oldest_scene_date"] is None
+        assert unknown["newest_scene_date"] is None
+        assert unknown["scene_date_span_days"] is None
+        # Never substituted with the run's requested target date.
+        assert unknown["newest_scene_date"] != body["run"]["date_used"]
+    finally:
+        db.close()
+
+
+def test_regional_scan_cluster_schema_documents_scene_date_range(client):
+    """OpenAPI must describe all three range fields -- a span is
+    misleading without the caveat that adjacency, not date, decides
+    membership."""
+    schema = client.get("/openapi.json").json()
+    prop = schema["components"]["schemas"]["RegionalScanClusterSchema"]["properties"]
+    for field in ("oldest_scene_date", "newest_scene_date", "scene_date_span_days"):
+        assert field in prop, f"{field} missing from RegionalScanClusterSchema"
+        assert prop[field].get("description"), f"{field} has no description"

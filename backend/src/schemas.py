@@ -418,6 +418,31 @@ class RegionalScanClusterSchema(BaseModel):
     max_anomaly_z: float
     threshold_tier: Literal["elevated", "warning"]
     member_point_ids: list[str]
+    oldest_scene_date: str | None = Field(
+        default=None, description="Oldest Sentinel-2 scene date among this "
+        "cluster's member cells (YYYY-MM-DD). Cells are merged by grid "
+        "adjacency alone, never by date, so one cluster can mix scene "
+        "vintages — measured spans within a single scan were 7, 5 and 10 "
+        "days. Null (together with `newest_scene_date` and "
+        "`scene_date_span_days`) when any member has no usable scene date; "
+        "never backfilled from the run's `date_used`, which is a requested "
+        "target date and not a scene date."
+    )
+    newest_scene_date: str | None = Field(
+        default=None, description="Newest Sentinel-2 scene date among this "
+        "cluster's member cells (YYYY-MM-DD). Not the same quantity as the "
+        "run-level `newest_scene_date`, which is the triggering poll's max "
+        "scene timestamp for the whole scan. Null under the same "
+        "all-or-nothing rule as `oldest_scene_date`."
+    )
+    scene_date_span_days: int | None = Field(
+        default=None, description="Whole days between `oldest_scene_date` and "
+        "`newest_scene_date`; 0 when every member cell came from one scene "
+        "date. A wide span is reported, never suppressed — the cluster is "
+        "still shown in full, because splitting or filtering it on freshness "
+        "would invent a spatial boundary no measurement supports. Null under "
+        "the same all-or-nothing rule as `oldest_scene_date`."
+    )
 
 
 class RegionalScanRunMeta(BaseModel):
