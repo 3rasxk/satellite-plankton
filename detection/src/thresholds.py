@@ -531,7 +531,16 @@ def leave_one_out(rows: list[dict], config: dict, matched_pairs: list[dict]) -> 
         member_notes = []
         for eid in held_out_ids:
             if eid in matched_by_id:
-                member_notes.append(f"{eid}: real z={matched_by_id[eid]['z']:.3f}")
+                # The qualifier travels with the claim: this string is rendered
+                # verbatim in reports/event_table.md and in the frontend's
+                # "Would have been missed -- {reason}" line, where a bare z
+                # would read as a measured failure rather than one event.
+                species = rows_by_id.get(eid, {}).get("species") or "unknown species"
+                member_notes.append(
+                    f"{eid}: real z={matched_by_id[eid]['z']:.3f} "
+                    f"(species {species}; a single matched event, not an accuracy "
+                    f"figure -- see LIMITATIONS.md 1 for the qualifiers that apply)"
+                )
                 continue
             r = rows_by_id.get(eid, {})
             if not r.get("matchable"):

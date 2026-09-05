@@ -198,7 +198,7 @@ trend:
 # docstring and never overridden per-call. Published ML forecasting has
 # reached ~96% accuracy at 8-day lead time (docs/DETECTION_PLAN.md §3);
 # this rule-based layer is not claimed to be comparable, and with only 14
-# validation events (0 of which could be matched to real satellite data,
-# see status note above), no lead-time accuracy figure is computed or
-# reported anywhere in this codebase.
+# validation events (1 of which has produced a real satellite reading --
+# not a calibration set, see status note above), no lead-time accuracy
+# figure is computed or reported anywhere in this codebase.
 prediction_confidence_label: "indicative, rule-based -- not a validated forecast"

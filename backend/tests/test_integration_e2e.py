@@ -132,9 +132,11 @@ def test_openapi_schema_never_declares_a_percentage_or_ratio_field(client):
 def test_validation_response_is_uncalibrated_and_percentage_free(client, monkeypatch):
     """Live smoke check that the actual /validation payload (not just the
     schema) still holds both properties end to end, using the real
-    threshold_run() output shape returned by this build (0/14 matchable)
-    -- mirrors the real, documented finding rather than an arbitrary
-    fixture."""
+    threshold_run() output SHAPE. The fixture is deliberately all-unmatched
+    (0/14) to exercise the empty-set path; that is NOT the current real
+    shape, which is 7 matchable and 1 with a real satellite reading
+    (th_010) as of 2026-09-05. Kept synthetic so this contract test does
+    not move whenever the real data does."""
     from src.routers import validation as validation_router
 
     def _fake_run() -> dict:

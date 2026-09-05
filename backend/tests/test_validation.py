@@ -1,7 +1,8 @@
 """GET /validation must never emit a percentage anywhere in its response
 body (CLAUDE.md truth boundary: n=14 cannot support a percentage claim),
 and `calibration_status` must read "uncalibrated" -- the real, live
-finding from Phase 2 (0/14 events have a coordinate precise enough to
+synthetic all-unmatched fixture -- NOT the current real shape (0/14
+events having a coordinate precise enough to
 match a satellite reading).
 
 `bridge.threshold_run()` makes a real, slow GEE call (the th_001
@@ -21,10 +22,12 @@ _PERCENT_LIKE = re.compile(r"\d+(\.\d+)?\s*%")
 
 
 def _fake_threshold_run_result() -> dict:
-    """Mirrors the real, documented outcome: 14 events, 0 matchable (no
-    events.csv row has a lat/lng), 0 with a real satellite reading (the
-    one live attempt, th_001's regional proxy, returned no usable
-    scene)."""
+    """All-unmatched fixture: 14 events, 0 matchable, 0 with a real
+    satellite reading. This exercises the empty-set code path; it is NOT
+    the current real shape. As of 2026-09-05 the live run returns 7
+    matchable and 1 with a real reading (th_010) -- see
+    detection/reports/event_table.md. Kept synthetic on purpose so these
+    router tests do not move whenever the real data does."""
     rows = []
     for i in range(1, 15):
         event_id = f"th_{i:03d}"

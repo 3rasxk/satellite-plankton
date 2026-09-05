@@ -84,7 +84,7 @@ satellite-data ──► bloom-detection
 - [ ] Sentinel-2 + MODIS pipeline pulling real data for the upper Gulf
 - [ ] All three indices implemented, with per-event results published for the 14 documented events — a record, not a pass/fail gate (§0)
 - [ ] MODIS climatology built, anomaly z-scores computed
-- [ ] Leave-one-out calibration **attempted and its outcome reported honestly**: 1 of 14 matchable, so no calibration is possible and thresholds stay literature defaults
+- [ ] Leave-one-out calibration **attempted and its outcome reported honestly**: 7 of 14 are matchable (carry a coordinate), but only 1 of 14 has produced a real satellite reading, so no calibration is possible and thresholds stay literature defaults
 - [ ] Rule-based prediction layer with every rule readable in config
 - [ ] Web: map + click-to-chart + summary page
 - [ ] LIMITATIONS.md states the truth boundary; no percentage claims on n=14; no overclaiming

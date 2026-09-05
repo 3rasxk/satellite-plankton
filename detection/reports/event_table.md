@@ -70,7 +70,7 @@ Per `data/validation/CALIBRATION_NOTES.md` §1, th_005/th_006/th_007 (Aug 2019 C
 | th_013 | th_013 | n/a (could not run) | No real satellite reading available for any member of this held-out unit. th_013: no coordinate in events.csv |
 | th_014 | th_014 | n/a (could not run) | No real satellite reading available for any member of this held-out unit. th_014: coordinate present, no usable Sentinel-2 reading (no_imagery) |
 | chonburi_aug2019 | th_005, th_006, th_007 | n/a (could not run) | No real satellite reading available for any member of this held-out unit. th_005: no coordinate in events.csv | th_006: coordinate present, no usable Sentinel-2 reading (no_imagery) | th_007: no coordinate in events.csv |
-| chonburi_feb2020 | th_009, th_010 | no | Evaluated against default (uncalibrated) cutoff z>=1.5. th_009: no coordinate in events.csv | th_010: real z=-4.503. Cluster rule: caught if ANY matchable member's z crosses the cutoff (same physical event, not independent trials). |
+| chonburi_feb2020 | th_009, th_010 | no | Evaluated against default (uncalibrated) cutoff z>=1.5. th_009: no coordinate in events.csv | th_010: real z=-4.503 (species karenia_sp; a single matched event, not an accuracy figure -- see LIMITATIONS.md 1 for the qualifiers that apply). Cluster rule: caught if ANY matchable member's z crosses the cutoff (same physical event, not independent trials). |
 
 ## Reading this table honestly
 
