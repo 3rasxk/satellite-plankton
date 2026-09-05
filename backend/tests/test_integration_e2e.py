@@ -294,7 +294,23 @@ def test_risk_map_keeps_detection_and_prediction_as_separate_fields_through_sche
         assert resp.status_code == 200
         body = resp.json()
 
-        feature = next(f for f in body["features"] if f["properties"]["site_id"] == _TEST_SITE_ID)
+        # `next()` needs a default here. Without one it raises StopIteration
+        # when the seeded site is missing, and pytest's rewriting of the
+        # generator's comparison then reports the LAST site_id it happened to
+        # test against -- e.g. "assert 'siracha' == 'pytest_e2e_separation_site'",
+        # which reads as a real grid site behaving wrongly when the actual
+        # fault is that this test's own site never reached /risk-map at all.
+        # That misdirection cost real debugging time; fail with the truth
+        # instead. (The intermittent cause -- the seeded row not being visible
+        # to the request's session -- is a separate, still-open issue.)
+        feature = next(
+            (f for f in body["features"] if f["properties"]["site_id"] == _TEST_SITE_ID),
+            None,
+        )
+        assert feature is not None, (
+            f"/risk-map did not include the seeded site {_TEST_SITE_ID!r}. "
+            f"Returned site_ids: {[f['properties']['site_id'] for f in body['features']]}"
+        )
         props = feature["properties"]
 
         # Detection: high-confidence remote sensing, traceable to the mock.

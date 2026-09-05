@@ -11,8 +11,8 @@ e.g. Chonburi/Bang Saen) -- not tied to any historical bloom's exact
 pixel, because (per Phase 2's finding) no historical event's location is
 precise enough to derive one.
 
-Six points, live-tested against real Sentinel-2/MODIS during this build
-(2026-08-22, detect() at date 2024-03-15):
+Seven points. Five of them were live-tested against real Sentinel-2/MODIS
+during this build (2026-08-22, detect() at date 2024-03-15):
   - bangsaen              -> no_imagery on that date (no cloud-free S2 scene
                               in the search window -- a real, expected gap)
   - siracha                -> no_water_pixels (buffer catches shoreline/
@@ -21,10 +21,17 @@ Six points, live-tested against real Sentinel-2/MODIS during this build
                               too few archive observations at this river-
                               mouth point)
   - chaophraya_mouth       -> ok (real anomaly_z returned)
-  - upper_gulf_open_water  -> ok (real anomaly_z returned) -- same point
-                              used as one of the two th_001 regional-proxy
-                              candidates in thresholds.py
   - chaam                  -> ok (real anomaly_z returned)
+
+bangpakong_mouth and pattaya were added later (commit b15af00) and were
+NOT part of that 2026-08-22 live test -- no per-site result is claimed
+for them here rather than one being assumed from the others.
+
+A sixth site, upper_gulf_open_water, was in this grid when the list above
+was written and has since been removed. thresholds.py still defines its
+own upper_gulf_open_water_1/_2 regional-proxy coordinates for th_001;
+those are hardcoded there and never read from this module, so they are
+unaffected by that removal.
 
 Keeping the non-'ok' points in the grid deliberately, rather than swapping
 in easier coordinates until everything reads 'ok': this is the honest
