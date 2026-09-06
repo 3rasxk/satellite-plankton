@@ -300,7 +300,9 @@ class RegionalScanPointSchema(BaseModel):
     point_id: str
     lat: float
     lng: float
-    status: Literal["ok", "no_imagery", "no_water_pixels", "no_climatology", "error"]
+    status: Literal["ok", "no_imagery", "no_water_pixels", "no_climatology", "error", "no_data_yet"] = Field(
+        description="no_data_yet marks a planned sampling location with no cached reading."
+    )
     index_values: dict[str, float] | None = None
     spatial_anomaly_z: float | None = Field(
         default=None, description="Not computed — no valid baseline exists."
@@ -381,8 +383,13 @@ class RegionalScanRunMeta(BaseModel):
 
 class RegionalScanResponse(DisclaimerMixin):
     caveat: str = Field(default=REGIONAL_SCAN_CAVEAT_TEXT)
+    grid_spacing_km: float = Field(description="Spacing of the displayed cached or planned grid.")
     run: RegionalScanRunMeta | None = Field(
-        default=None, description="Null only if no regional scan has completed yet."
+        default=None, description="Latest scan attempt; null if no scan has started."
     )
-    points: list[RegionalScanPointSchema] = []
+    points: list[RegionalScanPointSchema] = Field(
+        default_factory=list,
+        description="Every cached scan point, without threshold filtering. Before any "
+        "readings are cached, the planned grid is returned with no_data_yet and null values.",
+    )
     clusters: list[RegionalScanClusterSchema] = []

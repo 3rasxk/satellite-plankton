@@ -7,19 +7,67 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import pytest
+
 from src.db import SessionLocal
 from src.db_models import RegionalScanCluster, RegionalScanPoint, RegionalScanRun
+from src.regional_scan.grid import generate_scan_grid
+from src import config
 
 
-def test_regional_scan_empty_state_before_any_run(client):
+def test_regional_scan_shows_planned_grid_before_any_run(client, monkeypatch):
+    from src import _detection as bridge
+
+    def forbid_live_read(*args, **kwargs):
+        raise AssertionError("The map geometry endpoint must not fetch imagery")
+
+    monkeypatch.setattr(bridge, "detect", forbid_live_read)
     resp = client.get("/regional-scan")
     assert resp.status_code == 200
     body = resp.json()
     assert body["run"] is None
-    assert body["points"] == []
+    grid = generate_scan_grid(config.REGIONAL_SCAN_GRID_SPACING_KM)
+    assert len(body["points"]) == len(grid)
+    assert body["grid_spacing_km"] == config.REGIONAL_SCAN_GRID_SPACING_KM
+    assert [(p["point_id"], p["lat"], p["lng"]) for p in body["points"]] == [
+        (p["point_id"], p["lat"], p["lng"]) for p in grid
+    ]
+    assert all(p["status"] == "no_data_yet" for p in body["points"])
+    assert all(
+        p["index_values"] is None and p["actual_date"] is None
+        and p["spatial_anomaly_z"] is None and p["threshold_tier"] is None
+        for p in body["points"]
+    )
+    with SessionLocal() as db:
+        assert db.query(RegionalScanRun).count() == 0
+        assert db.query(RegionalScanPoint).count() == 0
     assert body["clusters"] == []
     assert "disclaimer" in body
     assert "caveat" in body
+
+
+@pytest.mark.parametrize("status", ["running", "error"])
+def test_first_scan_without_a_snapshot_still_shows_the_whole_grid(client, status):
+    with SessionLocal() as db:
+        run = RegionalScanRun(
+            started_at=datetime(2026, 8, 30, 6, 0, tzinfo=timezone.utc),
+            status=status, grid_spacing_km=5.0, date_used="2026-08-30",
+            total_points=501,
+        )
+        db.add(run)
+        db.commit()
+        try:
+            body = client.get("/regional-scan").json()
+            assert body["run"]["run_id"] == run.id
+            assert body["run"]["status"] == status
+            assert len(body["points"]) == 501
+            assert body["grid_spacing_km"] == 5.0
+            assert all(p["status"] == "no_data_yet" for p in body["points"])
+            assert all(p["index_values"] is None and p["actual_date"] is None for p in body["points"])
+            assert db.query(RegionalScanPoint).count() == 0
+        finally:
+            db.delete(run)
+            db.commit()
 
 
 def test_regional_scan_returns_latest_run_points_and_clusters(client):
@@ -128,7 +176,7 @@ def test_regional_scan_serves_last_good_clusters_when_latest_run_aborted(client)
         aborted_run = RegionalScanRun(
             started_at=datetime(2026, 8, 31, 12, 0, 0, tzinfo=timezone.utc),
             completed_at=datetime(2026, 8, 31, 12, 0, 5, tzinfo=timezone.utc),
-            status="error", grid_spacing_km=5.0, date_used="2026-08-31",
+            status="error", grid_spacing_km=10.0, date_used="2026-08-31",
             newest_scene_date="2026-08-30T10:00:00+00:00", total_points=2,
             count_ok=0, count_no_imagery=0, count_no_water_pixels=0,
             count_no_climatology=0, count_error=0,
@@ -144,6 +192,9 @@ def test_regional_scan_serves_last_good_clusters_when_latest_run_aborted(client)
         # The latest run (by started_at) is the aborted one.
         assert body["run"]["run_id"] == aborted_run.id
         assert body["run"]["status"] == "error"
+        # Label the displayed snapshot's spacing, not the failed attempt's.
+        assert body["run"]["grid_spacing_km"] == 10.0
+        assert body["grid_spacing_km"] == 5.0
 
         # Points are correctly unfiltered -- the last-good snapshot's rows
         # are still present (table also carries rows from earlier tests in

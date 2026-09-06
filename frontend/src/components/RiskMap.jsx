@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo } from 'react'
+import { Fragment, useEffect, useMemo, useRef } from 'react'
 import { MapContainer, TileLayer, CircleMarker, ZoomControl, useMap, Tooltip } from 'react-leaflet'
 import { 
   RISK_COLOR_HEX, 
@@ -46,18 +46,22 @@ function BoundsZoomLock() {
   return null
 }
 
-function FitToFeatures({ features }) {
+function FitToPoints({ points, features }) {
   const map = useMap()
-  useMemo(() => {
-    if (!features || features.length === 0) return
-    const bounds = features.map((f) => [f.geometry.coordinates[1], f.geometry.coordinates[0]])
+  const fitted = useRef(false)
+  useEffect(() => {
+    if (fitted.current) return
+    const bounds = points?.length
+      ? points.map((point) => [point.lat, point.lng])
+      : features.map((feature) => [feature.geometry.coordinates[1], feature.geometry.coordinates[0]])
+    if (bounds.length === 0) return
     if (bounds.length === 1) {
       map.setView(bounds[0], UPPER_GULF_ZOOM)
     } else {
       map.fitBounds(bounds, { padding: [60, 60] })
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [features])
+    fitted.current = true
+  }, [map, points, features])
   return null
 }
 
@@ -84,7 +88,7 @@ function makeAccessible(layer, label, onActivate) {
   })
 }
 
-export default function RiskMap({ featureCollection, onSelectSite = () => {}, mode = 'risk', children }) {
+export default function RiskMap({ featureCollection, fitPoints, onSelectSite = () => {}, mode = 'risk', children }) {
   // Every configured monitoring site stays visible. Alert colours remain
   // reserved for evaluated tiers; null risk uses the neutral marker below.
   const features = useMemo(
@@ -113,7 +117,7 @@ export default function RiskMap({ featureCollection, onSelectSite = () => {}, mo
         maxNativeZoom={19}
         maxZoom={18}
       />
-      <FitToFeatures features={features} />
+      <FitToPoints points={fitPoints} features={features} />
       {features.map((feature) => {
         const [lng, lat] = feature.geometry.coordinates
         const props = feature.properties

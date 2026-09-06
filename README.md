@@ -81,6 +81,14 @@ Once running:
 - API: http://localhost:8000 (interactive docs at `/docs`)
 - Dashboard: http://localhost:5173 (watch `scripts/dev.sh`'s own log output for the actual port Vite picked)
 
+The dashboard opens on the full upper-Gulf sampling grid (501 points at the
+default 5 km spacing), without threshold filtering. Click any pin for all four
+available indices, its status, and its actual scene date. Before a scan has
+saved results, the grid is still visible with `no_data_yet` and null readings;
+the browser checks the cache every 30 seconds, without triggering imagery
+requests. The seven named monitoring stations are an optional layer, off by
+default, not validation events.
+
 If you'd rather run the two processes by hand instead of the script (e.g. to see each one's logs in its own terminal):
 
 ```bash
@@ -96,7 +104,7 @@ cd frontend && npm run dev
 ```bash
 cd data-pipeline && ./venv/bin/python -m pytest tests/ -q   # 82 tests
 cd detection      && ./venv/bin/python -m pytest tests/ -q   # 59 tests
-cd backend        && ./venv/bin/python -m pytest tests/ -q   # 127 tests
+cd backend        && ./venv/bin/python -m pytest tests/ -q   # 129 tests
 cd frontend       && npm test
 ```
 
@@ -108,7 +116,11 @@ The stack has been manually exercised against real Earth Engine-backed data. Aut
 
 ## What's not automated
 
-Frontend tests currently cover map bounds and visibility of unevaluated monitoring pins. Component-level interaction coverage remains limited, so UI changes still require a browser check against the running API.
+Frontend tests cover map bounds, unevaluated monitoring pins, and rendering all
+regional grid statuses and per-point readings. Regional components are rendered
+with only the browser-dependent Leaflet/API boundaries stubbed; real map
+interaction coverage remains limited, so UI changes still need a browser check
+against the running API.
 
 ## Design decisions, locked
 

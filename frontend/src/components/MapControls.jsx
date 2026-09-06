@@ -1,6 +1,6 @@
 const MODES = [
   { value: 'true_color', label: 'True Color (RGB)' },
-  { value: 'risk', label: 'Risk Map' },
+  { value: 'risk', label: 'แผนที่ถนน' },
 ]
 
 /** Floating glass segmented control switching RiskMap's `mode` prop. */

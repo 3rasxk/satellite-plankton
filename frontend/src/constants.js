@@ -213,11 +213,9 @@ export function formatConfidence(label) {
 
 // ---- Regional scan layer (GET /regional-scan) --------------------------
 // Interim render: the regional scan currently publishes index readings
-// only. `threshold_tier` is null on every point of the latest run (the
-// anomaly cutoffs in detection/src/config.yaml are UNCALIBRATED, and no
-// point cleared them), so RegionalScanLayer gates on a real index value
-// instead and paints it with the neutral ramp below — never with
-// RISK_COLOR_HEX, which means a published risk tier and nothing else.
+// only. Every grid point is drawn, including no-data states. The neutral
+// ramp shades actual index magnitudes; no valid anomaly statistic exists,
+// so threshold_tier never decides whether a point is visible.
 
 // The index detect() treats as primary — detection/src/config.yaml
 // `indices.primary: ndci`. RegionalScanPointSchema returns `index_values`

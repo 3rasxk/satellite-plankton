@@ -1364,12 +1364,8 @@ table.events-table td.mono {
   gap: 7px;
 }
 
-/* Regional-scan last-scanned/status banner -- absolute map overlay,
-   sibling to map-date-pill/RiskLegend/MapControls (RegionalScanBanner.jsx).
-   Reuses the shared callout box chrome (border/background/radius/
-   padding/layout) for the caveat + disclaimer text; only position/sizing
-   and the small status row below are new, per spec §10's "reuse an
-   existing pattern" instruction. */
+/* Regional grid status and raw-index legend, separate from map controls.
+   Keep long caveats scrollable instead of covering the whole map. */
 .regional-scan-banner {
   position: absolute;
   bottom: 14px;
@@ -1380,6 +1376,38 @@ table.events-table td.mono {
   gap: 6px;
   background: rgba(255, 255, 255, 0.94);
   backdrop-filter: blur(8px);
+  max-height: 45%;
+  overflow-y: auto;
+}
+
+.regional-layer-controls {
+  top: 68px;
+  left: 16px;
+}
+
+.regional-point-readings {
+  min-width: 210px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.regional-point-readings dl {
+  margin: 6px 0;
+}
+
+.regional-point-readings dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.regional-point-readings dd {
+  margin: 0;
+}
+
+.regional-scan-point:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
 }
 
 .regional-scan-banner .headline {

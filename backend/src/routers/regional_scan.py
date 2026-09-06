@@ -11,9 +11,10 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..config import as_aware_utc
+from ..config import REGIONAL_SCAN_GRID_SPACING_KM, as_aware_utc
 from ..db import get_db
 from ..db_models import RegionalScanCluster, RegionalScanPoint, RegionalScanRun
+from ..regional_scan.grid import generate_scan_grid
 from ..schemas import (
     RegionalScanClusterSchema,
     RegionalScanPointSchema,
@@ -30,10 +31,27 @@ async def get_regional_scan(db: Session = Depends(get_db)) -> RegionalScanRespon
         select(RegionalScanRun).order_by(RegionalScanRun.started_at.desc())
     ).scalars().first()
 
-    if latest_run is None:
-        return RegionalScanResponse(run=None, points=[], clusters=[])
-
     points = db.execute(select(RegionalScanPoint)).scalars().all()
+    # An aborted/running attempt can leave an older, differently spaced
+    # snapshot on screen. Describe the coordinates actually being served.
+    grid_run = db.get(RegionalScanRun, points[0].run_id) if points else latest_run
+    grid_spacing_km = (
+        grid_run.grid_spacing_km if grid_run else REGIONAL_SCAN_GRID_SPACING_KM
+    )
+    # Planned sampling coordinates are real geometry, not satellite readings.
+    # Make the whole grid visible even before the first scan commits. Never
+    # store these placeholders or invent an index, scene date, or scan run.
+    planned_points = [] if points else [
+        RegionalScanPointSchema(
+            point_id=point["point_id"], lat=point["lat"], lng=point["lng"],
+            status="no_data_yet",
+        )
+        for point in generate_scan_grid(grid_spacing_km)
+    ]
+    if latest_run is None:
+        return RegionalScanResponse(
+            run=None, points=planned_points, clusters=[], grid_spacing_km=grid_spacing_km,
+        )
     # No run_id filter here either -- RegionalScanCluster is documented in
     # db_models.py as a whole-table latest-snapshot, same category as
     # RegionalScanPoint above ("deleted and reinserted whole each run"),
@@ -53,6 +71,7 @@ async def get_regional_scan(db: Session = Depends(get_db)) -> RegionalScanRespon
     clusters = db.execute(select(RegionalScanCluster)).scalars().all()
 
     return RegionalScanResponse(
+        grid_spacing_km=grid_spacing_km,
         run=RegionalScanRunMeta(
             run_id=latest_run.id,
             started_at=as_aware_utc(latest_run.started_at).isoformat(),
@@ -78,7 +97,7 @@ async def get_regional_scan(db: Session = Depends(get_db)) -> RegionalScanRespon
                 threshold_tier=p.threshold_tier, actual_date=p.actual_date,
             )
             for p in points
-        ],
+        ] or planned_points,
         clusters=[
             RegionalScanClusterSchema(
                 centroid_lat=c.centroid_lat, centroid_lng=c.centroid_lng,

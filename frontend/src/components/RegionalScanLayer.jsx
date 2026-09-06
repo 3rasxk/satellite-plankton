@@ -1,206 +1,87 @@
-import { Fragment, useMemo } from 'react'
-import { CircleMarker, Tooltip } from 'react-leaflet'
+import { useMemo } from 'react'
+import { CircleMarker, Popup, Tooltip } from 'react-leaflet'
 import {
-  RISK_COLOR_HEX,
-  NO_DATA_HEX,
-  NO_DATA_LINE_HEX,
-  REGIONAL_PRIMARY_INDEX,
-  REGIONAL_INDEX_LABEL,
-  regionalIndexDomain,
-  regionalIndexColor,
-  formatIndexValue,
+  NO_DATA_HEX, NO_DATA_LINE_HEX, REGIONAL_PRIMARY_INDEX, REGIONAL_INDEX_LABEL,
+  regionalIndexDomain, regionalIndexColor, formatIndexValue,
 } from '../constants.js'
 
-/**
- * Full-polygon regional bloom scan overlay (backend GET /regional-scan) --
- * a distinct layer from RiskMap.jsx's 7-site monitoring grid, per spec
- * §0/§10: does not touch or replace that grid or any of its markers.
- * Renders real NDCI/2BDA/3BDA values in each pin's popup -- never a
- * colored dot with no data behind it (no-fabrication rule, §0).
- * Must be rendered inside a react-leaflet <MapContainer>.
- *
- * Interim render (index values only). The previous version gated every
- * pin on `point.threshold_tier` and coloured it from RISK_COLOR_HEX.
- * `threshold_tier` is null because no valid anomaly baseline exists.
- * The former cross-unit statistic has been removed. Gating on a
- * real primary-index value instead makes the scan's actual output
- * visible, and the neutral --regional-index-* ramp keeps it honest: the
- * shade means "this pixel's NDCI reading, relative to the rest of this
- * scan", not a risk tier. See RegionalScanBanner.jsx for the matching
- * on-map wording and legend.
- *
- * Status handling, per status field (never merged into one colour):
- *   ok / no_climatology -> real index_values, drawn on the neutral ramp
- *   no_imagery          -> small hollow grey marker (nothing was seen)
- *   no_water_pixels     -> not drawn (177 of 501 on the latest run;
- *                          drawing them would bury the readings under
- *                          land/cloud-masked cells)
- *   error               -> not drawn (no index_values to show)
+const EMPTY_POINTS = []
+const POINT_STATUS = {
+  ok: 'มีค่าอ่านดาวเทียม',
+  no_data_yet: 'ยังไม่ได้สแกน',
+  no_imagery: 'ไม่มีภาพที่ผ่านเกณฑ์เมฆในช่วงค้นหา',
+  no_water_pixels: 'ไม่พบพิกเซลน้ำที่ใช้ได้ในจุดตัวอย่าง',
+  no_climatology: 'ไม่มีข้อมูลฐาน MODIS — แสดงดัชนีที่อ่านได้',
+  error: 'อ่านข้อมูลจุดนี้ไม่สำเร็จ',
+}
+
+function PointReadings({ point }) {
+  return (
+    <div className="regional-point-readings">
+      <strong>จุดกริด {point.point_id}</strong>
+      <div className="mono">{point.lat.toFixed(4)}°N, {point.lng.toFixed(4)}°E</div>
+      <div>{POINT_STATUS[point.status] || point.status}</div>
+      <dl>
+        {Object.entries(REGIONAL_INDEX_LABEL).map(([key, label]) => (
+          <div key={key}>
+            <dt>{label}</dt>
+            <dd className="mono">{formatIndexValue(point.index_values?.[key])}</dd>
+          </div>
+        ))}
+      </dl>
+      <div>วันที่ภาพจริง: <span className="mono">{point.actual_date || 'ยังไม่มีวันที่ภาพ'}</span></div>
+      <div>ค่าดัชนีเท่านั้น — ยังไม่มีการประเมินความผิดปกติ</div>
+    </div>
+  )
+}
+
+/** Every API point gets one pin, irrespective of status, threshold or cluster.
+ * Missing readings stay null. Popup values and dates come from that cached
+ * point; clicking does not silently fetch a different date's observation.
  */
 export default function RegionalScanLayer({ data }) {
-  const clusters = data?.clusters || []
-  const points = data?.points || []
+  const points = data?.points || EMPTY_POINTS
+  const domain = useMemo(() => regionalIndexDomain(points), [points])
 
-  // Points already covered by a cluster are shown once, via the
-  // cluster marker -- avoids stacking a cluster circle directly on top
-  // of its own single-point members.
-  const clusteredPointIds = useMemo(
-    () => new Set(clusters.flatMap((c) => c.member_point_ids)),
-    [clusters],
-  )
-  const indexPoints = useMemo(
-    () =>
-      points.filter(
-        (p) =>
-          typeof p.index_values?.[REGIONAL_PRIMARY_INDEX] === 'number' &&
-          !clusteredPointIds.has(p.point_id),
-      ),
-    [points, clusteredPointIds],
-  )
-  const noImageryPoints = useMemo(
-    () => points.filter((p) => p.status === 'no_imagery'),
-    [points],
-  )
-  const domain = useMemo(() => regionalIndexDomain(indexPoints), [indexPoints])
-
-  if (!data?.run) return null
-
-  const run = data.run
-  // Run-level fallback only, for points with no scene date of their own.
-  // Neither run-level date is any particular pin's scene: date_used is the
-  // target date handed to detect(), and newest_scene_date is a poll-level
-  // measurement -- both are the same string for all 501 pins. So label this
-  // as the scan target date and never as a scene date.
-  const runFallbackLine = run.date_used ? `scan target date ${run.date_used}` : null
-
-  // This pin's own Sentinel-2 scene. get_sentinel2_bands resolves the
-  // nearest cloud-free scene within ±10 days, so a single scan is routinely
-  // backed by scenes several days apart from each other -- show each pin's
-  // real vintage and its offset instead of implying one scan-wide date.
-  const sceneLineFor = (point) => {
-    const actual = point.actual_date
-    if (!actual) return runFallbackLine
-    const scene = actual.slice(0, 10)
-    if (!run.date_used || scene === run.date_used) return `scene ${scene}`
-    const offsetDays = Math.round(
-      (Date.parse(`${run.date_used}T00:00:00Z`) - Date.parse(`${scene}T00:00:00Z`)) / 86400000,
+  return points.map((point) => {
+    const primary = point.index_values?.[REGIONAL_PRIMARY_INDEX]
+    const hasPrimary = Number.isFinite(primary)
+    return (
+      <CircleMarker
+        key={point.point_id}
+        center={[point.lat, point.lng]}
+        radius={hasPrimary ? 6 : 4}
+        pathOptions={{
+          color: hasPrimary ? '#ffffff' : NO_DATA_LINE_HEX,
+          weight: 1,
+          dashArray: hasPrimary ? undefined : '2,2',
+          fillColor: hasPrimary ? regionalIndexColor(primary, domain) : NO_DATA_HEX,
+          fillOpacity: hasPrimary ? 0.9 : 0.3,
+          className: 'regional-scan-point',
+        }}
+        eventHandlers={{
+          add: ({ target }) => {
+            const element = target.getElement?.()
+            if (!element) return
+            element.setAttribute('tabindex', '0')
+            element.setAttribute('role', 'button')
+            // The same marker survives polling. Keep this label stable;
+            // the popup renders the current status and readings reactively.
+            element.setAttribute('aria-label', `จุดกริด ${point.point_id}: เปิดค่าดัชนี สถานะ และวันที่ภาพจริง`)
+            element.addEventListener('keydown', (event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault()
+                target.openPopup()
+              }
+            })
+          },
+        }}
+      >
+        <Tooltip direction="top" offset={[0, -8]} opacity={0.95}>
+          <PointReadings point={point} />
+        </Tooltip>
+        <Popup><PointReadings point={point} /></Popup>
+      </CircleMarker>
     )
-    // Unparseable date: show the scene, never a made-up offset.
-    if (!Number.isFinite(offsetDays) || offsetDays === 0) return `scene ${scene}`
-    const magnitude = Math.abs(offsetDays)
-    const unit = magnitude === 1 ? 'day' : 'days'
-    // The search window is ±10 days, so a scene can also post-date the scan.
-    return offsetDays > 0
-      ? `scene ${scene} · ${magnitude} ${unit} before scan date`
-      : `scene ${scene} · ${magnitude} ${unit} after scan date`
-  }
-
-  // A cluster is built from grid adjacency alone, never from dates, so its
-  // member cells can come from Sentinel-2 scenes days apart (measured spans
-  // within one scan: 7, 5 and 10 days). Always state the range -- a wide-span
-  // cluster is still shown in full, but never as one undifferentiated pin
-  // implying a single date (spec §12).
-  const clusterSceneLine = (cluster) => {
-    const oldest = cluster.oldest_scene_date?.slice(0, 10)
-    const newest = cluster.newest_scene_date?.slice(0, 10)
-    const span = cluster.scene_date_span_days
-    // All three are null together when any member cell had no usable scene
-    // date. Say so; never fall back to the run date or to one member's.
-    if (!oldest || !newest || typeof span !== 'number') return 'scene date range unknown'
-    if (span === 0) return `all from ${oldest}`
-    const unit = span === 1 ? 'day' : 'days'
-    return `scenes ${oldest} to ${newest} (${span} ${unit} span)`
-  }
-
-  return (
-    <>
-      {clusters.map((cluster, i) => (
-        <CircleMarker
-          key={`cluster-${i}`}
-          center={[cluster.centroid_lat, cluster.centroid_lng]}
-          radius={Math.min(10 + cluster.cell_count * 2, 40)}
-          pathOptions={{
-            color: RISK_COLOR_HEX[cluster.threshold_tier],
-            weight: 1.5,
-            fillColor: RISK_COLOR_HEX[cluster.threshold_tier],
-            fillOpacity: 0.35,
-          }}
-        >
-          <Tooltip direction="top" offset={[0, -10]} opacity={0.95}>
-            <div style={{ fontWeight: 600, fontSize: '13px' }}>
-              Cluster of {cluster.cell_count} cells
-            </div>
-            <div style={{ fontSize: '11.5px', marginTop: '2px', color: '#1d1d1f' }}>
-              mean spatial_anomaly_z {cluster.mean_spatial_anomaly_z?.toFixed(2) ?? '—'} · max {cluster.max_spatial_anomaly_z?.toFixed(2) ?? '—'}
-            </div>
-            <div style={{ fontSize: '11px', marginTop: '2px', color: '#6e6e73' }}>
-              {clusterSceneLine(cluster)}
-            </div>
-          </Tooltip>
-        </CircleMarker>
-      ))}
-      {noImageryPoints.map((point) => (
-        <CircleMarker
-          key={`no-imagery-${point.point_id}`}
-          center={[point.lat, point.lng]}
-          radius={3}
-          pathOptions={{
-            color: NO_DATA_LINE_HEX,
-            weight: 1,
-            // Visually hollow, but still a filled path: SVG hit-testing
-            // under pointer-events: visiblePainted ignores the interior of
-            // a fill="none" shape, which would leave this 3px marker
-            // hoverable only exactly on its 1px ring. fillOpacity 0 keeps
-            // it transparent while keeping the disc hoverable.
-            fillColor: NO_DATA_HEX,
-            fillOpacity: 0,
-          }}
-        >
-          <Tooltip direction="top" offset={[0, -5]} opacity={0.95}>
-            <div style={{ fontSize: '11.5px' }}>No satellite pass — nothing measured here</div>
-          </Tooltip>
-        </CircleMarker>
-      ))}
-      {indexPoints.map((point) => {
-        const primary = point.index_values[REGIONAL_PRIMARY_INDEX]
-        const others = Object.entries(point.index_values).filter(
-          ([key, value]) => key !== REGIONAL_PRIMARY_INDEX && typeof value === 'number',
-        )
-        const sceneLine = sceneLineFor(point)
-        return (
-          <Fragment key={point.point_id}>
-            <CircleMarker
-              center={[point.lat, point.lng]}
-              radius={6}
-              pathOptions={{
-                color: '#ffffff',
-                weight: 1,
-                fillColor: regionalIndexColor(primary, domain),
-                fillOpacity: 0.85,
-              }}
-            >
-              <Tooltip direction="top" offset={[0, -8]} opacity={0.95}>
-                <div style={{ fontWeight: 600, fontSize: '12.5px' }}>
-                  {REGIONAL_INDEX_LABEL[REGIONAL_PRIMARY_INDEX]} {formatIndexValue(primary)}
-                </div>
-                {others.length > 0 && (
-                  <div style={{ fontSize: '11.5px', marginTop: '2px' }}>
-                    {others
-                      .map(([key, value]) => `${REGIONAL_INDEX_LABEL[key] || key} ${formatIndexValue(value)}`)
-                      .join(' · ')}
-                  </div>
-                )}
-                {sceneLine && (
-                  <div style={{ fontSize: '11px', marginTop: '2px', color: '#6e6e73' }}>{sceneLine}</div>
-                )}
-                <div style={{ fontSize: '11px', marginTop: '2px', color: '#6e6e73' }}>
-                  Not computed — no valid baseline exists
-                </div>
-              </Tooltip>
-            </CircleMarker>
-          </Fragment>
-        )
-      })}
-    </>
-  )
+  })
 }
