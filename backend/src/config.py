@@ -99,6 +99,15 @@ REGIONAL_SCAN_COOLDOWN_HOURS: int = int(os.environ.get("REGIONAL_SCAN_COOLDOWN_H
 # equally to the regional scan, /detect and the scheduler's site cache.
 # backend reads the effective value through src/_detection.py rather than
 # keeping a second copy that could disagree with the one actually used.
+# How long a run left in status='running' is believed before a new scan
+# treats it as dead and proceeds. Two scans writing the same
+# RegionalScanPoint rows interleave their upserts and each delete the
+# other's clusters, so run_scan refuses to start alongside a live one --
+# but a process killed mid-scan leaves that row 'running' forever, and
+# without an expiry every later scan would be blocked by a ghost. A full
+# 5 km scan of the Thai-side Gulf measures ~3.1 h, so 6 h is roughly
+# double the longest legitimate run.
+REGIONAL_SCAN_STALE_RUN_HOURS: int = int(os.environ.get("REGIONAL_SCAN_STALE_RUN_HOURS", "6"))
 # Lookback window for the poll's own Sentinel-2 metadata query (spec §5) --
 # bounds the filterDate() query cost; does not affect the cooldown/trigger
 # decision itself (that compares timestamps, not window length).

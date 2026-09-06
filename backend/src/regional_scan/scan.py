@@ -6,6 +6,14 @@ point, and persists real spectral indices and scene dates. No valid
 anomaly baseline exists yet, so every score/tier is null and no point
 can be sent to clustering.
 
+Only one scan may run at a time. Two concurrent runs upsert the same
+`RegionalScanPoint` rows by `point_id`, so the table would end up a
+last-writer-wins mixture of two runs while `/regional-scan` reported it
+under one run's metadata, and each run's end-of-scan cleanup deletes the
+other's clusters. The scheduler's own cooldown (20 h) already made this
+impossible on its path, but `scripts/run_regional_scan.py` bypasses the
+cooldown entirely -- so the guard lives here, where both paths pass.
+
 GEEAuthError aborts the entire run (status='error') without touching
 whatever RegionalScanPoint/RegionalScanCluster rows a prior successful
 run already wrote -- it means the whole pipeline is unusable, not that
@@ -25,6 +33,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import _detection as bridge
+from ..config import REGIONAL_SCAN_STALE_RUN_HOURS, as_aware_utc
 from ..db_models import RegionalScanCluster, RegionalScanPoint, RegionalScanRun
 from .clustering import cluster_points
 from .grid import generate_scan_grid
@@ -32,11 +41,58 @@ from .grid import generate_scan_grid
 logger = logging.getLogger("backend.regional_scan.scan")
 
 
+class ConcurrentScanError(RuntimeError):
+    """Another scan is already in progress, so this one refused to start.
+
+    Not a failure of the running scan and not a data error -- the caller
+    should wait for the live run rather than retry. Raised before any row
+    is written, so a refused call leaves the database untouched.
+    """
+
+
+def _refuse_if_a_scan_is_already_running(db: Session, now: datetime) -> None:
+    """Guard against concurrent runs; expire a run that is stuck.
+
+    A run still marked 'running' after REGIONAL_SCAN_STALE_RUN_HOURS is
+    presumed dead (its process was killed, or the host restarted mid-scan)
+    and is marked 'error' so it stops blocking every future scan and stops
+    being served as an in-progress run. Anything younger than that is
+    treated as genuinely live and this raises.
+    """
+    active = db.execute(
+        select(RegionalScanRun)
+        .where(RegionalScanRun.status == "running")
+        .order_by(RegionalScanRun.started_at.desc())
+    ).scalars().first()
+    if active is None:
+        return
+
+    age_hours = (now - as_aware_utc(active.started_at)).total_seconds() / 3600
+    if age_hours < REGIONAL_SCAN_STALE_RUN_HOURS:
+        raise ConcurrentScanError(
+            f"regional scan {active.id} has been running for {age_hours:.1f}h "
+            f"({active.total_points} points, started {active.started_at}). "
+            "Two scans would overwrite each other's points and clusters. "
+            "Wait for it to finish, or pass allow_concurrent=True "
+            "(scripts/run_regional_scan.py --force) if you are certain it is dead."
+        )
+
+    logger.warning(
+        "regional_scan: run %s still 'running' after %.1fh (> %dh) -- presuming it "
+        "died and marking it error so this scan can proceed",
+        active.id, age_hours, REGIONAL_SCAN_STALE_RUN_HOURS,
+    )
+    active.status = "error"
+    active.completed_at = now
+    db.commit()
+
+
 def run_scan(
     db: Session,
     target_date: str,
     grid_spacing_km: float,
     newest_scene_date: str | None = None,
+    allow_concurrent: bool = False,
 ) -> RegionalScanRun:
     """Run one full regional scan and persist its results.
 
@@ -51,11 +107,22 @@ def run_scan(
             comparison baseline (spec §5/§6). None for a manually
             triggered run (backend/scripts/run_regional_scan.py) that
             didn't go through the poll.
+        allow_concurrent: skip the one-scan-at-a-time guard. Only for a
+            caller that knows the other run is dead -- concurrent runs
+            corrupt each other's points (see the module docstring).
 
     Returns:
         The persisted RegionalScanRun row (status='ok', 'partial_error',
         or 'error').
+
+    Raises:
+        ConcurrentScanError: another scan is already running and
+            `allow_concurrent` is False. Nothing is written.
     """
+    now = datetime.now(timezone.utc)
+    if not allow_concurrent:
+        _refuse_if_a_scan_is_already_running(db, now)
+
     grid = generate_scan_grid(grid_spacing_km)
     run = RegionalScanRun(
         started_at=datetime.now(timezone.utc),

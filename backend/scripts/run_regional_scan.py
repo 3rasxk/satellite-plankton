@@ -22,7 +22,7 @@ if str(_BACKEND_DIR) not in sys.path:
 
 from src.config import REGIONAL_SCAN_GRID_SPACING_KM, today_str  # noqa: E402
 from src.db import SessionLocal, init_db  # noqa: E402
-from src.regional_scan.scan import run_scan  # noqa: E402
+from src.regional_scan.scan import ConcurrentScanError, run_scan  # noqa: E402
 
 
 def main() -> None:
@@ -32,13 +32,25 @@ def main() -> None:
         "--spacing-km", type=float, default=REGIONAL_SCAN_GRID_SPACING_KM,
         help=f"grid spacing in km (default {REGIONAL_SCAN_GRID_SPACING_KM})",
     )
+    parser.add_argument(
+        "--force", action="store_true",
+        help="start even if another scan is marked running (only when you know it is dead -- "
+             "two live scans overwrite each other's points)",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     init_db()
     db = SessionLocal()
     try:
-        run = run_scan(db, args.date or today_str(), args.spacing_km)
+        try:
+            run = run_scan(
+                db, args.date or today_str(), args.spacing_km,
+                allow_concurrent=args.force,
+            )
+        except ConcurrentScanError as exc:
+            print(f"refusing to start: {exc}", file=sys.stderr)
+            sys.exit(2)
         print(
             f"run {run.id}: status={run.status} total_points={run.total_points} "
             f"ok={run.count_ok} no_imagery={run.count_no_imagery} "

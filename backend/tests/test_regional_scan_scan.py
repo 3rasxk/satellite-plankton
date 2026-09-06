@@ -4,6 +4,9 @@ happens (mirrors backend/tests/test_scheduler.py's pattern)."""
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
+import pytest
 from sqlalchemy import select
 
 from src import regional_scan
@@ -337,3 +340,113 @@ def test_scan_keeps_index_reading_without_climatology_through_endpoint(client, m
         for point in body["points"]
     )
     assert body["clusters"] == []
+
+
+# --------------------------------------------------------------------------
+# One scan at a time.
+#
+# Two runs upsert the same RegionalScanPoint rows by point_id, so a
+# concurrent pair leaves the table a last-writer-wins mixture of both
+# while /regional-scan reports it under one run's metadata, and each
+# run's end-of-scan cleanup deletes the other's clusters. The scheduler's
+# 20h cooldown already prevented this on its own path; scripts/
+# run_regional_scan.py bypasses the cooldown, which is how it happened.
+# --------------------------------------------------------------------------
+
+
+def _running_run(started_at, total_points=9119):
+    return RegionalScanRun(
+        started_at=started_at, completed_at=None, status="running",
+        grid_spacing_km=5.0, date_used="2026-09-06", total_points=total_points,
+        count_ok=0, count_no_imagery=0, count_no_water_pixels=0,
+        count_no_climatology=0, count_error=0,
+    )
+
+
+def _clear_running_rows(db):
+    """Tests in this module share one SQLite file, and a row left in
+    'running' would block every later run_scan call. Each test below
+    starts from a known-clean slate and removes its own fixture row."""
+    for row in db.execute(
+        select(RegionalScanRun).where(RegionalScanRun.status == "running")
+    ).scalars().all():
+        db.delete(row)
+    db.commit()
+
+
+def _run_ids(db):
+    return {r.id for r in db.execute(select(RegionalScanRun)).scalars().all()}
+
+
+def test_a_second_scan_refuses_to_start_while_one_is_running(client, monkeypatch):
+    """Refused before anything is written: no new run row, no point rows,
+    and detect() never called for even one point."""
+    calls = []
+
+    def _detect(lat, lng, date):
+        calls.append((lat, lng))
+        return {"status": "ok", "index_used": "ndci",
+                "index_values": {"ndci": 0.3}, "reason": None}
+
+    monkeypatch.setattr(scan_module.bridge, "detect", _detect)
+    with SessionLocal() as db:
+        _clear_running_rows(db)
+        live = _running_run(datetime.now(timezone.utc) - timedelta(minutes=45))
+        db.add(live)
+        db.commit()
+        live_id = live.id
+        runs_before = _run_ids(db)
+        points_before = len(db.execute(select(RegionalScanPoint)).scalars().all())
+
+        with pytest.raises(scan_module.ConcurrentScanError) as excinfo:
+            scan_module.run_scan(db, "2026-09-06", grid_spacing_km=100.0)
+
+        assert str(live_id) in str(excinfo.value)
+        assert calls == []
+        assert _run_ids(db) == runs_before, "a refused scan must not create a run row"
+        assert len(db.execute(select(RegionalScanPoint)).scalars().all()) == points_before
+        db.refresh(live)
+        assert live.status == "running", "the live run must be left alone"
+
+        _clear_running_rows(db)
+
+
+def test_a_run_stuck_running_past_the_stale_window_is_expired_and_taken_over(client, monkeypatch):
+    """A killed process leaves its row 'running' forever. Without an
+    expiry that ghost would block every future scan, so a run older than
+    REGIONAL_SCAN_STALE_RUN_HOURS is marked error and the new scan
+    proceeds."""
+    monkeypatch.setattr(scan_module.bridge, "detect", _fake_detect_all_ok_indices)
+    with SessionLocal() as db:
+        _clear_running_rows(db)
+        stale_age = scan_module.REGIONAL_SCAN_STALE_RUN_HOURS + 1
+        ghost = _running_run(datetime.now(timezone.utc) - timedelta(hours=stale_age))
+        db.add(ghost)
+        db.commit()
+        ghost_id = ghost.id
+
+        run = scan_module.run_scan(db, "2026-09-06", grid_spacing_km=100.0)
+
+        assert run.id != ghost_id
+        assert run.status == "ok"
+        db.refresh(ghost)
+        assert ghost.status == "error"
+        assert ghost.completed_at is not None, "an expired run must not stay open-ended"
+
+
+def test_allow_concurrent_bypasses_the_guard(client, monkeypatch):
+    """The escape hatch behind scripts/run_regional_scan.py --force, for
+    a caller who knows the other run is dead."""
+    monkeypatch.setattr(scan_module.bridge, "detect", _fake_detect_all_ok_indices)
+    with SessionLocal() as db:
+        _clear_running_rows(db)
+        db.add(_running_run(datetime.now(timezone.utc)))
+        db.commit()
+
+        run = scan_module.run_scan(
+            db, "2026-09-06", grid_spacing_km=100.0, allow_concurrent=True,
+        )
+        assert run.status == "ok"
+        assert run.count_ok == run.total_points > 0
+
+        _clear_running_rows(db)

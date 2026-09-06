@@ -23,7 +23,7 @@ from ..config import (
 )
 from ..db import SessionLocal
 from ..db_models import RegionalScanRun
-from .scan import run_scan
+from .scan import ConcurrentScanError, run_scan
 
 logger = logging.getLogger("backend.regional_scan.trigger")
 
@@ -84,7 +84,13 @@ def poll_and_maybe_scan() -> None:
             return
 
         logger.info("regional_scan poll: triggering full scan (newest_scene_date=%s)", newest_scene_date)
-        run_scan(db, today_str(), REGIONAL_SCAN_GRID_SPACING_KM, newest_scene_date=newest_scene_date)
+        try:
+            run_scan(db, today_str(), REGIONAL_SCAN_GRID_SPACING_KM, newest_scene_date=newest_scene_date)
+        except ConcurrentScanError as exc:
+            # Normal when a manual scan is in progress -- not an error to
+            # escalate; the next tick will find the cooldown satisfied or
+            # the run finished.
+            logger.info("regional_scan poll: %s", exc)
     except Exception as exc:  # noqa: BLE001 -- top-level scheduler-job guard
         logger.error("regional_scan poll: unexpected failure: %s: %s", type(exc).__name__, exc)
     finally:
