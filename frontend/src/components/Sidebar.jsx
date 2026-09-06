@@ -13,7 +13,7 @@ export default function Sidebar() {
         <span className="sidebar-logo" aria-hidden="true"><Icon name="satellite" size={17} /></span>
         <div>
           <div className="sidebar-title">HAB Sentinel</div>
-          <div className="sidebar-subtitle">อ่าวไทยตอนบน</div>
+          <div className="sidebar-subtitle">อ่าวไทยฝั่งไทย</div>
         </div>
       </div>
 

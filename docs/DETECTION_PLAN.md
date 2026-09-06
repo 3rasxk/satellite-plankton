@@ -2,7 +2,8 @@
 
 ## Scope
 
-The project monitors the upper Gulf of Thailand with a physics-based pipeline.
+The project monitors the Gulf of Thailand, Thai side, with a physics-based
+pipeline (widened from the upper Gulf on 2026-09-06).
 It does not train a classifier: no suitable local labelled dataset is active in
 the repository.
 

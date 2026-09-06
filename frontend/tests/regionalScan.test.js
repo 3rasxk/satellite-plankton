@@ -57,9 +57,9 @@ test('every status renders a pin; null tiers, low indices and cluster membership
 })
 
 test('planned grid renders before a run and does not invent readings or a scene date', () => {
-  const points = Array.from({ length: 501 }, (_, i) => point(String(i), 'no_data_yet'))
+  const points = Array.from({ length: 9119 }, (_, i) => point(String(i), 'no_data_yet'))
   const html = renderToStaticMarkup(createElement(RegionalScanLayer, { data: { run: null, points } }))
-  assert.equal(markerCount(html), 501)
+  assert.equal(markerCount(html), 9119)
   assert.match(html, /ยังไม่ได้สแกน/)
   assert.doesNotMatch(html, /0\.000|2026-09-06/)
 })
@@ -77,6 +77,21 @@ test('all four cached indices keep their own actual scene date', () => {
   assert.match(html, /2026-09-01/)
   assert.doesNotMatch(html, /2026-09-06/)
   assert.match(html, /ก่อนวันเป้าหมาย 5 วัน/)
+})
+
+test('retained readings use their snapshot target while a later scan is running', () => {
+  const data = {
+    run: { status: 'running', date_used: '2026-09-07' },
+    snapshot_date_used: '2026-09-06', grid_spacing_km: 5, max_scene_age_days: 14,
+    points: [{ ...point('retained', 'ok', { ndci: -0.2 }), actual_date: '2026-08-23' }],
+  }
+  const layer = renderToStaticMarkup(createElement(RegionalScanLayer, { data }))
+  assert.match(layer, /ก่อนวันเป้าหมาย 14 วัน/)
+  assert.doesNotMatch(layer, /ก่อนวันเป้าหมาย 15 วัน/)
+  const banner = renderToStaticMarkup(createElement(RegionalScanBanner, { data }))
+  assert.match(banner, /ข้อมูลที่แสดงมาจากรอบวันที่/)
+  assert.match(banner, /2026-09-06/)
+  assert.match(banner, /2026-09-07/)
 })
 
 test('overview loads regional pins by default independently of the seven-site API', () => {

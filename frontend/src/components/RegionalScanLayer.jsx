@@ -46,6 +46,7 @@ function PointReadings({ point, targetDate }) {
 export default function RegionalScanLayer({ data }) {
   const points = data?.points || EMPTY_POINTS
   const domain = useMemo(() => regionalIndexDomain(points), [points])
+  const targetDate = data?.snapshot_date_used ?? data?.run?.date_used
 
   return points.map((point) => {
     const primary = point.index_values?.[REGIONAL_PRIMARY_INDEX]
@@ -82,9 +83,9 @@ export default function RegionalScanLayer({ data }) {
         }}
       >
         <Tooltip direction="top" offset={[0, -8]} opacity={0.95}>
-          <PointReadings point={point} targetDate={data?.run?.date_used} />
+          <PointReadings point={point} targetDate={targetDate} />
         </Tooltip>
-        <Popup><PointReadings point={point} targetDate={data?.run?.date_used} /></Popup>
+        <Popup><PointReadings point={point} targetDate={targetDate} /></Popup>
       </CircleMarker>
     )
   })

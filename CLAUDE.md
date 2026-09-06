@@ -5,7 +5,7 @@
 
 ## 0. Project (do not deviate)
 
-Software-only early-warning system for harmful algal blooms (green *Noctiluca* / red tide) in the upper Gulf of Thailand, targeting SDG 14. **Physics-based, not machine learning.** Two layers + a web app:
+Software-only early-warning system for harmful algal blooms (green *Noctiluca* / red tide) in the Gulf of Thailand, Thai side, targeting SDG 14 (widened from the upper Gulf on 2026-09-06 — see §4.2). **Physics-based, not machine learning.** Two layers + a web app:
 
 1. **Satellite layer** Sentinel-2 (10 m, current detail) + MODIS (~1 km, 2002–present, climatology baseline) via Google Earth Engine.
 2. **Detection & prediction layer** Spectral indices (NDCI / 2BDA / 3BDA), reading status and actual scene dates. Anomaly scoring and rule-based risk evaluation are disabled: no valid baseline exists for the indices. MODIS `chlor_a` climatology is valid for `chlor_a` only. No trained model.
@@ -63,7 +63,7 @@ satellite-data ──► bloom-detection
 ## 4. What the human must do (agents cannot — remind the user)
 
 1. **Google Earth Engine** — sign up (free for research, needs approval), authenticate locally. If auth fails with an SSL certificate error, a Python from another toolchain (e.g. PlatformIO) is being used — create a clean virtualenv from the system Python instead.
-2. **Study area** — confirmed 2026-08-24 as a real polygon (not an axis-aligned bounding box), stored in `data-pipeline/src/study_area.py` (`STUDY_AREA_POLYGON_LATLNG`). This is a boundary-check only (`check_point_in_study_area`), not a scan area — `/risk-map` does not enumerate points inside it. The actual monitored sites are the fixed, hand-picked seven-point list in `backend/src/grid.py`.
+2. **Study area** — confirmed 2026-08-24 as a real polygon (not an axis-aligned bounding box), stored in `data-pipeline/src/study_area.py` (`STUDY_AREA_POLYGON_LATLNG`); widened 2026-09-06 from the upper-Gulf quadrilateral to 16 vertices covering the Thai side of the whole Gulf, Bangkok bight to the Malaysian border. Its offshore edge is a hand-drawn approximation, **not** a maritime boundary — it encodes no EEZ, no Thailand–Cambodia overlapping claims area and no Thailand–Malaysia JDA, and must not be cited as any of them. It now serves two purposes: the boundary check (`check_point_in_study_area`) for arbitrary `/detect` queries, and the source of the regional scan grid (`backend/src/regional_scan/grid.py`, ~9,100 points at 5 km). `/risk-map` still does not enumerate points inside it — those are the fixed, hand-picked seven-point list in `backend/src/grid.py`. Widening changed where the system *reads*; it validated nothing anywhere.
 3. **Supabase/DB keys** + hosting account.
 4. **Review thresholds and escalation rules** in `detection/src/config.yaml` — accept or change.
 
@@ -77,7 +77,7 @@ satellite-data ──► bloom-detection
 
 ## 6. Definition of Done
 
-- [ ] Sentinel-2 + MODIS pipeline pulling real data for the upper Gulf
+- [ ] Sentinel-2 + MODIS pipeline pulling real data for the Thai-side Gulf
 - [ ] All three indices implemented and returned with real scene provenance
 - [ ] MODIS `chlor_a` climatology used only for `chlor_a`; spectral-index anomaly scoring explicitly disabled
 - [ ] Rule-based prediction layer with every rule readable in config
@@ -101,9 +101,9 @@ cd frontend && npm run dev
 Tests — three separate pytest suites, each with its own venv, no live GEE credentials required (GEE is mocked/bypassed at typed boundaries):
 
 ```bash
-cd data-pipeline && ./venv/bin/python -m pytest tests/ -q   # 97 tests
-cd detection      && ./venv/bin/python -m pytest tests/ -q   # 60 tests
-cd backend        && ./venv/bin/python -m pytest tests/ -q   # 130 tests
+cd data-pipeline && ./venv/bin/python -m pytest tests/ -q
+cd detection      && ./venv/bin/python -m pytest tests/ -q
+cd backend        && ./venv/bin/python -m pytest tests/ -q
 ```
 
 Single test: `./venv/bin/python -m pytest tests/test_climatology.py::test_name -q` (run from the relevant subproject directory, with its venv active).

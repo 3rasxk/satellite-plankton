@@ -75,6 +75,7 @@ async def get_regional_scan(db: Session = Depends(get_db)) -> RegionalScanRespon
     return RegionalScanResponse(
         grid_spacing_km=grid_spacing_km,
         max_scene_age_days=bridge.default_max_scene_age_days(),
+        snapshot_date_used=grid_run.date_used if points and grid_run else None,
         run=RegionalScanRunMeta(
             run_id=latest_run.id,
             started_at=as_aware_utc(latest_run.started_at).isoformat(),

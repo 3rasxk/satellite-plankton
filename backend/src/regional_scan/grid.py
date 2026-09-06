@@ -1,8 +1,15 @@
 """
 Regional bloom scan grid generation (spec §1): a regular lat/lng grid at
-a configurable km spacing across the upper Gulf study-area polygon's
-bounding box, filtered to points actually inside the polygon
+a configurable km spacing across the study-area polygon's bounding box,
+filtered to points actually inside the polygon
 (`backend/src/_study_area.py`'s `check_point_in_study_area`).
+
+The polygon covers the Thai side of the whole Gulf of Thailand as of
+2026-09-06, so the default 5 km spacing yields ~9,100 points (it was
+~500 while the polygon was the upper-Gulf quadrilateral). Grid size is
+therefore driven entirely by that polygon: widening it multiplies scan
+cost quadratically in the linear extent, and `spacing_km` is the only
+lever here for bringing that back down.
 
 Pure, GEE-free -- unit-testable without a live Earth Engine session
 (docs/superpowers/specs/2026-08-31-regional-scan-design.md §1/§11).

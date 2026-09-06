@@ -104,11 +104,10 @@ class DetectResponse(DisclaimerMixin):
         "Always null currently."
     )
     in_study_area: bool = Field(
-        description="Whether lat/lng falls inside the confirmed upper Gulf of "
-        "Thailand study-area polygon (data-pipeline/src/study_area.py). A "
-        "reading outside it is never blocked or fabricated -- it's flagged, "
-        "not refused -- but should not be trusted to the same degree as a "
-        "reading inside the study area."
+        description="Whether lat/lng falls inside the project-defined Thai-side "
+        "Gulf of Thailand study polygon (data-pipeline/src/study_area.py), "
+        "not an official maritime boundary. Outside readings are flagged, "
+        "not blocked. Indices remain uncalibrated inside and outside the area."
     )
     study_area_warning: str | None = Field(
         default=None, description="Non-null only when in_study_area is False -- "
@@ -289,7 +288,7 @@ class SummaryResponse(DisclaimerMixin):
 
 REGIONAL_SCAN_CAVEAT_TEXT = (
     "Index values only — no anomaly detection active. Real "
-    "Sentinel-2 readings across the full upper Gulf study-area polygon, "
+    "Sentinel-2 readings across the Thai-side Gulf study-area polygon, "
     "the same detect() pipeline /detect and /risk-map use. Spatial anomaly "
     "is not computed — no valid baseline exists. It is a "
     "separate output from the unvalidated Ang Sila spatial-trend test "
@@ -395,6 +394,11 @@ class RegionalScanResponse(DisclaimerMixin):
     )
     run: RegionalScanRunMeta | None = Field(
         default=None, description="Latest scan attempt; null if no scan has started."
+    )
+    snapshot_date_used: str | None = Field(
+        default=None, description="Target date of the scan that produced the displayed "
+        "cached points. Can differ from run.date_used while a later attempt is "
+        "running or failed. Null for planned coordinates with no cached snapshot.",
     )
     points: list[RegionalScanPointSchema] = Field(
         default_factory=list,

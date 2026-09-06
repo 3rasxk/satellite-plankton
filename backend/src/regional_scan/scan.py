@@ -70,9 +70,13 @@ def run_scan(
     db.refresh(run)
 
     counts = {"ok": 0, "no_imagery": 0, "no_water_pixels": 0, "no_climatology": 0, "error": 0}
+    logger.info(
+        "regional_scan: run %s started -- target=%s spacing_km=%s total_points=%d",
+        run.id, target_date, grid_spacing_km, len(grid),
+    )
 
     try:
-        for point in grid:
+        for processed, point in enumerate(grid, start=1):
             try:
                 result = bridge.detect(point["lat"], point["lng"], target_date)
             except bridge.GEEAuthError:
@@ -108,6 +112,12 @@ def run_scan(
             else:
                 for key, value in fields.items():
                     setattr(existing, key, value)
+
+            if processed % 100 == 0 or processed == len(grid):
+                logger.info(
+                    "regional_scan: run %s processed=%d/%d counts=%s",
+                    run.id, processed, len(grid), counts,
+                )
 
     except bridge.GEEAuthError as exc:
         # Deliberately does NOT touch any RegionalScanPoint/RegionalScanCluster

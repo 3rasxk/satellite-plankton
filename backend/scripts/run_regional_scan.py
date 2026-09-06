@@ -2,8 +2,9 @@
 Manual trigger for one regional scan, without waiting on the poll/
 cooldown cycle -- provides a manual-
 trigger pattern (docs/superpowers/specs/2026-08-31-regional-scan-design.md
-§8). Makes real, live GEE calls -- up to ~500 Sentinel-2/MODIS reads,
-measured 1-3.6hr range (spec §2).
+§8). Makes real, live Sentinel-2 reads for every point in the current
+study-area polygon (about 9,100 at 5 km). A full run can take hours;
+progress is logged every 100 points and the cache updates on completion.
 
     cd backend && source venv/bin/activate && python scripts/run_regional_scan.py [--date YYYY-MM-DD] [--spacing-km 5]
 """
@@ -11,6 +12,7 @@ measured 1-3.6hr range (spec §2).
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 
@@ -32,6 +34,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     init_db()
     db = SessionLocal()
     try:

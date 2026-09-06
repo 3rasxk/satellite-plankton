@@ -26,6 +26,7 @@ def test_regional_scan_shows_planned_grid_before_any_run(client, monkeypatch):
     assert resp.status_code == 200
     body = resp.json()
     assert body["run"] is None
+    assert body["snapshot_date_used"] is None
     grid = generate_scan_grid(config.REGIONAL_SCAN_GRID_SPACING_KM)
     assert len(body["points"]) == len(grid)
     assert body["grid_spacing_km"] == config.REGIONAL_SCAN_GRID_SPACING_KM
@@ -51,12 +52,46 @@ def test_regional_scan_shows_planned_grid_before_any_run(client, monkeypatch):
 
 
 @pytest.mark.parametrize("status", ["running", "error"])
+def test_retained_snapshot_keeps_its_target_when_a_later_attempt_starts(client, monkeypatch, status):
+    from src.regional_scan import scan as scan_module
+
+    monkeypatch.setattr(scan_module, "generate_scan_grid", lambda _: [
+        {"point_id": "1_62", "row_idx": 1, "col_idx": 62, "lat": 6.55, "lng": 102.03},
+    ])
+    monkeypatch.setattr(scan_module.bridge, "detect", lambda *args: {
+        "status": "ok", "index_values": {"ndci": -0.2}, "actual_date": "2026-08-23",
+    })
+    with SessionLocal() as db:
+        saved_run = scan_module.run_scan(db, "2026-09-06", 5.0)
+        saved_run.started_at = datetime(2026, 9, 6, 6, 0, tzinfo=timezone.utc)
+        attempt = RegionalScanRun(
+            started_at=datetime(2026, 9, 7, 6, 0, tzinfo=timezone.utc),
+            status=status, grid_spacing_km=5.0, date_used="2026-09-07", total_points=9119,
+        )
+        db.add(attempt)
+        db.commit()
+        try:
+            body = client.get("/regional-scan").json()
+            assert body["run"]["run_id"] == attempt.id
+            assert body["run"]["date_used"] == "2026-09-07"
+            assert body["snapshot_date_used"] == "2026-09-06"
+            assert body["points"][0]["actual_date"] == "2026-08-23"
+            assert body["points"][0]["index_values"] == {"ndci": -0.2}
+        finally:
+            db.query(RegionalScanPoint).filter_by(run_id=saved_run.id).delete()
+            db.delete(attempt)
+            db.delete(saved_run)
+            db.commit()
+
+
+@pytest.mark.parametrize("status", ["running", "error"])
 def test_first_scan_without_a_snapshot_still_shows_the_whole_grid(client, status):
+    grid = generate_scan_grid(5.0)
     with SessionLocal() as db:
         run = RegionalScanRun(
             started_at=datetime(2026, 8, 30, 6, 0, tzinfo=timezone.utc),
             status=status, grid_spacing_km=5.0, date_used="2026-08-30",
-            total_points=501,
+            total_points=len(grid),
         )
         db.add(run)
         db.commit()
@@ -64,7 +99,10 @@ def test_first_scan_without_a_snapshot_still_shows_the_whole_grid(client, status
             body = client.get("/regional-scan").json()
             assert body["run"]["run_id"] == run.id
             assert body["run"]["status"] == status
-            assert len(body["points"]) == 501
+            assert len(body["points"]) == len(grid)
+            assert {(p["lat"], p["lng"]) for p in body["points"]} == {
+                (p["lat"], p["lng"]) for p in grid
+            }
             assert body["grid_spacing_km"] == 5.0
             assert all(p["status"] == "no_data_yet" for p in body["points"])
             assert all(p["index_values"] is None and p["actual_date"] is None for p in body["points"])

@@ -25,7 +25,7 @@ export default function RegionalScanBanner({ data, loading, error, onRefresh }) 
   return (
     <div className="regional-scan-banner info-callout" role="status">
       <div className="regional-scan-banner-status-row">
-        <span className="headline">จุดสแกนทั่วอ่าวไทยตอนบน</span>
+        <span className="headline">จุดสแกนอ่าวไทยฝั่งไทย</span>
         <button type="button" className="retry-btn" onClick={onRefresh} disabled={loading}>
           {loading ? 'กำลังโหลด…' : 'โหลดผลล่าสุด'}
         </button>
@@ -39,9 +39,15 @@ export default function RegionalScanBanner({ data, loading, error, onRefresh }) 
             มีค่าอ่าน {withReadings} · ยังไม่ได้สแกน {pending} · ไม่มีค่าอ่าน {points.length - withReadings - pending}
           </p>
           <p>{run ? STATUS_LABEL_TH[run.status] || run.status : 'ยังไม่มีผลสแกน — แสดงตำแหน่งกริดที่เตรียมไว้'}</p>
+          {run?.status === 'running' && Number.isFinite(run.total_points) && (
+            <p>รอบที่กำลังสแกนมี {run.total_points} จุด</p>
+          )}
           {run?.date_used && <p>วันที่เป้าหมายการสแกน: <span className="mono">{run.date_used}</span></p>}
+          {data.snapshot_date_used && data.snapshot_date_used !== run?.date_used && (
+            <p>ข้อมูลที่แสดงมาจากรอบวันที่ <span className="mono">{data.snapshot_date_used}</span></p>
+          )}
           {data.max_scene_age_days != null && (
-            <p>ใช้ภาพล่าสุดที่ใช้ได้ของแต่ละจุด ไม่เกิน {data.max_scene_age_days} วันก่อนวันเป้าหมาย · แต่ละจุดอาจใช้ภาพคนละวัน</p>
+            <p>ตั้งค่าการสแกน: ใช้ภาพล่าสุดที่ใช้ได้ ไม่เกิน {data.max_scene_age_days} วันก่อนวันเป้าหมาย · แต่ละจุดอาจใช้ภาพคนละวัน</p>
           )}
         </>
       )}
