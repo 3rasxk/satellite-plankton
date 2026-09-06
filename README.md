@@ -92,16 +92,19 @@ scheduler's site cache, and the true-color / NDCI thumbnails beside them — com
 from the newest usable image acquired **on or before** the day being asked
 about, never one acquired after it. How old that image may be before the system
 gives up and reports no data is the one thing configurable about it:
-`SENTINEL2_MAX_SCENE_AGE_DAYS` in `data-pipeline/.env`, 60 days by default.
+`SENTINEL2_MAX_SCENE_AGE_DAYS` in `data-pipeline/.env`, 14 days by default.
 Each pin keeps its own scene date and shows its age against the scan target, so
 a 3-day-old reading and a 5-week-old one are never presented as the same thing.
 Nothing usable inside the ceiling means a no-data pin — not a relaxed cloud
 mask, not a made-up index value.
 
-Expect the dates to differ pin to pin, and to be old in the monsoon: on the
-2026-09-06 scan of 501 points, 295 returned a reading, 221 of them from a single
-clear pass on 2026-08-18, because every later acquisition over that water was
-fully clouded.
+Expect the dates to differ pin to pin, and expect a lot of no-data pins in the
+monsoon. On the 2026-09-06 scan of 501 points, only 74 had a usable scene within
+14 days. A further 221 had one at 19 days — a single clear pass on 2026-08-18,
+every later acquisition over that water being fully clouded — and the 14-day
+ceiling deliberately reports those as no imagery rather than showing a
+three-week-old reading as if it described today. Raise the ceiling if you would
+rather see them, and read their scene dates.
 
 If you'd rather run the two processes by hand instead of the script (e.g. to see each one's logs in its own terminal):
 

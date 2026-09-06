@@ -88,9 +88,10 @@ def test_transitive_chain_merges_into_one_cluster():
 # target date, so one cluster genuinely can span several days of imagery.
 # Measured spans among the 'ok' points of a single scan: 7 days
 # (2025-12-15), 5 days (2026-03-15), 10 days (2026-06-15) under an
-# earlier symmetric +/-10-day search, and 15 days (2026-09-06) under the
-# current rule. These fields state the spread; they never hide it and
-# never change which cells cluster together.
+# earlier symmetric +/-10-day search, and 15 days (2026-09-06) under a
+# 20-day ceiling. A span can never exceed the ceiling in force. These
+# fields state the spread; they never hide it and never change which
+# cells cluster together.
 # --------------------------------------------------------------------------
 
 

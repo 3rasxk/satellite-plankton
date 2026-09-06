@@ -91,7 +91,7 @@ test('overview loads regional pins by default independently of the seven-site AP
 
 test('grid counts include missing readings and retain the API interpretation disclaimer', () => {
   const html = renderToStaticMarkup(createElement(RegionalScanBanner, { data: {
-    run: { status: 'running', date_used: '2026-09-06' }, grid_spacing_km: 5, max_scene_age_days: 60,
+    run: { status: 'running', date_used: '2026-09-06' }, grid_spacing_km: 5, max_scene_age_days: 14,
     points: [point('pending', 'no_data_yet'), point('cloud', 'no_imagery'), point('read', 'ok', { ndci: -0.4 })],
     disclaimer: 'Index values alone establish neither bloom presence nor absence.',
   } }))
@@ -99,5 +99,5 @@ test('grid counts include missing readings and retain the API interpretation dis
   assert.match(html, /มีค่าอ่าน 1 · ยังไม่ได้สแกน 1 · ไม่มีค่าอ่าน 1/)
   assert.match(html, /Index values alone establish neither bloom presence nor absence\./)
   assert.match(html, /no anomaly detection active/)
-  assert.match(html, /ไม่เกิน 60 วันก่อนวันเป้าหมาย/)
+  assert.match(html, /ไม่เกิน 14 วันก่อนวันเป้าหมาย/)
 })

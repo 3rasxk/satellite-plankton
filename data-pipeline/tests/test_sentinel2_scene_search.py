@@ -209,8 +209,8 @@ def test_the_default_ceiling_is_used_when_the_caller_names_none(monkeypatch):
     monkeypatch.delenv(sentinel2.MAX_SCENE_AGE_ENV_VAR, raising=False)
     _, bounds = scene_catalog(monkeypatch, [("clear", "2026-09-06T03:00:00", 0.0, 10)])
     sentinel2.get_sentinel2_bands(13, 100.5, "2026-09-06")
-    assert sentinel2.DEFAULT_MAX_SCENE_AGE_DAYS == 60
-    assert bounds == [("2026-07-08", "2026-09-07")]
+    assert sentinel2.DEFAULT_MAX_SCENE_AGE_DAYS == 14
+    assert bounds == [("2026-08-23", "2026-09-07")]
 
 
 def test_the_env_override_moves_the_ceiling(monkeypatch):

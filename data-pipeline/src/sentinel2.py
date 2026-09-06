@@ -142,15 +142,17 @@ DEFAULT_SCALE_M = 10
 # rule is "newest usable scene acquired on or before the requested day";
 # this only decides when to stop looking and report no imagery rather
 # than reach for something older still. Sentinel-2's ~5-day revisit puts
-# roughly a dozen acquisition opportunities inside the default 60 days,
-# which through the southwest monsoon is often what it takes to reach one
-# cloud-free pass: measured 2026-09-06 at upper-Gulf grid point 1_2,
-# every acquisition from 2026-09-02 back to 2026-08-20 was 100% cloud
-# over the sample buffer and the walk only stopped at 2026-08-18. Past
-# this ceiling a reading is too stale to say anything about current water
-# colour, so no-data is the honest answer. Override with
-# SENTINEL2_MAX_SCENE_AGE_DAYS (see .env.example).
-DEFAULT_MAX_SCENE_AGE_DAYS = 60
+# only about three acquisition opportunities inside 14 days, which
+# through the southwest monsoon is frequently not enough to reach a
+# cloud-free pass -- and the resulting no-data is the intended answer,
+# not a failure. Measured on the 2026-09-06 upper-Gulf scan (501 points):
+# 74 points had a usable scene within 14 days, while 221 more had one
+# only at 19 days (a single clear pass on 2026-08-18, every later
+# acquisition over that water being 100% cloud). Those 221 now report no
+# imagery, because a 19-day-old reading says little about current water
+# colour and saying nothing is more honest than saying that. Override
+# with SENTINEL2_MAX_SCENE_AGE_DAYS (see .env.example).
+DEFAULT_MAX_SCENE_AGE_DAYS = 14
 MAX_SCENE_AGE_ENV_VAR = "SENTINEL2_MAX_SCENE_AGE_DAYS"
 DEFAULT_MAX_CLOUD_FRACTION = 0.5
 DEFAULT_MIN_WATER_OCCURRENCE_PCT = 50.0
