@@ -1,17 +1,6 @@
-import { Fragment, useEffect, useMemo, useRef } from 'react'
-import { MapContainer, TileLayer, CircleMarker, ZoomControl, useMap, Tooltip } from 'react-leaflet'
-import { 
-  RISK_COLOR_HEX, 
-  NO_DATA_HEX, 
-  NO_DATA_LINE_HEX, 
-  STATUS_LABEL, 
-  NO_DATA_STATUS, 
-  RISK_LABEL_TH,
-  RISK_MEANING_TH,
-  formatSiteName,
-} from '../constants.js'
+import { useEffect, useRef } from 'react'
+import { MapContainer, TileLayer, ZoomControl, useMap } from 'react-leaflet'
 import { MAP_BOUNDS, syncMinimumBoundsZoom } from '../utils/mapBounds.js'
-import { selectMapFeatures } from '../utils/mapFeatures.js'
 
 const UPPER_GULF_CENTER = [13.1, 100.6]
 const UPPER_GULF_ZOOM = 9
@@ -46,14 +35,12 @@ function BoundsZoomLock() {
   return null
 }
 
-function FitToPoints({ points, features }) {
+function FitToPoints({ points }) {
   const map = useMap()
   const fitted = useRef(false)
   useEffect(() => {
     if (fitted.current) return
-    const bounds = points?.length
-      ? points.map((point) => [point.lat, point.lng])
-      : features.map((feature) => [feature.geometry.coordinates[1], feature.geometry.coordinates[0]])
+    const bounds = points?.length ? points.map((point) => [point.lat, point.lng]) : []
     if (bounds.length === 0) return
     if (bounds.length === 1) {
       map.setView(bounds[0], UPPER_GULF_ZOOM)
@@ -61,41 +48,11 @@ function FitToPoints({ points, features }) {
       map.fitBounds(bounds, { padding: [60, 60] })
     }
     fitted.current = true
-  }, [map, points, features])
+  }, [map, points])
   return null
 }
 
-/**
- * Makes a Leaflet vector layer keyboard-reachable: Leaflet renders
- * CircleMarker as an SVG <path>, which isn't in the tab order or
- * keypress-able by default. Setting tabindex + a keydown listener on the
- * rendered element is the standard workaround (react-leaflet doesn't
- * expose this itself) — see .claude/agents/frontend-dashboard.md
- * acceptance criteria: "cells clickable and keyboard-reachable."
- */
-function makeAccessible(layer, label, onActivate) {
-  const el = layer.getElement?.()
-  if (!el) return
-  el.setAttribute('tabindex', '0')
-  el.setAttribute('role', 'button')
-  el.setAttribute('aria-label', label)
-  el.classList.add('risk-marker')
-  el.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault()
-      onActivate()
-    }
-  })
-}
-
-export default function RiskMap({ featureCollection, fitPoints, onSelectSite = () => {}, mode = 'risk', children }) {
-  // Every configured monitoring site stays visible. Alert colours remain
-  // reserved for evaluated tiers; null risk uses the neutral marker below.
-  const features = useMemo(
-    () => selectMapFeatures(featureCollection?.features || []),
-    [featureCollection],
-  )
-
+export default function RiskMap({ fitPoints, mode = 'risk', children }) {
   return (
     <MapContainer
       className={`leaflet-map map-mode-${mode}`}
@@ -117,75 +74,7 @@ export default function RiskMap({ featureCollection, fitPoints, onSelectSite = (
         maxNativeZoom={19}
         maxZoom={18}
       />
-      <FitToPoints points={fitPoints} features={features} />
-      {features.map((feature) => {
-        const [lng, lat] = feature.geometry.coordinates
-        const props = feature.properties
-        const isNoData = NO_DATA_STATUS.has(props.status)
-        const colorHex = !isNoData ? RISK_COLOR_HEX[props.risk_level] || NO_DATA_LINE_HEX : null
-        const label = `${props.name}: ${isNoData ? STATUS_LABEL[props.status] || 'no reading' : props.risk_level || 'Risk not evaluated — no valid baseline exists'}`
-
-        return (
-          <Fragment key={props.site_id}>
-            {!isNoData && props.risk_level != null && (
-              <CircleMarker
-                center={[lat, lng]}
-                radius={22}
-                pathOptions={{
-                  color: colorHex,
-                  weight: 1.5,
-                  fillColor: colorHex,
-                  fillOpacity: 0.18,
-                  className: 'marker-pulsing-circle',
-                }}
-                interactive={false}
-              />
-            )}
-            <CircleMarker
-              center={[lat, lng]}
-              radius={14}
-              pathOptions={
-                isNoData
-                  ? {
-                      color: NO_DATA_LINE_HEX,
-                      weight: 2,
-                      dashArray: '3,3',
-                      fillColor: NO_DATA_HEX,
-                      fillOpacity: 0.7,
-                      className: 'clickable-marker',
-                    }
-                  : {
-                      color: colorHex,
-                      weight: 2,
-                      fillColor: colorHex,
-                      fillOpacity: 0.85,
-                      className: 'clickable-marker',
-                    }
-              }
-              eventHandlers={{
-                add: (e) => makeAccessible(e.target, label, () => onSelectSite({ lat, lng, ...props })),
-                click: () => onSelectSite({ lat, lng, ...props }),
-              }}
-            >
-              <Tooltip direction="top" offset={[0, -10]} opacity={0.95}>
-                <div style={{ fontWeight: 600, fontSize: '13px' }}>{formatSiteName(props)}</div>
-                <div style={{ fontSize: '11.5px', marginTop: '2px', color: '#1d1d1f' }}>
-                  {isNoData ? (
-                    'ไม่มีค่าอ่าน'
-                  ) : (
-                    <>
-                      <span style={{ fontWeight: 600 }}>{RISK_LABEL_TH[props.risk_level] || 'ยังประเมินไม่ได้ — ยังไม่มีค่าฐานที่ถูกต้อง'}</span>
-                      {RISK_MEANING_TH[props.risk_level] ? (
-                        <span style={{ color: '#6e6e73' }}> · {RISK_MEANING_TH[props.risk_level]}</span>
-                      ) : null}
-                    </>
-                  )}
-                </div>
-              </Tooltip>
-            </CircleMarker>
-          </Fragment>
-        )
-      })}
+      <FitToPoints points={fitPoints} />
       {children}
     </MapContainer>
   )

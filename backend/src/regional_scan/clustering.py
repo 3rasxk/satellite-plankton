@@ -11,11 +11,15 @@ docs/superpowers/specs/2026-08-31-regional-scan-design.md §4.
 
 Scene freshness: adjacency is the ONLY thing that merges cells here, and
 a cluster's members are not required to come from the same Sentinel-2
-scene -- they routinely do not. get_sentinel2_bands resolves the nearest
-cloud-free scene within +/-10 days of the scan's target date
-independently per point, and measured scene-date spans among the 'ok'
-points of a single scan were 7 days (2025-12-15), 5 days (2026-03-15)
-and 10 days (2026-06-15). So each cluster reports its own freshness
+scene -- they routinely do not. Each point independently resolves the
+newest usable scene acquired on or before the target date, under the one
+system-wide ceiling (SENTINEL2_MAX_SCENE_AGE_DAYS, 60 days by default).
+Measured scene-date spans among the 'ok' points of a single scan were
+7 days (2025-12-15), 5 days (2026-03-15) and 10 days (2026-06-15) --
+all recorded under an earlier symmetric +/-10-day search, so they
+describe that policy's spread and bound nothing about this one. The
+2026-09-06 scan spanned 2026-08-18 to 2026-09-02, 15 days.
+So each cluster reports its own freshness
 range (`oldest_scene_date` / `newest_scene_date` /
 `scene_date_span_days`), which spec §12 named as the precondition for
 showing mixed-vintage cells under one undifferentiated pin at all.

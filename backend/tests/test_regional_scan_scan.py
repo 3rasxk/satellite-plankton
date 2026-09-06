@@ -20,6 +20,33 @@ def _fake_detect_all_ok_indices(lat, lng, date):
     }
 
 
+def test_scan_reads_every_grid_point_at_the_target_date_and_names_no_scene_policy(client, monkeypatch):
+    """The scan asks detect() for a date and nothing else: which scene
+    answers for that date is one system-wide rule in data-pipeline, not a
+    per-caller argument the scan could set differently."""
+    calls = []
+
+    def latest_reading(lat, lng, date, *args, **kwargs):
+        calls.append((lat, lng, date, args, kwargs))
+        return {
+            "status": "ok", "index_used": "ndci", "index_values": {"ndci": -0.2},
+            "actual_date": "2026-08-20", "reason": None,
+        }
+
+    monkeypatch.setattr(scan_module.bridge, "detect", latest_reading)
+    with SessionLocal() as db:
+        run = scan_module.run_scan(db, "2026-09-06", grid_spacing_km=20.0)
+        assert run.count_ok == run.total_points > 0
+        assert len(calls) == run.total_points
+        assert all(
+            date == "2026-09-06" and args == () and kwargs == {}
+            for _, _, date, args, kwargs in calls
+        )
+        points = db.execute(select(RegionalScanPoint)).scalars().all()
+        assert {(p.lat, p.lng) for p in points} == {(lat, lng) for lat, lng, _, _, _ in calls}
+        assert all(p.actual_date == "2026-08-20" and p.index_values == {"ndci": -0.2} for p in points)
+
+
 def test_run_scan_persists_indices_with_no_scores_tiers_or_clusters(client, monkeypatch):
     monkeypatch.setattr(scan_module.bridge, "detect", _fake_detect_all_ok_indices)
 
@@ -154,8 +181,8 @@ def test_run_scan_gee_auth_error_mid_loop_does_not_overwrite_earlier_points_this
 
 def _fake_detect_with_scene_date(lat, lng, date):
     """detect() resolving a scene 6 days before the scan's target date --
-    the normal case, not an edge case: get_sentinel2_bands searches +/-10
-    days for the nearest cloud-free scene, so points in one scan are
+    the normal case, not an edge case: the scan searches backward for
+    each point's latest usable scene, so points in one scan are
     routinely backed by scenes of different vintages."""
     return {
         "status": "ok",
@@ -239,7 +266,7 @@ _SPAN_SCENE_DATES = ["2026-08-05", "2026-08-15", "2026-08-10"]
 
 def _make_fake_detect_varying_scene_dates():
     """detect() resolving a different scene for successive points, the
-    way the +/-10-day nearest-cloud-free-scene search really behaves.
+    way the per-point latest-usable-scene search behaves.
     Returns (detect_fn, assigned) where `assigned` maps (lat, lng) to the
     scene date handed out, so the test can check the persisted range
     against what was actually returned rather than against a constant."""

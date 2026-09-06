@@ -144,8 +144,8 @@ class RegionalScanPoint(Base):
     threshold_tier: Mapped[str | None] = mapped_column(String, nullable=True)  # elevated|warning|null
     # The real Sentinel-2 scene date backing THIS point's reading, straight
     # from detect() (detection/src/prediction.py). It routinely differs from
-    # the run's `date_used`: get_sentinel2_bands resolves the nearest
-    # cloud-free scene within a +/-10-day window, so one scan's points are
+    # the run's `date_used`: each point independently resolves the newest
+    # usable scene on or before the target date, so one scan's points are
     # normally backed by scenes of several different vintages. Null when no
     # scene was ever resolved for this point (status no_imagery /
     # no_water_pixels / error) -- never backfilled with `date_used`.

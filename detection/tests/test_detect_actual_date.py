@@ -2,10 +2,10 @@
 `detect()`'s `actual_date` -- the real Sentinel-2 scene date behind one
 reading, which is NOT the date that was requested.
 
-`get_sentinel2_bands` resolves the nearest cloud-free scene within a
-search window (data-pipeline/src/sentinel2.py), so a caller that scans
-many points on one target date routinely gets readings backed by scenes
-several days apart. Until this field existed, `detect()` computed that
+`get_sentinel2_bands` resolves the newest usable scene acquired on or
+before the requested date (data-pipeline/src/sentinel2.py), so a caller
+that scans many points on one target date routinely gets readings backed
+by scenes days or weeks apart. Until this field existed, `detect()` computed that
 scene date and then discarded it, leaving every consumer to either omit
 it or re-derive it with a second GEE round-trip
 (backend/src/satellite_meta.py).
@@ -77,6 +77,26 @@ def test_detect_ok_returns_the_real_scene_date_not_the_requested_date(monkeypatc
     assert result["actual_date"] == SCENE_DATE
     # The whole point: this is a measurement, not an echo of the input.
     assert result["actual_date"] != REQUESTED_DATE
+
+
+def test_detect_delegates_scene_choice_to_the_one_system_rule(monkeypatch, config):
+    """detect() takes no scene-selection argument at all. The
+    newest-usable-past-scene rule and its age ceiling live in
+    get_sentinel2_bands, so no caller can have one pixel read under a
+    different policy than the pixel next to it."""
+    calls = []
+
+    def bands(lat, lng, date, *args, **options):
+        calls.append((lat, lng, date, args, options))
+        return {**_BANDS, "actual_date": "2026-08-20"}
+
+    monkeypatch.setattr(prediction, "get_sentinel2_bands", bands)
+    result = detect(13.4, 100.6, "2026-09-06", config)
+    assert calls == [(13.4, 100.6, "2026-09-06", (), {})]
+    assert result["status"] == "ok"
+    assert result["actual_date"] == "2026-08-20"
+    assert result["index_values"]["ndci"] == pytest.approx(1 / 13)
+    assert "spatial_anomaly_z" not in result
 
 
 # --------------------------------------------------------------------------

@@ -30,9 +30,10 @@ Error mapping (mirrors routers/detect.py's GEEAuthError handling, extended
 to the two additional failure modes this endpoint can hit that /detect's
 own response never raises out of its own status field):
     GEEAuthError            -> 503 (GEE session itself unusable)
-    NoCloudFreeImageryError -> 404 (no scene meets the cloud threshold in
-                                the search window -- a real, expected data
-                                gap, not a server error)
+    NoCloudFreeImageryError -> 404 (no scene on or before the requested
+                                date, within the scene-age ceiling, meets
+                                the cloud threshold -- a real, expected
+                                data gap, not a server error)
     NoWaterPixelsError      -> 404 (sample buffer is entirely land per the
                                 JRC Global Surface Water mask)
     urllib.error.URLError   -> 502 (scene resolved fine; the thumbnail
@@ -97,7 +98,7 @@ def get_satellite_image(
         raise HTTPException(
             status_code=404,
             detail=f"No cloud-free Sentinel-2 imagery available for this location "
-            f"within the search window around {date}: {exc}",
+            f"on or before {date}, within the scene-age ceiling: {exc}",
         ) from exc
     except bridge.NoWaterPixelsError as exc:
         raise HTTPException(

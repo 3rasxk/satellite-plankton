@@ -99,6 +99,11 @@ _dp = _load_data_pipeline_package()
 # Re-exported, unmodified, from data-pipeline/src.
 GEEAuthError = _dp.GEEAuthError
 get_sentinel2_bands = _dp.get_sentinel2_bands
+# The system-wide scene-age ceiling and its env override live in
+# data-pipeline (sentinel2.py); re-exported so backend/ can report the
+# effective value without a second copy of the default.
+DEFAULT_MAX_SCENE_AGE_DAYS = _dp.DEFAULT_MAX_SCENE_AGE_DAYS
+default_max_scene_age_days = _dp.default_max_scene_age_days
 get_modis_chlorophyll_history = _dp.get_modis_chlorophyll_history
 get_modis_sst = _dp.get_modis_sst
 get_rainfall_proxy = _dp.get_rainfall_proxy
@@ -142,6 +147,8 @@ NoWaterPixelsError = _dp.sentinel2.NoWaterPixelsError
 __all__ = [
     "GEEAuthError",
     "get_sentinel2_bands",
+    "DEFAULT_MAX_SCENE_AGE_DAYS",
+    "default_max_scene_age_days",
     "get_modis_chlorophyll_history",
     "get_modis_sst",
     "get_rainfall_proxy",

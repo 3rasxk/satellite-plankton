@@ -86,8 +86,22 @@ default 5 km spacing), without threshold filtering. Click any pin for all four
 available indices, its status, and its actual scene date. Before a scan has
 saved results, the grid is still visible with `no_data_yet` and null readings;
 the browser checks the cache every 30 seconds, without triggering imagery
-requests. The seven named monitoring stations are an optional layer, off by
-default, not validation events.
+requests. The named monitoring-station layer is not shown on this map.
+Every satellite reading in the system — the regional grid, `/detect`, the
+scheduler's site cache, and the true-color / NDCI thumbnails beside them — comes
+from the newest usable image acquired **on or before** the day being asked
+about, never one acquired after it. How old that image may be before the system
+gives up and reports no data is the one thing configurable about it:
+`SENTINEL2_MAX_SCENE_AGE_DAYS` in `data-pipeline/.env`, 60 days by default.
+Each pin keeps its own scene date and shows its age against the scan target, so
+a 3-day-old reading and a 5-week-old one are never presented as the same thing.
+Nothing usable inside the ceiling means a no-data pin — not a relaxed cloud
+mask, not a made-up index value.
+
+Expect the dates to differ pin to pin, and to be old in the monsoon: on the
+2026-09-06 scan of 501 points, 295 returned a reading, 221 of them from a single
+clear pass on 2026-08-18, because every later acquisition over that water was
+fully clouded.
 
 If you'd rather run the two processes by hand instead of the script (e.g. to see each one's logs in its own terminal):
 
@@ -102,9 +116,9 @@ cd frontend && npm run dev
 ### 4. Run the tests
 
 ```bash
-cd data-pipeline && ./venv/bin/python -m pytest tests/ -q   # 82 tests
-cd detection      && ./venv/bin/python -m pytest tests/ -q   # 59 tests
-cd backend        && ./venv/bin/python -m pytest tests/ -q   # 129 tests
+cd data-pipeline && ./venv/bin/python -m pytest tests/ -q
+cd detection      && ./venv/bin/python -m pytest tests/ -q
+cd backend        && ./venv/bin/python -m pytest tests/ -q
 cd frontend       && npm test
 ```
 

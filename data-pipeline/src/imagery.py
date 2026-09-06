@@ -13,16 +13,18 @@ that.
 
 Same-scene guarantee: every function here calls
 `sentinel2._resolve_sentinel2_scene` — the exact same candidate search/
-sort/cloud-check loop `get_sentinel2_bands` uses — rather than running a
+check loop `get_sentinel2_bands` uses — rather than running a
 second, independently written resolution query. Given identical lat/lng/
-date/search_window_days/buffer_m/max_cloud_fraction arguments, that
-function's underlying GEE query is deterministic (same collection
-filter + sort by proximity to the requested date + candidate loop), so a
+date/max_scene_age_days/buffer_m/max_cloud_fraction arguments, that
+function's underlying GEE query is deterministic (same collection filter
++ same acquisition-time ordering + same checks), so a
 `get_true_color_image`/`get_ndci_heatmap` call and a `get_sentinel2_bands`
 call made with the same arguments are guaranteed to resolve to the same
-`actual_date`/scene, never a different one. See `sentinel2.py`'s module
-docstring and `_resolve_sentinel2_scene`'s docstring for the full
-argument.
+`actual_date`/scene, never a different one. Both paths run the one
+backward-only rule — newest usable scene on or before the requested date
+— so there is no direction for them to disagree about and no caller
+carved out of the guarantee. See `sentinel2.py`'s module docstring and
+`_resolve_sentinel2_scene`'s docstring for the full argument.
 
 Visualization region vs. numeric sample region: `get_sentinel2_bands`
 computes its band means over a small buffer (`DEFAULT_BUFFER_M`, ~30 m —
@@ -79,7 +81,6 @@ import ee
 from .sentinel2 import (
     DEFAULT_BUFFER_M,  # noqa: F401 -- re-exported for callers that want the numeric-path default for comparison
     DEFAULT_MAX_CLOUD_FRACTION,
-    DEFAULT_SEARCH_WINDOW_DAYS,
     _resolve_sentinel2_scene,
 )
 
@@ -279,7 +280,7 @@ def get_true_color_image(
     lat: float,
     lng: float,
     date: str,
-    search_window_days: int = DEFAULT_SEARCH_WINDOW_DAYS,
+    max_scene_age_days: int | None = None,
     buffer_m: int = DEFAULT_BUFFER_M,
     max_cloud_fraction: float = DEFAULT_MAX_CLOUD_FRACTION,
     image_region_buffer_m: int = DEFAULT_IMAGE_REGION_BUFFER_M,
@@ -290,7 +291,7 @@ def get_true_color_image(
     bands for.
 
     Args:
-        lat, lng, date, search_window_days, buffer_m, max_cloud_fraction:
+        lat, lng, date, max_scene_age_days, buffer_m, max_cloud_fraction:
             identical meaning to `get_sentinel2_bands` -- pass the same
             values as a paired numeric call to guarantee the same
             resolved scene (see module docstring, "Same-scene guarantee").
@@ -326,7 +327,7 @@ def get_true_color_image(
             per the JRC GSW mask.
     """
     resolved = _resolve_sentinel2_scene(
-        lat, lng, date, search_window_days, buffer_m, max_cloud_fraction
+        lat, lng, date, max_scene_age_days, buffer_m, max_cloud_fraction
     )
     image = resolved["image"]
     point = ee.Geometry.Point([lng, lat])
@@ -354,7 +355,7 @@ def get_ndci_heatmap(
     lat: float,
     lng: float,
     date: str,
-    search_window_days: int = DEFAULT_SEARCH_WINDOW_DAYS,
+    max_scene_age_days: int | None = None,
     buffer_m: int = DEFAULT_BUFFER_M,
     max_cloud_fraction: float = DEFAULT_MAX_CLOUD_FRACTION,
     image_region_buffer_m: int = DEFAULT_IMAGE_REGION_BUFFER_M,
@@ -370,7 +371,7 @@ def get_ndci_heatmap(
     instead of on the single averaged reading.
 
     Args:
-        lat, lng, date, search_window_days, buffer_m, max_cloud_fraction,
+        lat, lng, date, max_scene_age_days, buffer_m, max_cloud_fraction,
         image_region_buffer_m, image_size_px: see `get_true_color_image`.
 
     Returns:
@@ -391,7 +392,7 @@ def get_ndci_heatmap(
             per the JRC GSW mask.
     """
     resolved = _resolve_sentinel2_scene(
-        lat, lng, date, search_window_days, buffer_m, max_cloud_fraction
+        lat, lng, date, max_scene_age_days, buffer_m, max_cloud_fraction
     )
     image = resolved["image"]
     point = ee.Geometry.Point([lng, lat])

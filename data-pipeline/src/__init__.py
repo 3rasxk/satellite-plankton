@@ -33,8 +33,10 @@ from .modis import get_modis_chlorophyll_history, get_modis_sst
 from .rainfall import get_rainfall_proxy
 from .scene_poll import get_newest_scene_timestamp
 from .sentinel2 import (
+    DEFAULT_MAX_SCENE_AGE_DAYS,
     NoCloudFreeImageryError,
     NoWaterPixelsError,
+    default_max_scene_age_days,
     get_sentinel2_bands,
 )
 from .study_area import STUDY_AREA_POLYGON_LATLNG, check_point_in_study_area
@@ -50,6 +52,8 @@ __all__ = [
     "get_ndci_heatmap",
     "NoCloudFreeImageryError",
     "NoWaterPixelsError",
+    "DEFAULT_MAX_SCENE_AGE_DAYS",
+    "default_max_scene_age_days",
     "check_point_in_study_area",
     "STUDY_AREA_POLYGON_LATLNG",
     "get_newest_scene_timestamp",

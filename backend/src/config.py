@@ -93,6 +93,12 @@ def today_str() -> str:
 REGIONAL_SCAN_GRID_SPACING_KM: float = float(os.environ.get("REGIONAL_SCAN_GRID_SPACING_KM", "5"))
 REGIONAL_SCAN_POLL_INTERVAL_HOURS: int = int(os.environ.get("REGIONAL_SCAN_POLL_INTERVAL_HOURS", "3"))
 REGIONAL_SCAN_COOLDOWN_HOURS: int = int(os.environ.get("REGIONAL_SCAN_COOLDOWN_HOURS", "20"))
+# How old a point's imagery may be is NOT configured here: it is one
+# system-wide rule owned by data-pipeline (sentinel2.py's
+# DEFAULT_MAX_SCENE_AGE_DAYS / SENTINEL2_MAX_SCENE_AGE_DAYS), applying
+# equally to the regional scan, /detect and the scheduler's site cache.
+# backend reads the effective value through src/_detection.py rather than
+# keeping a second copy that could disagree with the one actually used.
 # Lookback window for the poll's own Sentinel-2 metadata query (spec §5) --
 # bounds the filterDate() query cost; does not affect the cooldown/trigger
 # decision itself (that compares timestamps, not window length).

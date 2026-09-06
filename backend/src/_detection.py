@@ -110,6 +110,10 @@ GEEAuthError = _data_pipeline_bridge.GEEAuthError
 NoCloudFreeImageryError = _data_pipeline_bridge.NoCloudFreeImageryError
 NoWaterPixelsError = _data_pipeline_bridge.NoWaterPixelsError
 get_sentinel2_bands = _data_pipeline_bridge.get_sentinel2_bands
+# The one system-wide scene-age ceiling (data-pipeline/src/sentinel2.py).
+# Routers report the effective value so the dashboard can state the
+# policy actually in force, instead of a backend-local copy of it.
+default_max_scene_age_days = _data_pipeline_bridge.default_max_scene_age_days
 get_modis_chlorophyll_history = _data_pipeline_bridge.get_modis_chlorophyll_history
 day_of_year_climatology = _data_pipeline_bridge.day_of_year_climatology
 
@@ -144,6 +148,7 @@ __all__ = [
     "NoCloudFreeImageryError",
     "NoWaterPixelsError",
     "get_sentinel2_bands",
+    "default_max_scene_age_days",
     "get_modis_chlorophyll_history",
     "day_of_year_climatology",
     "z_score",

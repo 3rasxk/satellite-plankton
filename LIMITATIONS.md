@@ -24,6 +24,15 @@ index signal is not evidence that no bloom exists.
 **Cloud is a hard stop.** Optical sensors cannot see through cloud. The system
 reports `no_imagery` rather than inventing or silently substituting data.
 
+**A reading is only as current as its own scene date.** Every reading comes from
+the newest *usable* image on or before the date asked about, which through the
+southwest monsoon is routinely weeks old — on the 2026-09-06 upper-Gulf scan,
+221 of 295 readings came from 2026-08-18, 19 days earlier. The scene date is
+carried per point and shown with the value; it is never backfilled with the
+requested date. Read a pin as "this is what that water looked like on its own
+scene date", not as today's condition, and never compare two pins without
+comparing their dates.
+
 **Turbidity and sediment confound optical indices.** River plumes and shallow
 coastal water can resemble a bloom signal. The indices are not species
 classifiers, and the B2/B3 feature is only a secondary, lower-confidence

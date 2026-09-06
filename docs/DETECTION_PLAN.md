@@ -36,7 +36,14 @@ the engine returns no level, no triggered rule, and the reason
 ## Regional scan
 
 The regional scan evaluates the same `detect()` pipeline at every grid point in
-the study-area polygon. It stores every point, including explicit no-data
+the study-area polygon. Scene choice is not the scan's decision and cannot be
+varied per caller: `get_sentinel2_bands` applies one system-wide rule — the
+newest usable scene acquired on or before the requested day, never a later one,
+giving up past `SENTINEL2_MAX_SCENE_AGE_DAYS` (60) and reporting no imagery
+rather than reaching further back. `/detect`, the scheduler's site cache and the
+rendered thumbnails all read under that same rule, which is also what keeps a
+thumbnail and the number beside it on the same scene. Cloud and water-mask
+criteria are unchanged. The scan stores every point, including explicit no-data
 statuses, and preserves the real per-point `actual_date`. With anomaly scoring
 inactive, `spatial_anomaly_z`, `threshold_tier`, and clusters remain null/empty.
 

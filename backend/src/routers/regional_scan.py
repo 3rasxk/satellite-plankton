@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from .. import _detection as bridge
 from ..config import REGIONAL_SCAN_GRID_SPACING_KM, as_aware_utc
 from ..db import get_db
 from ..db_models import RegionalScanCluster, RegionalScanPoint, RegionalScanRun
@@ -51,6 +52,7 @@ async def get_regional_scan(db: Session = Depends(get_db)) -> RegionalScanRespon
     if latest_run is None:
         return RegionalScanResponse(
             run=None, points=planned_points, clusters=[], grid_spacing_km=grid_spacing_km,
+            max_scene_age_days=bridge.default_max_scene_age_days(),
         )
     # No run_id filter here either -- RegionalScanCluster is documented in
     # db_models.py as a whole-table latest-snapshot, same category as
@@ -72,6 +74,7 @@ async def get_regional_scan(db: Session = Depends(get_db)) -> RegionalScanRespon
 
     return RegionalScanResponse(
         grid_spacing_km=grid_spacing_km,
+        max_scene_age_days=bridge.default_max_scene_age_days(),
         run=RegionalScanRunMeta(
             run_id=latest_run.id,
             started_at=as_aware_utc(latest_run.started_at).isoformat(),

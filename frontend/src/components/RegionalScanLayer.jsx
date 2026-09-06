@@ -15,7 +15,10 @@ const POINT_STATUS = {
   error: 'อ่านข้อมูลจุดนี้ไม่สำเร็จ',
 }
 
-function PointReadings({ point }) {
+function PointReadings({ point, targetDate }) {
+  const ageDays = point.actual_date && targetDate
+    ? Math.round((Date.parse(targetDate) - Date.parse(point.actual_date)) / 86400000)
+    : null
   return (
     <div className="regional-point-readings">
       <strong>จุดกริด {point.point_id}</strong>
@@ -30,6 +33,7 @@ function PointReadings({ point }) {
         ))}
       </dl>
       <div>วันที่ภาพจริง: <span className="mono">{point.actual_date || 'ยังไม่มีวันที่ภาพ'}</span></div>
+      {Number.isFinite(ageDays) && ageDays >= 0 && <div>ก่อนวันเป้าหมาย {ageDays} วัน</div>}
       <div>ค่าดัชนีเท่านั้น — ยังไม่มีการประเมินความผิดปกติ</div>
     </div>
   )
@@ -78,9 +82,9 @@ export default function RegionalScanLayer({ data }) {
         }}
       >
         <Tooltip direction="top" offset={[0, -8]} opacity={0.95}>
-          <PointReadings point={point} />
+          <PointReadings point={point} targetDate={data?.run?.date_used} />
         </Tooltip>
-        <Popup><PointReadings point={point} /></Popup>
+        <Popup><PointReadings point={point} targetDate={data?.run?.date_used} /></Popup>
       </CircleMarker>
     )
   })

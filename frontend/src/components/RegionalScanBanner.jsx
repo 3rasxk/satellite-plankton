@@ -40,6 +40,9 @@ export default function RegionalScanBanner({ data, loading, error, onRefresh }) 
           </p>
           <p>{run ? STATUS_LABEL_TH[run.status] || run.status : 'ยังไม่มีผลสแกน — แสดงตำแหน่งกริดที่เตรียมไว้'}</p>
           {run?.date_used && <p>วันที่เป้าหมายการสแกน: <span className="mono">{run.date_used}</span></p>}
+          {data.max_scene_age_days != null && (
+            <p>ใช้ภาพล่าสุดที่ใช้ได้ของแต่ละจุด ไม่เกิน {data.max_scene_age_days} วันก่อนวันเป้าหมาย · แต่ละจุดอาจใช้ภาพคนละวัน</p>
+          )}
         </>
       )}
       <p className="regional-scan-interim">แสดงค่าดัชนีทุกจุด ไม่กรองด้วย threshold</p>

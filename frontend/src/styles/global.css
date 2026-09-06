@@ -1380,11 +1380,6 @@ table.events-table td.mono {
   overflow-y: auto;
 }
 
-.regional-layer-controls {
-  top: 68px;
-  left: 16px;
-}
-
 .regional-point-readings {
   min-width: 210px;
   font-size: 12px;

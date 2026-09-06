@@ -144,18 +144,25 @@ def detect(lat: float, lng: float, date: str, config: dict | None = None) -> dic
         date: "YYYY-MM-DD".
         config: pre-loaded config.yaml dict; loaded fresh if omitted.
 
+    Scene selection is not a parameter here: `get_sentinel2_bands` applies
+    the one system-wide rule (newest usable scene acquired on or before
+    `date`, never a later one, giving up past
+    `SENTINEL2_MAX_SCENE_AGE_DAYS`), so every caller of detect() -- the
+    regional scan, /detect, the scheduler's site cache -- reads the same
+    policy and no caller can quietly ask for a different one.
+
     Returns:
         {'index_values': dict | None, 'index_used': str, 'status': str,
          'reason': str | None, 'actual_date': str | None}
         `status` is one of: 'ok', 'no_imagery' (cloud/no scene in
         window), or 'no_water_pixels' (on land/shore).
         `actual_date` is the real Sentinel-2 scene date this reading came
-        from ("YYYY-MM-DD"), which may differ from the requested `date`
-        by up to the search window -- get_sentinel2_bands resolves the
-        nearest cloud-free scene, so two points scanned on the same
-        `date` can be backed by scenes days apart. It is None only on
-        the two statuses where no imagery was ever obtained
-        ('no_imagery', 'no_water_pixels').
+        from ("YYYY-MM-DD"). It is routinely older than the requested
+        `date` and never newer: get_sentinel2_bands resolves each point
+        independently to its own newest usable scene, so two points
+        scanned on the same `date` are commonly backed by scenes days or
+        weeks apart. It is None only on the two statuses where no imagery
+        was ever obtained ('no_imagery', 'no_water_pixels').
         Never substitute the requested `date` for it.
 
     Raises:

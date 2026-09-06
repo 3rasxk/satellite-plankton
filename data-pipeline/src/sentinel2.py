@@ -13,9 +13,12 @@ on the exact requested date. JRC GSW is 30 m (Landsat-derived); ETOPO1 is
 1 arc-minute, roughly 1.85 km at this latitude — far coarser than the
 Sentinel-2 pixels it is deciding about.
 Limitation: optical sensor — cannot see through cloud, so `actual_date`
-may differ from the requested date (nearest usable image within the
-search window is used instead, and the caller is told which date that
-was). Turbid coastal water near river mouths can still contaminate the
+routinely differs from the requested date: the newest usable image
+acquired on or before that date is used, however old that turns out to
+be, and the caller is always told which date it was. An image acquired
+*after* the requested date is never used, at any distance — the
+requested date means "as of this day". Turbid
+coastal water near river mouths can still contaminate the
 land/water mask; the JRC Global Surface Water "occurrence" layer used
 here is a multi-year statistical mask, not today's water extent, so a
 newly-exposed mudflat or an unusually low tide is not guaranteed to be
@@ -63,9 +66,11 @@ also the function `data-pipeline/src/imagery.py` calls to render the
 true-color and NDCI-heatmap panel thumbnails from — reusing this exact
 loop (rather than a second, independently written one) is what
 guarantees an image and the numeric band reading given for the same
-lat/lng/date/window/buffer/cloud-threshold always describe the same
-resolved Sentinel-2 scene, never two different candidates. See
-`_resolve_sentinel2_scene`'s docstring for the determinism argument.
+lat/lng/date/max-scene-age/buffer/cloud-threshold always describe the
+same resolved Sentinel-2 scene. Numeric and image callers run the one
+backward-only selection rule, so that guarantee holds system-wide with
+no per-caller exception. See `_resolve_sentinel2_scene`'s docstring for
+the determinism argument.
 
 Historical GEE gotcha, now designed out rather than guarded against:
 `reduceRegion` with `ee.Reducer.toList()` reduces each band of a
@@ -99,6 +104,7 @@ GEE-free, offline-testable pieces (`data-pipeline/tests/test_sentinel2_masking.p
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -132,7 +138,20 @@ DEFAULT_CLOUD_CLASSES = (
 BANDS = ("B2", "B3", "B4", "B5", "B6")
 DEFAULT_BUFFER_M = 30  # ~3x3 10 m pixels around the point
 DEFAULT_SCALE_M = 10
-DEFAULT_SEARCH_WINDOW_DAYS = 10
+# Ceiling on the backward scene search -- NOT the selection rule. The
+# rule is "newest usable scene acquired on or before the requested day";
+# this only decides when to stop looking and report no imagery rather
+# than reach for something older still. Sentinel-2's ~5-day revisit puts
+# roughly a dozen acquisition opportunities inside the default 60 days,
+# which through the southwest monsoon is often what it takes to reach one
+# cloud-free pass: measured 2026-09-06 at upper-Gulf grid point 1_2,
+# every acquisition from 2026-09-02 back to 2026-08-20 was 100% cloud
+# over the sample buffer and the walk only stopped at 2026-08-18. Past
+# this ceiling a reading is too stale to say anything about current water
+# colour, so no-data is the honest answer. Override with
+# SENTINEL2_MAX_SCENE_AGE_DAYS (see .env.example).
+DEFAULT_MAX_SCENE_AGE_DAYS = 60
+MAX_SCENE_AGE_ENV_VAR = "SENTINEL2_MAX_SCENE_AGE_DAYS"
 DEFAULT_MAX_CLOUD_FRACTION = 0.5
 DEFAULT_MIN_WATER_OCCURRENCE_PCT = 50.0
 
@@ -390,51 +409,111 @@ def _water_mask_image(
     return jrc_says_water.unmask(bathymetry_says_water).rename(WATER_MASK_BAND)
 
 
+
+
+def default_max_scene_age_days() -> int:
+    """Effective ceiling on the backward scene search, read at call time.
+
+    `SENTINEL2_MAX_SCENE_AGE_DAYS` wins when it parses as a positive
+    integer; anything else falls back to `DEFAULT_MAX_SCENE_AGE_DAYS`.
+    Read lazily rather than frozen into a module constant at import time
+    because the `.env` files carrying it are loaded by whichever bridge
+    imports this package (`detection/src/_data_pipeline.py`, and
+    `backend/src/config.py` for its own file), and the import order
+    between those is not guaranteed.
+    """
+    raw = os.environ.get(MAX_SCENE_AGE_ENV_VAR, "").strip()
+    if not raw:
+        return DEFAULT_MAX_SCENE_AGE_DAYS
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_MAX_SCENE_AGE_DAYS
+    return value if value > 0 else DEFAULT_MAX_SCENE_AGE_DAYS
+
+
+# Carried alongside each candidate's `reduceRegion` output in the single
+# batched round trip below. Leading underscore so neither can collide
+# with a reducer output key ("B2_mean", "cloud_flag_count", ...).
+_SCENE_ID_PROPERTY = "_scene_id"
+_SCENE_TIME_PROPERTY = "_scene_time_start"
+
+
 def _resolve_sentinel2_scene(
     lat: float,
     lng: float,
     date: str,
-    search_window_days: int = DEFAULT_SEARCH_WINDOW_DAYS,
+    max_scene_age_days: int | None = None,
     buffer_m: int = DEFAULT_BUFFER_M,
     max_cloud_fraction: float = DEFAULT_MAX_CLOUD_FRACTION,
 ) -> dict:
-    """Shared candidate-resolution logic: search, sort-by-proximity-to-
-    `date`, and cloud/water-check Sentinel-2 candidates until one usable
-    scene is found.
+    """Newest usable Sentinel-2 scene acquired on or before `date`.
 
-    This is the single place that loop lives. `get_sentinel2_bands`
+    Selection rule -- one policy, every caller: among the scenes covering
+    this point, take the most recent acquisition whose sample buffer
+    passes the cloud and water checks. Two things the rule is not:
+
+      - It is not "nearest to `date`". A scene acquired *after* the
+        requested day is never a candidate, at any distance. `date` means
+        "as of this day", and answering it with imagery that did not
+        exist yet would date a reading into the future of the very thing
+        it claims to describe.
+      - `max_scene_age_days` is not the selection rule either. It is only
+        how far back the walk goes before giving up and raising, rather
+        than reaching for something older still. It bounds the search; it
+        never chooses within it. Defaults to
+        `default_max_scene_age_days()`.
+
+    This is the single place that logic lives. `get_sentinel2_bands`
     (numeric path) and `data-pipeline/src/imagery.py` (image-rendering
     path, added for the true-color/NDCI-heatmap panel thumbnails) both
     call this function rather than each running their own copy of the
-    search/sort/cloud-check loop — a second, independently written loop
-    could drift (different default threshold, different sort, a future
-    bugfix applied to only one copy) and end up picking a different
-    image than the one the numeric bands came from, which is exactly the
+    search/check loop — a second, independently written loop could drift
+    (different default threshold, different ordering, a future bugfix
+    applied to only one copy) and end up picking a different image than
+    the one the numeric bands came from, which is exactly the
     inconsistency this project cannot tolerate: a caller must never be
     shown a picture from a different date than the numbers next to it.
-    Given identical arguments, the underlying GEE query here is
-    deterministic (same collection filter + sort + candidate loop), so
-    both callers resolving with the same lat/lng/date/window/buffer/
-    cloud-threshold land on the same scene by construction, not by luck.
+    Given identical lat/lng/date/max-scene-age/buffer/cloud-threshold the
+    underlying GEE query is deterministic (same collection filter, same
+    acquisition-time ordering, same checks), so both callers land on the
+    same scene by construction, not by luck — with no per-caller
+    exception, since neither has a direction to disagree about any more.
+
+    One round trip, not one per candidate: the masked statistics for
+    every candidate in the window are computed server-side in a single
+    `collection.map(...)` and returned by one `getInfo()`, after which
+    the newest-first walk is plain Python over numbers already in hand.
+    The previous implementation issued one `reduceRegion().getInfo()` per
+    candidate, which made the walk-back cost proportional to how cloudy
+    the period had been — the 2026-09-06 upper-Gulf scan spent ~10 round
+    trips on a typical point and 36 minutes over 501 points, and that was
+    against a 20-day ceiling. Server-side compute is unchanged (the same
+    reduction over the same ~40-pixel buffer, just evaluated for every
+    candidate instead of stopping early); only the number of network
+    round trips falls, which is what makes a long ceiling affordable.
 
     Masking is done server-side: the combined cloud+water mask is built
     as an `ee.Image` and applied with `updateMask` before one
     `reduceRegion(ee.Reducer.mean().combine(ee.Reducer.count()))` per
-    candidate — one `getInfo()` round trip per candidate, the same as the
-    `toList` version it replaced. Pixels are never pulled back as
-    parallel per-band Python lists, so there is no per-band alignment to
-    get wrong (see the module docstring, "Historical GEE gotcha").
+    candidate. Pixels are never pulled back as parallel per-band Python
+    lists, so there is no per-band alignment to get wrong (see the module
+    docstring, "Historical GEE gotcha"). Pairing the scene id and its
+    acquisition time onto the same feature as those statistics also
+    removes the last place two separately-evaluated `aggregate_array`
+    calls had to be trusted to come back in the same order.
 
-    One measured, deliberate side effect of that switch: `toList` only
-    returned pixels lying wholly inside the buffer (~26-28 at the default
-    30 m radius / 10 m scale), whereas `reduceRegion`'s mean/count
-    reducers include every pixel that *intersects* it (~40), weighted by
-    the fraction covered. The sample is therefore a proper area-weighted
-    mean over the 30 m disc rather than an unweighted mean over the
-    pixels fully inside it. Live-checked 2026-09-05 at Bang Saen, Si
-    Racha and the Chao Phraya mouth (grid point 23_10): every band moved
-    by less than 1.4% (B2 -1.35% to +0.97%, B6 +0.10% to +1.34%). Units
-    are unchanged, so ratio indices downstream are unaffected.
+    One measured, deliberate side effect of the `reduceRegion` switch:
+    `toList` only returned pixels lying wholly inside the buffer (~26-28
+    at the default 30 m radius / 10 m scale), whereas `reduceRegion`'s
+    mean/count reducers include every pixel that *intersects* it (~40),
+    weighted by the fraction covered. The sample is therefore a proper
+    area-weighted mean over the 30 m disc rather than an unweighted mean
+    over the pixels fully inside it. Live-checked 2026-09-05 at Bang
+    Saen, Si Racha and the Chao Phraya mouth (grid point 23_10): every
+    band moved by less than 1.4% (B2 -1.35% to +0.97%, B6 +0.10% to
+    +1.34%). Units are unchanged, so ratio indices downstream are
+    unaffected.
 
     Returns:
         {
@@ -448,19 +527,24 @@ def _resolve_sentinel2_scene(
 
     Raises:
         GEEAuthError: GEE not authenticated.
-        NoCloudFreeImageryError: no image in the window met the cloud
-            threshold.
+        NoCloudFreeImageryError: no scene on or before `date`, within
+            `max_scene_age_days`, met the cloud threshold.
         NoWaterPixelsError: no pixel in the buffer survived the combined
-            cloud+water mask (or no usable image was found; see below).
+            cloud+water mask on any candidate clear enough to check.
     """
     initialize_ee()
+
+    if max_scene_age_days is None:
+        max_scene_age_days = default_max_scene_age_days()
 
     point = ee.Geometry.Point([lng, lat])
     region = point.buffer(buffer_m)
 
     requested = datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-    window_start = (requested - timedelta(days=search_window_days)).strftime("%Y-%m-%d")
-    window_end = (requested + timedelta(days=search_window_days + 1)).strftime("%Y-%m-%d")
+    window_start = (requested - timedelta(days=max_scene_age_days)).strftime("%Y-%m-%d")
+    # filterDate's end is exclusive, so +1 day keeps the requested day's
+    # own acquisitions as candidates and admits nothing later.
+    window_end = (requested + timedelta(days=1)).strftime("%Y-%m-%d")
 
     collection = (
         ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
@@ -469,33 +553,19 @@ def _resolve_sentinel2_scene(
         .sort("system:time_start")
     )
 
-    image_ids = collection.aggregate_array("system:index").getInfo()
-    if not image_ids:
-        raise NoCloudFreeImageryError(
-            f"No Sentinel-2 scenes found for ({lat}, {lng}) between "
-            f"{window_start} and {window_end}."
-        )
-
     # JRC Global Surface Water (multi-year "how often was this pixel
     # water", independent of any single day's turbidity/cloud), backed by
     # ETOPO1 bathymetry wherever JRC has no data at all -- see
     # `_water_mask_image`. Built once, reused for every candidate.
     water_mask_img = _water_mask_image()
 
-    dated_ids = collection.aggregate_array("system:time_start").getInfo()
-    candidates = sorted(
-        zip(image_ids, dated_ids),
-        key=lambda item: abs(item[1] - requested.timestamp() * 1000),
-    )
-
     # mean + count together: mean gives the masked band means and the
     # cloud fraction, count says how many pixels each of those was
     # actually computed from (0 -> nothing survived the mask).
     reducer = ee.Reducer.mean().combine(ee.Reducer.count(), sharedInputs=True)
 
-    best_error: Exception | None = None
-    for image_id, time_start_ms in candidates:
-        image = ee.Image(f"COPERNICUS/S2_SR_HARMONIZED/{image_id}")
+    def _candidate_stats(image):
+        image = ee.Image(image)
         cloud_flag = _cloud_flag_image(image)
 
         # B2-B6 masked down to clear-sky water pixels; `cloud_flag` is
@@ -507,14 +577,35 @@ def _resolve_sentinel2_scene(
             .updateMask(water_mask_img.And(cloud_flag.Not()))
             .addBands(cloud_flag)
         )
-
         stats = sample_img.reduceRegion(
             reducer=reducer,
             geometry=region,
             scale=DEFAULT_SCALE_M,
             maxPixels=1e7,
-        ).getInfo()
+        )
+        return ee.Feature(None, stats).set({
+            _SCENE_ID_PROPERTY: image.get("system:index"),
+            _SCENE_TIME_PROPERTY: image.get("system:time_start"),
+        })
 
+    features = ee.FeatureCollection(collection.map(_candidate_stats)).getInfo()["features"]
+    if not features:
+        raise NoCloudFreeImageryError(
+            f"No Sentinel-2 scenes found for ({lat}, {lng}) between "
+            f"{window_start} and {window_end}."
+        )
+
+    # Newest acquisition first, so the first candidate that passes both
+    # checks is by construction the newest usable one.
+    candidates = sorted(
+        (feature["properties"] for feature in features),
+        key=lambda stats: stats[_SCENE_TIME_PROPERTY],
+        reverse=True,
+    )
+
+    best_error: Exception | None = None
+    for stats in candidates:
+        image_id = stats[_SCENE_ID_PROPERTY]
         cloud_fraction = cloud_fraction_from_stats(stats)
         if cloud_fraction > max_cloud_fraction:
             best_error = NoCloudFreeImageryError(
@@ -529,11 +620,11 @@ def _resolve_sentinel2_scene(
             best_error = exc
             continue
 
-        actual_date = datetime.fromtimestamp(time_start_ms / 1000, tz=timezone.utc).strftime(
-            "%Y-%m-%d"
-        )
+        actual_date = datetime.fromtimestamp(
+            stats[_SCENE_TIME_PROPERTY] / 1000, tz=timezone.utc
+        ).strftime("%Y-%m-%d")
         return {
-            "image": image,
+            "image": ee.Image(f"COPERNICUS/S2_SR_HARMONIZED/{image_id}"),
             "image_id": image_id,
             "region": region,
             "band_means": band_means,
@@ -541,10 +632,10 @@ def _resolve_sentinel2_scene(
             "actual_date": actual_date,
         }
 
-    # Every candidate in the window was rejected.
+    # Every candidate on or before `date` was rejected.
     raise best_error or NoCloudFreeImageryError(
-        f"No usable Sentinel-2 image for ({lat}, {lng}) within "
-        f"{search_window_days} days of {date}."
+        f"No usable Sentinel-2 image for ({lat}, {lng}) on or before {date}, "
+        f"within {max_scene_age_days} days."
     )
 
 
@@ -552,19 +643,28 @@ def get_sentinel2_bands(
     lat: float,
     lng: float,
     date: str,
-    search_window_days: int = DEFAULT_SEARCH_WINDOW_DAYS,
+    max_scene_age_days: int | None = None,
     buffer_m: int = DEFAULT_BUFFER_M,
     max_cloud_fraction: float = DEFAULT_MAX_CLOUD_FRACTION,
 ) -> dict:
     """Sentinel-2 surface-reflectance bands at a point, cloud- and
-    land-masked, nearest usable date to the one requested.
+    land-masked, from the newest usable scene acquired on or before the
+    requested date.
 
     Args:
         lat, lng: WGS84 coordinates (upper Gulf of Thailand study area).
-        date: requested date, "YYYY-MM-DD". The nearest cloud-free enough
-            image within `search_window_days` on either side is used if
-            the exact date is unusable.
-        search_window_days: how far before/after `date` to search.
+        date: the day being asked about, "YYYY-MM-DD", read as "as of
+            this day". The reading comes from the most recent usable
+            acquisition on or before it, which is routinely days or weeks
+            older -- `actual_date` in the result says which, and callers
+            showing the number to a human are expected to show that date
+            (or its age) with it. A scene acquired after this day is
+            never used.
+        max_scene_age_days: how far back to keep looking before giving up
+            and raising, rather than returning something older still.
+            Defaults to `default_max_scene_age_days()`
+            (`SENTINEL2_MAX_SCENE_AGE_DAYS`, else
+            `DEFAULT_MAX_SCENE_AGE_DAYS`).
         buffer_m: radius (metres) of the sample buffer around the point.
             A small buffer (not a single pixel) avoids one noisy pixel
             dominating the reading.
@@ -581,15 +681,15 @@ def get_sentinel2_bands(
 
     Raises:
         GEEAuthError: GEE not authenticated.
-        NoCloudFreeImageryError: no image in the window met the cloud
-            threshold.
+        NoCloudFreeImageryError: no scene on or before `date`, within
+            `max_scene_age_days`, met the cloud threshold.
         NoWaterPixelsError: no pixel in the buffer survived the combined
-            cloud+water mask (or no usable image was found; see below).
+            cloud+water mask on any candidate clear enough to check.
             "Water" = JRC GSW occurrence >= 50% where JRC has data,
             ETOPO1 bedrock below sea level where it does not.
     """
     resolved = _resolve_sentinel2_scene(
-        lat, lng, date, search_window_days, buffer_m, max_cloud_fraction
+        lat, lng, date, max_scene_age_days, buffer_m, max_cloud_fraction
     )
     return {
         **resolved["band_means"],

@@ -45,7 +45,7 @@ SST_BAND = "sst"
 DEFAULT_SCALE_M = 4638  # native L3SMI grid resolution
 ARCHIVE_START = "2002-07-04"
 DEFAULT_CLIMATOLOGY_WINDOW_DAYS = 7
-DEFAULT_SST_SEARCH_WINDOW_DAYS = 5
+DEFAULT_SST_MAX_SCENE_AGE_DAYS = 5
 
 
 # --------------------------------------------------------------------------
@@ -182,14 +182,16 @@ def get_modis_sst(
     lat: float,
     lng: float,
     date: str,
-    search_window_days: int = DEFAULT_SST_SEARCH_WINDOW_DAYS,
+    max_scene_age_days: int = DEFAULT_SST_MAX_SCENE_AGE_DAYS,
     climatology_window_days: int = DEFAULT_CLIMATOLOGY_WINDOW_DAYS,
 ) -> dict:
     """Sea surface temperature at a point/date plus its seasonal normal.
 
     Pulls the full MODIS-Aqua `sst` history at the point (same product as
-    chlorophyll), picks the reading nearest `date` within
-    `search_window_days`, and separately computes the day-of-year
+    chlorophyll), picks the newest reading on or before `date` that is at
+    most `max_scene_age_days` old -- the same "as of this day, never
+    later" rule `sentinel2._resolve_sentinel2_scene` applies to the
+    optical scenes -- and separately computes the day-of-year
     climatology (mean/std across all archive years) via
     `day_of_year_climatology` — this is the "SST anomaly" input the
     prediction layer in docs/DETECTION_PLAN.md §3 needs (warm water
@@ -198,15 +200,18 @@ def get_modis_sst(
     Args:
         lat, lng: WGS84 coordinates.
         date: target date, "YYYY-MM-DD".
-        search_window_days: how far from `date` to look for the nearest
-            valid SST reading (cloud/land gaps are common day-to-day).
+        max_scene_age_days: how far back before `date` to accept a
+            reading from (cloud/land gaps are common day-to-day). A
+            reading dated after `date` is never used.
         climatology_window_days: day-of-year window for the seasonal mean.
 
     Returns:
         {'sst': float | None, 'sst_date': str | None,
          'sst_climatology': {'mean': float, 'std': float, 'n': int} | None}
-        `sst` is None if no valid reading fell within the search window
-        (e.g. persistent cloud) — this is reported, not silently dropped.
+        `sst` is None if no valid reading on or before `date` fell
+        within `max_scene_age_days` (e.g. persistent cloud) — this is
+        reported, not silently dropped. `sst_date` says which day the
+        returned value actually came from.
 
     Raises:
         GEEAuthError: GEE not authenticated.
@@ -215,13 +220,13 @@ def get_modis_sst(
 
     target = datetime.strptime(date, "%Y-%m-%d")
     nearest = None
-    nearest_diff = None
+    nearest_age = None
     for row in series:
         d = datetime.strptime(row["date"], "%Y-%m-%d")
-        diff = abs((d - target).days)
-        if diff <= search_window_days and (nearest_diff is None or diff < nearest_diff):
+        age = (target - d).days
+        if 0 <= age <= max_scene_age_days and (nearest_age is None or age < nearest_age):
             nearest = row
-            nearest_diff = diff
+            nearest_age = age
 
     climatology = day_of_year_climatology(series, SST_BAND, date, climatology_window_days)
 

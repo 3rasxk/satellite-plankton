@@ -76,6 +76,7 @@ test('all four cached indices keep their own actual scene date', () => {
   }
   assert.match(html, /2026-09-01/)
   assert.doesNotMatch(html, /2026-09-06/)
+  assert.match(html, /ก่อนวันเป้าหมาย 5 วัน/)
 })
 
 test('overview loads regional pins by default independently of the seven-site API', () => {
@@ -85,12 +86,12 @@ test('overview loads regional pins by default independently of the seven-site AP
   })
   const html = renderToStaticMarkup(createElement(OverviewPage))
   assert.equal(markerCount(html), 1)
-  assert.doesNotMatch(html, /Show regional scan|ระดับความเสี่ยง/)
+  assert.doesNotMatch(html, /Show regional scan|ระดับความเสี่ยง|จุดตรวจวัดประจำ|regional-layer-controls/)
 })
 
 test('grid counts include missing readings and retain the API interpretation disclaimer', () => {
   const html = renderToStaticMarkup(createElement(RegionalScanBanner, { data: {
-    run: { status: 'running', date_used: '2026-09-06' }, grid_spacing_km: 5,
+    run: { status: 'running', date_used: '2026-09-06' }, grid_spacing_km: 5, max_scene_age_days: 60,
     points: [point('pending', 'no_data_yet'), point('cloud', 'no_imagery'), point('read', 'ok', { ndci: -0.4 })],
     disclaimer: 'Index values alone establish neither bloom presence nor absence.',
   } }))
@@ -98,4 +99,5 @@ test('grid counts include missing readings and retain the API interpretation dis
   assert.match(html, /มีค่าอ่าน 1 · ยังไม่ได้สแกน 1 · ไม่มีค่าอ่าน 1/)
   assert.match(html, /Index values alone establish neither bloom presence nor absence\./)
   assert.match(html, /no anomaly detection active/)
+  assert.match(html, /ไม่เกิน 60 วันก่อนวันเป้าหมาย/)
 })

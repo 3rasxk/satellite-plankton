@@ -12,7 +12,7 @@ import pytest
 from src.db import SessionLocal
 from src.db_models import RegionalScanCluster, RegionalScanPoint, RegionalScanRun
 from src.regional_scan.grid import generate_scan_grid
-from src import config
+from src import _detection as bridge, config
 
 
 def test_regional_scan_shows_planned_grid_before_any_run(client, monkeypatch):
@@ -29,6 +29,10 @@ def test_regional_scan_shows_planned_grid_before_any_run(client, monkeypatch):
     grid = generate_scan_grid(config.REGIONAL_SCAN_GRID_SPACING_KM)
     assert len(body["points"]) == len(grid)
     assert body["grid_spacing_km"] == config.REGIONAL_SCAN_GRID_SPACING_KM
+    # The effective ceiling in force, read from the one place that owns it
+    # (data-pipeline via src/_detection.py) rather than a literal here --
+    # an env override must change the reported value, not fail the suite.
+    assert body["max_scene_age_days"] == bridge.default_max_scene_age_days()
     assert [(p["point_id"], p["lat"], p["lng"]) for p in body["points"]] == [
         (p["point_id"], p["lat"], p["lng"]) for p in grid
     ]
@@ -214,9 +218,9 @@ def test_regional_scan_serves_last_good_clusters_when_latest_run_aborted(client)
 
 def test_regional_scan_serves_per_point_actual_date(client):
     """Each point carries its OWN Sentinel-2 scene date. A single scan
-    legitimately mixes scene vintages (the nearest cloud-free scene is
-    searched within +/-10 days of the target date), so a run-level date
-    cannot stand in for any individual pin's."""
+    legitimately mixes scene vintages (each point resolves its own
+    latest usable scene on or before the target date), so a run-level
+    date cannot stand in for any individual pin's."""
     db = SessionLocal()
     try:
         run = RegionalScanRun(

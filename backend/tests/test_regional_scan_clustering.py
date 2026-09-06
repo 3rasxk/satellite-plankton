@@ -83,12 +83,13 @@ def test_transitive_chain_merges_into_one_cluster():
 # --------------------------------------------------------------------------
 # Scene-freshness range per cluster (spec §12).
 #
-# Cells are merged by grid adjacency alone -- never by date -- and
-# get_sentinel2_bands resolves each point's nearest cloud-free scene
-# independently within +/-10 days, so one cluster genuinely can span
-# several days of imagery. Measured spans among the 'ok' points of a
-# single scan: 7 days (2025-12-15), 5 days (2026-03-15), 10 days
-# (2026-06-15). These fields state the spread; they never hide it and
+# Cells are merged by grid adjacency alone -- never by date -- and each
+# point independently resolves the newest usable scene on or before the
+# target date, so one cluster genuinely can span several days of imagery.
+# Measured spans among the 'ok' points of a single scan: 7 days
+# (2025-12-15), 5 days (2026-03-15), 10 days (2026-06-15) under an
+# earlier symmetric +/-10-day search, and 15 days (2026-09-06) under the
+# current rule. These fields state the spread; they never hide it and
 # never change which cells cluster together.
 # --------------------------------------------------------------------------
 
@@ -110,7 +111,7 @@ def test_cluster_with_one_shared_scene_date_reports_span_zero():
 
 
 def test_cluster_spanning_scene_dates_reports_oldest_newest_and_span():
-    # The measured 10-day worst case from the 2026-06-15 scan, inside a
+    # The 10-day worst case measured in the 2026-06-15 scan, inside a
     # single 8-connected cluster.
     points = [
         _point("0_0", 0, 0, 1.6, "elevated", "2026-06-14"),

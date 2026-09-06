@@ -76,8 +76,9 @@ class DetectResponse(DisclaimerMixin):
         "when a satellite pull actually happened."
     )
     actual_date: str | None = Field(
-        default=None, description="Actual satellite scene date used, which may differ "
-        "from the requested `date` (nearest cloud-free image within the search window)."
+        default=None, description="Actual satellite scene date used. Routinely older "
+        "than the requested `date` and never newer: the newest usable image acquired "
+        "on or before that day is used, up to the system's scene-age ceiling."
     )
 
     true_color_image_url: str | None = Field(
@@ -311,9 +312,9 @@ class RegionalScanPointSchema(BaseModel):
     actual_date: str | None = Field(
         default=None, description="Real Sentinel-2 scene date behind THIS point's "
         "reading (YYYY-MM-DD) — per point, not per run. It is often older than the "
-        "run's `date_used`: the nearest cloud-free scene is searched within a "
-        "±10-day window, so points in one scan are routinely backed by scenes of "
-        "different dates. Null when no scene was resolved for this point "
+        "run's `date_used`: each point independently takes the newest usable "
+        "scene acquired on or before the target date, so dates differ across "
+        "points. Never newer than `date_used`. Null when no scene was resolved for this point "
         "(`status` no_imagery / no_water_pixels / error); never substituted with "
         "`date_used`."
     )
@@ -369,7 +370,7 @@ class RegionalScanRunMeta(BaseModel):
         "the next poll as its comparison baseline. Not the same quantity "
         "as a cluster's `newest_scene_date`, which is a date-only "
         "(YYYY-MM-DD) maximum over one cluster's member cells, each of "
-        "which resolved its own nearest cloud-free scene independently. "
+        "which resolved its own latest usable scene independently. "
         "Null when the run was not poll-triggered, or the poll found no "
         "scene in its lookback window."
     )
@@ -384,6 +385,14 @@ class RegionalScanRunMeta(BaseModel):
 class RegionalScanResponse(DisclaimerMixin):
     caveat: str = Field(default=REGIONAL_SCAN_CAVEAT_TEXT)
     grid_spacing_km: float = Field(description="Spacing of the displayed cached or planned grid.")
+    max_scene_age_days: int = Field(
+        description="How old a point's Sentinel-2 scene is currently allowed to be "
+        "before the system reports no imagery instead. Every point takes the newest "
+        "usable scene acquired on or before the scan's target date, never a later "
+        "one; this number only bounds how far back that search gives up. It is the "
+        "value in force right now, not proof that an older cached snapshot was "
+        "produced under the same setting.",
+    )
     run: RegionalScanRunMeta | None = Field(
         default=None, description="Latest scan attempt; null if no scan has started."
     )
