@@ -499,38 +499,135 @@ def test_an_overlay_finer_than_the_pixel_ceiling_is_refused():
 
 def test_the_vectorised_ramp_matches_data_pipelines_own_scalar_ramp():
     """`ramp_rgb` is a vectorisation of imagery.ndci_value_to_color, not a
-    second palette. Checked value for value, including outside the domain
-    where both must clamp."""
+    second palette.
+
+    Reference provenance: APPROXIMATE, saturating. Two implementations of
+    a continuous function can only be compared at sampled inputs, so
+    "they agree" is always "they agree where we looked". This looks at
+    the density where the ramp's output set stops growing
+    (RAMP_PALETTE_BASE_SAMPLES), which means every colour either can
+    produce is exercised, and well past the domain in both directions
+    where both must clamp. It was 997 samples, which is agreement over
+    0.2% of that -- enough to miss a divergence confined to a few
+    adjacent values.
+    """
     low, high = render.NDCI_RAMP_DOMAIN
     span = high - low
-    values = np.linspace(low - span, high + span, 997)
+    values = np.linspace(low - span, high + span, RAMP_PALETTE_BASE_SAMPLES)
 
     vectorised = render.ramp_rgb(values)
+    produced = set()
     for value, colour in zip(values, vectorised):
-        assert tuple(int(c) for c in colour) == bridge.ndci_value_to_color(float(value))
+        as_tuple = tuple(int(c) for c in colour)
+        scalar = bridge.ndci_value_to_color(float(value))
+        assert as_tuple == scalar, (
+            f"vectorised and scalar ramps diverge at NDCI {value!r}: "
+            f"{as_tuple} vs {scalar}"
+        )
+        produced.add(as_tuple)
+
+    # The sample is only meaningful if it covered the whole output set.
+    assert produced == ramp_colours(), (
+        "the comparison did not exercise every colour the ramp can produce, "
+        "so agreement here is weaker than it looks"
+    )
     assert render.NDCI_RAMP_HEX == bridge.NDCI_RAMP_HEX
     assert render.NDCI_RAMP_DOMAIN == bridge.NDCI_RAMP_DOMAIN
 
 
+EDGE_PROBE_OFFSET_DEG = 1e-4  # ~11 m: unambiguously off the line, still hugging it
+EDGE_PROBES_PER_EDGE = 200
+
+
+def _edge_probe_points(polygon):
+    """Points just inside and just outside every polygon edge.
+
+    Two implementations of point-in-polygon agree trivially in the open
+    interior; they diverge, if at all, next to an edge. A lattice is
+    least dense exactly there, so the edges are walked directly and
+    probed on both sides along each edge's normal.
+
+    Points nearer the line than EDGE_PROBE_OFFSET_DEG are deliberately
+    not probed: neither implementation claims a boundary rule (see
+    study_area.point_in_polygon's docstring), so a disagreement on the
+    line itself would not be a defect in either.
+    """
+    probes = []
+    count = len(polygon)
+    for index in range(count):
+        lat_a, lng_a = polygon[index]
+        lat_b, lng_b = polygon[(index + 1) % count]
+        for step in np.linspace(0.02, 0.98, EDGE_PROBES_PER_EDGE):
+            lat = lat_a + (lat_b - lat_a) * step
+            lng = lng_a + (lng_b - lng_a) * step
+            d_lat, d_lng = lat_b - lat_a, lng_b - lng_a
+            length = float(np.hypot(d_lat, d_lng)) or 1.0
+            # Unit normal to this edge.
+            n_lat, n_lng = -d_lng / length, d_lat / length
+            for sign in (1.0, -1.0):
+                probes.append((
+                    lat + n_lat * EDGE_PROBE_OFFSET_DEG * sign,
+                    lng + n_lng * EDGE_PROBE_OFFSET_DEG * sign,
+                ))
+    return probes
+
+
 def test_the_polygon_mask_agrees_with_the_study_area_boundary_check():
     """The vectorised ray casting is the same rule data-pipeline's
-    `check_point_in_study_area` applies, run on a grid -- checked against
-    the real study polygon, over a lattice that crosses all four edges."""
-    lats = np.linspace(12.3, 13.8, 41)
-    lngs = np.linspace(99.7, 101.3, 41)
+    `check_point_in_study_area` applies, run on a grid.
 
-    mask = render.points_in_polygon_mask(
-        lats[:, None], lngs[None, :], render.STUDY_AREA_POLYGON_LATLNG
+    Reference provenance: APPROXIMATE, and unavoidably so -- the plane is
+    continuous, so no finite check is exhaustive. What it does cover is
+    stated rather than implied:
+
+      - EDGES, densely: 200 points along each of the polygon's edges,
+        probed ~11 m either side of the line. This is where two
+        point-in-polygon implementations can actually disagree, and it is
+        precisely where the previous 41x41 lattice was thinnest -- most
+        of its 1,681 points sat in open interior or open exterior, where
+        agreement is trivial.
+      - INTERIOR and EXTERIOR, coarsely: the original lattice, kept, so a
+        gross error away from the edges is still caught.
+
+    Not covered, and not claimed: the boundary line itself, within
+    ~11 m. Neither implementation defines a rule there.
+    """
+    polygon = render.STUDY_AREA_POLYGON_LATLNG
+
+    edge_disagreements = [
+        (lat, lng)
+        for lat, lng in _edge_probe_points(polygon)
+        if bool(render.points_in_polygon_mask(
+            np.array([[lat]]), np.array([[lng]]), polygon
+        )[0, 0]) != bridge.check_point_in_study_area(lat, lng)["in_study_area"]
+    ]
+    assert edge_disagreements == [], (
+        f"{len(edge_disagreements)} disagreement(s) beside the polygon edge, "
+        f"e.g. {edge_disagreements[:3]}"
     )
 
-    disagreements = [
+    lats = np.linspace(12.3, 13.8, 41)
+    lngs = np.linspace(99.7, 101.3, 41)
+    mask = render.points_in_polygon_mask(lats[:, None], lngs[None, :], polygon)
+    lattice_disagreements = [
         (float(lat), float(lng))
         for row, lat in enumerate(lats)
         for col, lng in enumerate(lngs)
         if bool(mask[row, col]) != bridge.check_point_in_study_area(lat, lng)["in_study_area"]
     ]
-    assert disagreements == []
+    assert lattice_disagreements == []
     assert mask.any() and not mask.all()
+
+    # The edge probes are only meaningful if they land on both sides.
+    inside = sum(
+        bridge.check_point_in_study_area(lat, lng)["in_study_area"]
+        for lat, lng in _edge_probe_points(polygon)
+    )
+    total = len(_edge_probe_points(polygon))
+    assert 0 < inside < total, (
+        f"edge probes landed {inside}/{total} inside -- they are not straddling "
+        "the boundary, so they test nothing"
+    )
 
 
 def test_a_band_with_no_agreed_display_domain_is_refused():

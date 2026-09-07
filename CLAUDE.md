@@ -70,7 +70,7 @@ satellite-data ──► bloom-detection
 ## 5. Shared conventions
 
 - Repo: `/data-pipeline` `/detection` `/backend` `/frontend` `/docs`
-- The retained `data/validation/water_mask_truth.json` fixture tests the water mask; it is not bloom-event ground truth.
+- The retained `data/validation/water_mask_truth.json` fixture tests the water mask. It is not bloom-event data, and it is not ground truth in any sense: every label is NDWI derived from a Sentinel-2 Cloud Score+ composite, so it is satellite inferring water from satellite. Where the fixture and the mask err the same way — most likely in turbid river-mouth water, the case this project cares most about — no test can see it. A green run means the mask still behaves as when it was measured, never that it is correct. See the fixture's own `_meta.circularity` and `_meta.non_derived_reference_options`.
 - Config via env vars + `.env.example` only — never commit secrets.
 - Every module has a docstring stating data source + limitations.
 - Comments/docs may be English; identifiers in English.

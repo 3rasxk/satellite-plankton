@@ -8,7 +8,7 @@ This repository monitors harmful algal blooms in the upper Gulf of Thailand.
 - `detection/src/` computes spectral indices, climatology, thresholds, and rule-based risk; tests are in `detection/tests/`, reports in `detection/reports/`.
 - `backend/src/` contains the FastAPI service, database models, scheduler, and routers; tests are in `backend/tests/`.
 - `frontend/src/` contains the React/Vite dashboard, components, pages, hooks, and styles; static assets are in `frontend/public/`.
-- `data/validation/water_mask_truth.json` is the retained water-mask regression fixture; `docs/` contains design and implementation plans.
+- `data/validation/water_mask_truth.json` is the retained water-mask regression fixture — a satellite-derived reference, not field truth (see its `_meta.circularity`); `docs/` contains design and implementation plans.
 
 Keep the three Python services as separate projects and virtual environments. Preserve the existing namespaced `importlib` bridges between their `src/` directories.
 
