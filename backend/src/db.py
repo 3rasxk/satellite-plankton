@@ -3,7 +3,7 @@ for the DATABASE_URL / SQLite-fallback story."""
 
 from __future__ import annotations
 
-from sqlalchemy import MetaData, Table, create_engine, inspect
+from sqlalchemy import MetaData, Table, create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from . import config
@@ -27,6 +27,47 @@ def get_db():
         db.close()
 
 
+# Nullable columns added to a table that already exists in the wild.
+# `create_all` creates missing tables but never alters an existing one, so
+# a column added to a model after its table was first created is invisible
+# to any database that predates it -- and the next query naming it fails.
+#
+# Each entry is (table, column, DDL type), all module constants, never
+# user input. Only ever nullable additions with no default: an ADD COLUMN
+# of that shape is instant and lossless on both SQLite and Postgres, which
+# is the whole reason this is acceptable in a project with no migration
+# tool. Anything that needs data moved or a column dropped is not this
+# list's job and should not be added to it.
+_ADDED_NULLABLE_COLUMNS: tuple[tuple[str, str, str], ...] = (
+    # RasterScanRun.overlay -- rendered map assets and their bounds; the
+    # raster_scan_runs table shipped one commit before the renderer did.
+    ("raster_scan_runs", "overlay", "JSON"),
+)
+
+
+def _add_missing_columns(connection) -> list[str]:
+    """Apply `_ADDED_NULLABLE_COLUMNS` to tables that already exist.
+
+    A table that does not exist yet is skipped -- `create_all` will build
+    it complete from the model, including the column. Returns the
+    "table.column" names actually added, for the caller to log; adding
+    nothing is the normal case.
+    """
+    inspector = inspect(connection)
+    added: list[str] = []
+    for table_name, column_name, ddl_type in _ADDED_NULLABLE_COLUMNS:
+        if not inspector.has_table(table_name):
+            continue
+        existing = {column["name"] for column in inspector.get_columns(table_name)}
+        if column_name in existing:
+            continue
+        connection.execute(
+            text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {ddl_type}")
+        )
+        added.append(f"{table_name}.{column_name}")
+    return added
+
+
 def init_db() -> None:
     """Create active tables and discard retired or invalid cache schemas.
 
@@ -35,6 +76,11 @@ def init_db() -> None:
     disposable detection caches and regional scan snapshots and their run
     metadata are reset. The retired validation tables are always dropped.
     Repeated startup preserves caches already using the current schema.
+
+    Nullable columns added to a table that already exists are then filled
+    in by `_add_missing_columns` -- `create_all` never alters an existing
+    table, so without that step a column added to a model after its table
+    shipped would be missing from every database that predates it.
     """
     from . import db_models  # noqa: F401  (registers models on Base.metadata)
 
@@ -65,4 +111,5 @@ def init_db() -> None:
                 db_models.DetectionCache,
             ):
                 model.__table__.drop(bind=connection, checkfirst=True)
+        _add_missing_columns(connection)
         Base.metadata.create_all(bind=connection)

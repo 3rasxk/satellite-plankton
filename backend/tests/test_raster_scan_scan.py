@@ -460,3 +460,66 @@ def test_every_stale_running_row_is_expired_not_only_the_newest(client, blob_roo
         )
         assert db.get(RasterScanRun, newer_id).status == "error"
         assert db.get(RasterScanRun, older_id).completed_at is not None
+
+
+# --------------------------------------------------------------------------
+# The map overlay drawn from the stored cells (src/raster_scan/render.py).
+#
+# Rendering happens after the run is committed, on purpose: the cells are
+# the result, the overlay is a picture of them, and a failed picture must
+# not be able to cost a good raster its row.
+# --------------------------------------------------------------------------
+
+
+def test_a_completed_scan_records_where_its_overlay_was_drawn(client, blob_root, monkeypatch):
+    from src.raster_scan import render
+
+    install_raster(monkeypatch)
+
+    with SessionLocal() as db:
+        run = scan_module.run_raster_scan(db, "2026-09-06")
+
+        assert run.status == "ok"
+        overlay = run.overlay
+        assert overlay["status"] == "ok"
+        # A PNG with no bounds is not a map layer; both are on the row.
+        assert overlay["bounds"]["leaflet_bounds"] == [
+            [overlay["bounds"]["south"], overlay["bounds"]["west"]],
+            [overlay["bounds"]["north"], overlay["bounds"]["east"]],
+        ]
+        png = Path(overlay["assets"]["ndci"]["path"])
+        assert png.exists() and png.parent == storage.run_blob_dir(run.id, blob_root)
+        assert overlay["assets"]["ndci"]["bytes"] == png.stat().st_size
+        # Four cells were stored; the rest of the study area is drawn as
+        # unmeasured rather than left blank.
+        assert overlay["assets"]["ndci"]["valued_pixels"] == 4
+        assert overlay["assets"]["ndci"]["no_data_pixels"] > 4
+        assert overlay["assets"]["ndci"]["measured_fraction"] < 0.001
+        assert render.NO_DATA_MIN_ALPHA > 0
+
+
+def test_a_failed_render_does_not_cost_the_scan_its_raster(client, blob_root, monkeypatch):
+    """The overlay is derived; the cells are not. A render that blows up
+    is recorded on the row and leaves the raster, the summary and the
+    run's status alone."""
+    from src.raster_scan import render
+
+    install_raster(monkeypatch)
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("no pixels for you")
+
+    monkeypatch.setattr(render, "write_overlay_assets", boom)
+
+    with SessionLocal() as db:
+        run = scan_module.run_raster_scan(db, "2026-09-06")
+
+        assert run.status == "ok", "a picture failing must not fail the scan"
+        assert run.reason is None
+        assert Path(run.blob_path).exists()
+        assert run.cell_count == 4
+        assert run.summary["cell_count"] == 4
+        # Recorded, not swallowed -- and distinguishable from "never
+        # rendered" (null) and from an expired run's removed overlay.
+        assert run.overlay["status"] == "error"
+        assert "no pixels for you" in run.overlay["error"]

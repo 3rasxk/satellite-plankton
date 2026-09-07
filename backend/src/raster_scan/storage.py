@@ -17,7 +17,10 @@ the repository) -- verified by
 
 Retention: full rasters are kept for `RASTER_RETENTION_DAYS` (default 30).
 Past that, the run is *reduced*, not deleted -- its `summary` row (written
-when the scan completed) stays, and only the blob goes. What survives is
+when the scan completed) stays, and the blob goes, taking the rendered
+overlay PNGs with it: those are drawn from the cells
+(`src/raster_scan/render.py`), so once the cells are gone the picture can
+never be redrawn or checked against its source. What survives is
 a whole-raster reduction computed with data-pipeline's own aggregation
 policy, `RASTER_BAND_REDUCERS`: mean for the four index bands, and mode
 -- never mean -- for the acquisition date, because the average of two
@@ -174,6 +177,26 @@ def delete_blob_file(path: str | Path) -> bool:
     return existed
 
 
+def delete_overlay_assets(run: RasterScanRun) -> list[str]:
+    """Remove the rendered PNGs and sidecar one run recorded, if any.
+
+    The overlay is drawn from the cells (`src/raster_scan/render.py`), so
+    it cannot outlive them: once the blob is gone the image can never be
+    redrawn or checked against its source, and an unredrawable picture of
+    a raster nobody can re-read is exactly the kind of orphan this
+    project's retention exists to avoid. Keeping it would also leave
+    files in the run directory forever, since `delete_blob_file` only
+    removes the directory when it is empty.
+
+    Reads `run.overlay["files"]` -- a flat list render.py maintains for
+    this one purpose, so retention never has to know the structure of the
+    rest of that metadata. Returns the paths removed.
+    """
+    overlay = run.overlay or {}
+    removed = [path for path in overlay.get("files", []) if delete_blob_file(path)]
+    return removed
+
+
 def delete_run_blob(run_id: int, root: Path | None = None) -> bool:
     """Remove one run's blob by id -- for a caller holding the run id
     rather than the stored path (manual cleanup, tests). Retention itself
@@ -194,10 +217,10 @@ def apply_retention(
     actually taken -- not on when the row was created or last touched.
 
     A reduced run keeps: its row, all its metadata, and its `summary`
-    (written at scan time, see `run_raster_scan`). It loses only the
-    cells. `blob_path` is nulled and `blob_deleted_at` set, so "expired"
-    is a stated fact on the row rather than something inferred from a
-    missing file.
+    (written at scan time, see `run_raster_scan`). It loses the cells and
+    the overlay drawn from them. `blob_path` and `overlay` are nulled and
+    `blob_deleted_at` set, so "expired" is a stated fact on the row rather
+    than something inferred from a missing file.
 
     A run whose summary is missing is NOT expired: it is left alone and
     logged. Deleting the last copy of a raster that was never reduced
@@ -245,6 +268,12 @@ def apply_retention(
         # and the current root: if RASTER_BLOB_ROOT has moved since the
         # scan, reconstructing would delete nothing while still nulling
         # the row, leaking the old file with no record it ever existed.
+        # The rendered overlay goes with the cells it was drawn from --
+        # see delete_overlay_assets. Removed before the blob so an
+        # interrupted pass never leaves a row advertising PNGs whose
+        # source raster is already gone.
+        delete_overlay_assets(run)
+        run.overlay = None
         delete_blob_file(run.blob_path)
         run.blob_path = None
         run.blob_bytes = None

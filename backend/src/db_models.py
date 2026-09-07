@@ -180,6 +180,21 @@ class RasterScanRun(Base):
     # see data-pipeline/src/raster.py's RASTER_BAND_REDUCERS.
     summary: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
+    # Where the rendered map overlay for this run lives, and the
+    # geographic bounds it must be placed at (src/raster_scan/render.py).
+    # Carries the legend with it: an overlay's grey hatch means "inside
+    # the study area, nothing usable was read here" and must never be
+    # captioned as a low reading, so the meaning of each of the three
+    # drawn states travels with the paths rather than being re-guessed by
+    # whatever displays them.
+    #
+    # Null means no overlay: never rendered, or rendered and then removed
+    # with the cells by retention (the PNGs are derived from the blob and
+    # cannot be redrawn once it is gone). A failed render stores
+    # {"status": "error", ...} instead, so a failure is a recorded fact
+    # rather than an absence indistinguishable from the other two.
+    overlay: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 

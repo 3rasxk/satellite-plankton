@@ -2,7 +2,8 @@
 Raster scan orchestration: run_raster_scan() builds one whole-polygon
 Sentinel-2 spectral-index composite (data-pipeline/src/raster.py, reached
 through backend/src/_detection.py), downloads it at the configured scale,
-writes the cells to disk (src/raster_scan/storage.py) and records the run.
+writes the cells to disk (src/raster_scan/storage.py), records the run, and
+draws its map overlay from the stored cells (src/raster_scan/render.py).
 
 What this is not: it does not replace, feed, or interfere with the pin
 path. The fixed 7-site grid (src/grid.py), the scheduler's DetectionCache
@@ -43,7 +44,7 @@ from .. import _detection as bridge
 from .. import _study_area
 from ..config import RASTER_RETENTION_DAYS, RASTER_SCAN_SCALE_M, as_aware_utc
 from ..db_models import RasterScanRun
-from . import storage
+from . import render, storage
 
 logger = logging.getLogger("backend.raster_scan.scan")
 
@@ -253,12 +254,51 @@ def run_raster_scan(
     # month later.
     run.summary = summary
     finished = _finish(db, run, "ok", None)
+    # After the run is committed, never before: the cells are the result,
+    # the overlay is a picture of them. A failed render must not be able
+    # to cost a good raster its row.
+    _render_overlay(db, finished)
     logger.info(
         "raster_scan: run %s done -- cells=%d scenes=%d span=%s..%s blob=%s (%.1f MB)",
         run.id, run.cell_count, run.scene_count, run.oldest_scene_date,
         run.newest_scene_date, run.blob_path, written["bytes"] / 1e6,
     )
     return finished
+
+
+def _render_overlay(db: Session, run: RasterScanRun) -> None:
+    """Draw the run's map overlay from the cells just stored, and record
+    where it went (src/raster_scan/render.py).
+
+    Reads the blob back off disk rather than rendering the arrays still
+    in memory: the picture must be of what was actually stored, so a
+    write that silently lost or altered a cell shows up here instead of
+    being papered over by an overlay drawn from a better copy.
+
+    A render failure is recorded on the row, not raised and not swallowed.
+    The scan itself has already succeeded and committed by this point --
+    the cells are safe on disk and are the product; the overlay is a
+    derived picture of them, and losing it is a smaller thing than losing
+    the raster. `overlay = {"status": "error", ...}` keeps that
+    distinguishable from a run that was never rendered (null) and from
+    one whose overlay retention removed along with the cells (also null,
+    but with blob_deleted_at set).
+    """
+    try:
+        render.render_and_store(db, run)
+    except Exception as exc:  # noqa: BLE001 -- recorded on the row, see above
+        logger.error(
+            "raster_scan: run %s stored %s cells but its overlay failed to render: "
+            "%s: %s", run.id, run.cell_count, type(exc).__name__, exc
+        )
+        db.rollback()
+        db.refresh(run)
+        run.overlay = {
+            "status": "error",
+            "error": f"{type(exc).__name__}: {exc}",
+            "attempted_at": datetime.now(timezone.utc).isoformat(),
+        }
+        db.commit()
 
 
 def _finish(db: Session, run: RasterScanRun, status: str, reason: str | None) -> RasterScanRun:

@@ -118,6 +118,19 @@ get_rainfall_proxy = _dp.get_rainfall_proxy
 get_true_color_image = _dp.get_true_color_image
 get_ndci_heatmap = _dp.get_ndci_heatmap
 
+# The NDCI display ramp itself, plus its pure colour math (imagery.py's
+# NDCI_RAMP_HEX / NDCI_RAMP_DOMAIN / hex_to_rgb / ndci_value_to_color).
+# Re-exported for backend/src/raster_scan/render.py, which draws the
+# whole-polygon overlay from *stored cells* instead of from a GEE
+# thumbnail. It has to paint the same quantity in the same colours over
+# the same value domain as the per-site NDCI heatmap, or the dashboard
+# would show one index in two disagreeing palettes -- so there is one
+# ramp, read by both, and never a second copy of the stops or the domain.
+NDCI_RAMP_HEX = _dp.imagery.NDCI_RAMP_HEX
+NDCI_RAMP_DOMAIN = _dp.imagery.NDCI_RAMP_DOMAIN
+hex_to_rgb = _dp.imagery.hex_to_rgb
+ndci_value_to_color = _dp.imagery.ndci_value_to_color
+
 # Study-area boundary check (data-pipeline/src/study_area.py) -- pure, no
 # GEE call. Re-exported for the same pass-through reason as the image
 # functions above: backend/src/_detection.py reaches it through this one
@@ -180,6 +193,10 @@ __all__ = [
     "NoWaterPixelsError",
     "get_true_color_image",
     "get_ndci_heatmap",
+    "NDCI_RAMP_HEX",
+    "NDCI_RAMP_DOMAIN",
+    "hex_to_rgb",
+    "ndci_value_to_color",
     "check_point_in_study_area",
     "get_newest_scene_timestamp",
     "build_index_composite",

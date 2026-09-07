@@ -127,6 +127,17 @@ day_of_year_climatology = _data_pipeline_bridge.day_of_year_climatology
 get_true_color_image = _data_pipeline_bridge.get_true_color_image
 get_ndci_heatmap = _data_pipeline_bridge.get_ndci_heatmap
 
+# The NDCI ramp itself (stops, domain, and the pure colour math), used by
+# src/raster_scan/render.py to paint the whole-polygon overlay from stored
+# cells. The overlay and the per-site heatmap show the same index, so they
+# read the same ramp rather than each carrying its own copy of five hex
+# strings and a domain that could drift apart. `ndci_value_to_color` is
+# the scalar reference the renderer's vectorised ramp is tested against.
+NDCI_RAMP_HEX = _data_pipeline_bridge.NDCI_RAMP_HEX
+NDCI_RAMP_DOMAIN = _data_pipeline_bridge.NDCI_RAMP_DOMAIN
+hex_to_rgb = _data_pipeline_bridge.hex_to_rgb
+ndci_value_to_color = _data_pipeline_bridge.ndci_value_to_color
+
 # Study-area boundary check -- pure, no GEE call. Used by routers/detect.py
 # to flag (never silently accept) a query outside the upper Gulf polygon.
 check_point_in_study_area = _data_pipeline_bridge.check_point_in_study_area
@@ -177,6 +188,10 @@ __all__ = [
     "z_score",
     "get_true_color_image",
     "get_ndci_heatmap",
+    "NDCI_RAMP_HEX",
+    "NDCI_RAMP_DOMAIN",
+    "hex_to_rgb",
+    "ndci_value_to_color",
     "check_point_in_study_area",
     "get_newest_scene_timestamp",
     "build_index_composite",

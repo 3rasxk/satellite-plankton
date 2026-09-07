@@ -20,6 +20,15 @@ earthengine-api>=0.1.400
 numpy>=1.26
 PyYAML>=6.0
 
+# PNG encoding for the raster-scan map overlay (src/raster_scan/render.py)
+# -- the only thing this is used for. It is NOT used to fetch or decode
+# satellite imagery: the per-site thumbnails are rendered by Earth Engine
+# and passed through as bytes (data-pipeline/src/imagery.py). Listed
+# explicitly because it was previously present in the venv by accident --
+# `pip show pillow` reported no package requiring it -- and code must not
+# depend on a library nothing declares.
+Pillow>=11.0
+
 # dev / test only
 pytest>=8.0
 httpx>=0.27
