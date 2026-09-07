@@ -287,6 +287,49 @@ class SummaryResponse(DisclaimerMixin):
 # /regional-scan
 # --------------------------------------------------------------------------
 
+class RasterScanResponse(DisclaimerMixin):
+    """Metadata for the newest raster overlay still present on disk.
+
+    The image itself is fetched separately from `overlay_url`; this
+    payload stays small enough to poll. Every field is null when no
+    overlay has been rendered -- there is no placeholder raster, because
+    an empty overlay drawn over the study area would assert "we looked
+    and saw nothing", which is not the same as "we have not looked".
+    """
+
+    run_id: int | None = Field(default=None, description="Run that produced the served overlay.")
+    status: str | None = Field(default=None, description="That run's status.")
+    date_used: str | None = Field(default=None, description="Target date the scan was run for.")
+    scale_m: int | None = Field(
+        default=None, description="Read scale in metres. A cell is ONE nearest-neighbour "
+        "sampled native pixel at this spacing, not an average of the pixels it covers -- "
+        "see data-pipeline/src/raster.py.")
+    cell_count: int | None = Field(default=None, description="Cells carrying a real reading.")
+    scene_count: int | None = Field(
+        default=None, description="Distinct Sentinel-2 acquisitions contributing pixels.")
+    oldest_scene_date: str | None = Field(
+        default=None, description="Oldest acquisition date among the retained cells.")
+    newest_scene_date: str | None = Field(
+        default=None, description="Newest acquisition date among the retained cells. One raster "
+        "routinely mixes several dates; each cell carries its own.")
+    completed_at: str | None = Field(default=None, description="When that run finished (UTC).")
+    bounds: list[list[float]] | None = Field(
+        default=None, description="[[south, west], [north, east]] for a Leaflet ImageOverlay. "
+        "Covers the whole study polygon, not merely the cells that returned data, so a cloudy "
+        "day cannot silently shrink the overlay.")
+    legend: dict | None = Field(
+        default=None, description="What each colour means, carried with the picture: the value "
+        "swatches are sampled from the same ramp that painted the image, so a legend cannot "
+        "drift from it. Includes the no-data hatch, which marks water that was NOT measured -- "
+        "never a low reading.")
+    overlay_url: str | None = Field(default=None, description="Where to fetch the PNG.")
+    stale_run_id: int | None = Field(
+        default=None, description="Set when a newer run exists whose overlay is not on disk "
+        "(running, failed, or expired). The served picture is older than the newest attempt.")
+    reason: str | None = Field(
+        default=None, description="Why no overlay is being served, when there is none.")
+
+
 REGIONAL_SCAN_CAVEAT_TEXT = (
     "Index values only — no anomaly detection active. Real "
     "Sentinel-2 readings across the full upper Gulf study-area polygon, "

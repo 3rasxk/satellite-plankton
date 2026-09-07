@@ -3,6 +3,7 @@ import Icon from './Icon.jsx'
 
 const NAV_ITEMS = [
   { to: '/', label: 'ภาพรวม/แผนที่', icon: 'map', end: true },
+  { to: '/raster', label: 'ภาพแรสเตอร์ทั่วพื้นที่', icon: 'satellite' },
 ]
 
 /** Sidebar nav shell (HAB Sentinel design spec). */

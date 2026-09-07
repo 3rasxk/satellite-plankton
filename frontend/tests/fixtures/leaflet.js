@@ -10,3 +10,11 @@ export const Popup = ({ children }) => createElement('section', null, children)
 export const TileLayer = () => null
 export const ZoomControl = () => null
 export const useMap = () => ({ fitBounds() {}, setView() {} })
+export const ImageOverlay = ({ url, bounds, opacity, className }) => createElement(
+  'img', {
+    'data-overlay-url': url,
+    'data-overlay-bounds': JSON.stringify(bounds),
+    'data-overlay-opacity': String(opacity),
+    className,
+  },
+)

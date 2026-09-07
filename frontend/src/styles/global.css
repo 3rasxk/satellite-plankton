@@ -2113,3 +2113,41 @@ table.events-table td.mono {
     transform: rotate(360deg);
   }
 }
+
+/* Raster overlay ---------------------------------------------------------
+   image-rendering: pixelated is load-bearing. Smooth scaling blends
+   neighbouring pixels, and a blend of the grey no-data hatch with a ramp
+   colour is a colour that means nothing -- it would paint water we could
+   not see in something that reads as a reading. Nearest-neighbour keeps
+   every pixel either a reading or a hatch. Measured: nearest resampling
+   at 1/2..1/16 introduces zero off-palette colours, bilinear introduces
+   7,307. */
+.raster-overlay-image {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges; /* older WebKit/Firefox spelling */
+}
+
+.raster-legend {
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
+  z-index: 500;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  max-width: 320px;
+}
+
+.raster-legend-title { font-weight: 600; margin-bottom: 6px; }
+.raster-legend-ramp { display: flex; height: 12px; border-radius: 3px; overflow: hidden; }
+.raster-legend-chip { flex: 1 1 auto; }
+.raster-legend-scale { display: flex; justify-content: space-between; font-size: 11px; margin-top: 2px; }
+.raster-legend-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.raster-legend-hatch { height: 14px; border-radius: 3px; display: inline-block; }
+.raster-legend-outside {
+  height: 14px; border-radius: 3px; display: inline-block;
+  border: 1px dashed rgba(0, 0, 0, 0.35);
+}
+.raster-legend-note { margin: 8px 0 0; font-size: 11px; color: #6e6e73; }
+
+.raster-status { position: absolute; top: 16px; left: 16px; z-index: 500; max-width: 420px; }

@@ -584,3 +584,32 @@ def test_retention_removes_the_overlay_with_the_cells(client, tmp_path):
     assert [path for path in assets if path.exists()] == []
     # Nothing of this run is left behind on disk -- the directory goes too.
     assert not storage.run_blob_dir(run_id, tmp_path).exists()
+
+
+def test_the_frontend_legend_fixture_still_matches_this_renderer():
+    """frontend/tests/fixtures/raster_legend.json is generated from
+    legend_swatches() and asserted against the legend component. A
+    static fixture goes stale silently: change the ramp and the
+    frontend test would keep passing against the OLD colours while the
+    map painted new ones -- exactly the legend/picture drift the
+    swatches exist to prevent. This fails instead, and regenerating the
+    fixture is the fix."""
+    import json
+    from pathlib import Path
+
+    from src.raster_scan import render
+
+    fixture_path = (
+        Path(__file__).resolve().parents[2]
+        / "frontend" / "tests" / "fixtures" / "raster_legend.json"
+    )
+    assert fixture_path.exists(), f"legend fixture missing at {fixture_path}"
+    fixture = json.loads(fixture_path.read_text())
+
+    assert fixture["ramp_hex"] == list(render.NDCI_RAMP_HEX)
+    assert fixture["domain"] == list(render.NDCI_RAMP_DOMAIN)
+    assert fixture["no_data_base_rgba"] == list(render.NO_DATA_BASE_RGBA)
+    assert fixture["no_data_stripe_rgba"] == list(render.NO_DATA_STRIPE_RGBA)
+    assert fixture["swatches"] == render.legend_swatches(render.NDCI_RAMP_DOMAIN), (
+        "the legend fixture no longer matches the renderer's ramp -- regenerate it"
+    )

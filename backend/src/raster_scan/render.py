@@ -670,6 +670,15 @@ def write_overlay_assets(
             "value": {
                 "ramp_hex": list(NDCI_RAMP_HEX),
                 "domain": list(BAND_DOMAINS.get(bands[0], NDCI_RAMP_DOMAIN)) if bands else None,
+                # Discrete swatches sampled from the same ramp_rgb() that
+                # painted the image, so a legend can be drawn from these
+                # bytes instead of re-interpolating the stops itself. Two
+                # interpolations that agree today can drift apart later,
+                # and a legend that disagrees with the picture is a quiet
+                # lie about what a colour means.
+                "swatches": legend_swatches(
+                    BAND_DOMAINS.get(bands[0], NDCI_RAMP_DOMAIN)
+                ) if bands else [],
                 "meaning": (
                     "index reading at this cell -- a display ramp, not a risk "
                     "score: no valid spectral-index baseline exists, so nothing "
@@ -711,6 +720,28 @@ def write_overlay_assets(
         100 * next(iter(assets.values()))["measured_fraction"] if assets else 0.0,
     )
     return metadata
+
+
+LEGEND_SWATCH_COUNT = 24
+
+
+def legend_swatches(domain: tuple[float, float], count: int = LEGEND_SWATCH_COUNT) -> list[dict]:
+    """Discrete legend colours, taken from the renderer's own ramp.
+
+    Returns `count` evenly spaced samples across `domain` as
+    {"value": float, "hex": "#rrggbb"}, computed by the same
+    `ramp_rgb()` that paints the overlay. A legend built from these is
+    the picture's colours by construction; one built by re-interpolating
+    the stops is a second implementation that can drift.
+    """
+    import numpy as _np
+
+    values = _np.linspace(domain[0], domain[1], count)
+    colours = _np.asarray(ramp_rgb(values))
+    return [
+        {"value": float(v), "hex": "#{:02x}{:02x}{:02x}".format(int(c[0]), int(c[1]), int(c[2]))}
+        for v, c in zip(values, colours)
+    ]
 
 
 def render_and_store(

@@ -38,6 +38,11 @@ export async function getRiskMap() {
   return data
 }
 
+export async function getRasterScan() {
+  const { data } = await client.get('/raster-scan')
+  return data
+}
+
 export async function getTimeseries(lat, lng) {
   const { data } = await client.get('/timeseries', { params: { lat, lng } })
   return data
