@@ -1,6 +1,6 @@
 # Gulf of Thailand Algal Bloom Monitor
 
-Software-only monitoring system for harmful algal blooms (green *Noctiluca* / red tide) in the Gulf of Thailand, Thai side, targeting SDG 14. **Physics-based, not machine learning** — the detection path reports spectral index values with actual scene dates. Anomaly scoring and rule-based risk evaluation are disabled: no valid baseline exists for those indices. MODIS `chlor_a` history and its same-quantity seasonal anomalies remain available separately. See `CLAUDE.md` and `LIMITATIONS.md` for the current scope, and `docs/DETECTION_PLAN.md` §0 for why supervised ML was rejected.
+Software-only monitoring system for harmful algal blooms (green *Noctiluca* / red tide) in the upper Gulf of Thailand, targeting SDG 14. **Physics-based, not machine learning** — the detection path reports spectral index values with actual scene dates. Anomaly scoring and rule-based risk evaluation are disabled: no valid baseline exists for those indices. MODIS `chlor_a` history and its same-quantity seasonal anomalies remain available separately. See `CLAUDE.md` and `LIMITATIONS.md` for the current scope, and `docs/DETECTION_PLAN.md` §0 for why supervised ML was rejected.
 
 **Read `LIMITATIONS.md` before trusting any output.** The detection path supplies index readings only; it has no valid anomaly statistic or presence/absence verdict. Its prediction rules cannot evaluate risk without that input.
 
@@ -81,16 +81,12 @@ Once running:
 - API: http://localhost:8000 (interactive docs at `/docs`)
 - Dashboard: http://localhost:5173 (watch `scripts/dev.sh`'s own log output for the actual port Vite picked)
 
-The dashboard opens on the full sampling grid — the Thai side of the Gulf of
-Thailand, ~9,100 points at the default 5 km spacing — without threshold
-filtering. Click any pin for all four
+The dashboard opens on the full upper-Gulf sampling grid (501 points at the
+default 5 km spacing), without threshold filtering. Click any pin for all four
 available indices, its status, and its actual scene date. Before a scan has
 saved results, the grid is still visible with `no_data_yet` and null readings;
 the browser checks the cache every 30 seconds, without triggering imagery
-requests. While a replacement scan is running, the last completed grid stays
-visible with its own target date (`snapshot_date_used` in `/regional-scan`);
-the expanded grid replaces it when the new scan finishes.
-The named monitoring-station layer is not shown on this map.
+requests. The named monitoring-station layer is not shown on this map.
 Every satellite reading in the system — the regional grid, `/detect`, the
 scheduler's site cache, and the true-color / NDCI thumbnails beside them — comes
 from the newest usable image acquired **on or before** the day being asked
@@ -103,9 +99,9 @@ Nothing usable inside the ceiling means a no-data pin — not a relaxed cloud
 mask, not a made-up index value.
 
 Expect the dates to differ pin to pin, and expect a lot of no-data pins in the
-monsoon. On the 2026-09-06 upper-Gulf scan of 501 points, only 74 had a usable scene within
-14 days. A further 221 had their newest usable scene on 2026-08-18, at 19 days,
-and the 14-day
+monsoon. On the 2026-09-06 scan of 501 points, only 74 had a usable scene within
+14 days. A further 221 had one at 19 days — a single clear pass on 2026-08-18,
+every later acquisition over that water being fully clouded — and the 14-day
 ceiling deliberately reports those as no imagery rather than showing a
 three-week-old reading as if it described today. Raise the ceiling if you would
 rather see them, and read their scene dates.

@@ -29,8 +29,8 @@ the newest *usable* image on or before the date asked about, up to 14 days old
 by default; past that the system reports no imagery instead of a staler value.
 Cloud makes that limit bite hard in the southwest monsoon — on the 2026-09-06
 upper-Gulf scan only 74 of 501 points had a scene that recent, and 221 more had
-one only at 19 days. A no-data pin means "no recent usable image here",
-never "no bloom here"; every sampling point remains visible. The scene date is carried per point and shown with
+one only at 19 days. Absence of a pin therefore means "no recent usable image
+here", never "no bloom here". The scene date is carried per point and shown with
 the value, never backfilled with the requested date: read a pin as "this is what
 that water looked like on its own scene date", not as today's condition, and
 never compare two pins without comparing their dates.
@@ -44,12 +44,8 @@ classifiers, and the B2/B3 feature is only a secondary, lower-confidence
 coastline coordinate can contain land or structure. The pipeline does not move
 coordinates or widen buffers to force a usable result.
 
-**Geographic scope is limited.** The scan covers the Thai side of the Gulf of
-Thailand (widened from the upper Gulf on 2026-09-06). Nothing is calibrated
-anywhere within it, and nothing is claimed to generalize beyond it. Covering
-more water did not validate any of it: a reading off Songkhla rests on exactly
-the same uncalibrated indices as one off Chonburi. The offshore edge of that
-area is a hand-drawn approximation, not a maritime boundary of any kind.
+**Geographic scope is limited.** Nothing is calibrated or claimed to
+generalize beyond the upper Gulf of Thailand.
 
 **Prediction is not validated.** The retained rule interface is labelled
 `indicative, rule-based -- not a validated forecast`; no lead-time accuracy is

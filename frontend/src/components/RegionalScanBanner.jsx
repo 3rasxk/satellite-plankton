@@ -25,7 +25,7 @@ export default function RegionalScanBanner({ data, loading, error, onRefresh }) 
   return (
     <div className="regional-scan-banner info-callout" role="status">
       <div className="regional-scan-banner-status-row">
-        <span className="headline">จุดสแกนอ่าวไทยฝั่งไทย</span>
+        <span className="headline">จุดสแกนทั่วอ่าวไทยตอนบน</span>
         <button type="button" className="retry-btn" onClick={onRefresh} disabled={loading}>
           {loading ? 'กำลังโหลด…' : 'โหลดผลล่าสุด'}
         </button>

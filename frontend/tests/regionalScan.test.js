@@ -57,9 +57,9 @@ test('every status renders a pin; null tiers, low indices and cluster membership
 })
 
 test('planned grid renders before a run and does not invent readings or a scene date', () => {
-  const points = Array.from({ length: 9119 }, (_, i) => point(String(i), 'no_data_yet'))
+  const points = Array.from({ length: 501 }, (_, i) => point(String(i), 'no_data_yet'))
   const html = renderToStaticMarkup(createElement(RegionalScanLayer, { data: { run: null, points } }))
-  assert.equal(markerCount(html), 9119)
+  assert.equal(markerCount(html), 501)
   assert.match(html, /ยังไม่ได้สแกน/)
   assert.doesNotMatch(html, /0\.000|2026-09-06/)
 })

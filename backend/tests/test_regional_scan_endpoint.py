@@ -66,7 +66,7 @@ def test_retained_snapshot_keeps_its_target_when_a_later_attempt_starts(client, 
         saved_run.started_at = datetime(2026, 9, 6, 6, 0, tzinfo=timezone.utc)
         attempt = RegionalScanRun(
             started_at=datetime(2026, 9, 7, 6, 0, tzinfo=timezone.utc),
-            status=status, grid_spacing_km=5.0, date_used="2026-09-07", total_points=9119,
+            status=status, grid_spacing_km=5.0, date_used="2026-09-07", total_points=501,
         )
         db.add(attempt)
         db.commit()

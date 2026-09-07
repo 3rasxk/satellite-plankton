@@ -354,7 +354,7 @@ def test_scan_keeps_index_reading_without_climatology_through_endpoint(client, m
 # --------------------------------------------------------------------------
 
 
-def _running_run(started_at, total_points=9119):
+def _running_run(started_at, total_points=501):
     return RegionalScanRun(
         started_at=started_at, completed_at=None, status="running",
         grid_spacing_km=5.0, date_used="2026-09-06", total_points=total_points,

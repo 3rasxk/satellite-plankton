@@ -2,10 +2,8 @@ import { useEffect, useRef } from 'react'
 import { MapContainer, TileLayer, ZoomControl, useMap } from 'react-leaflet'
 import { MAP_BOUNDS, syncMinimumBoundsZoom } from '../utils/mapBounds.js'
 
-// Centre and zoom for the whole Thai-side Gulf scan area (widened from
-// the upper Gulf's [13.1, 100.6] / zoom 9 on 2026-09-06).
-const GULF_CENTER = [10.05, 101.1]
-const GULF_ZOOM = 7
+const UPPER_GULF_CENTER = [13.1, 100.6]
+const UPPER_GULF_ZOOM = 9
 
 // OpenStreetMap — free, no API key, no watermark. Used for standard map
 // and styled to pure-white monochrome in Risk Alert Map mode.
@@ -49,7 +47,7 @@ function FitToPoints({ points }) {
     const boundsKey = JSON.stringify(bounds)
     if (fitted.current === boundsKey) return
     if (bounds.length === 1) {
-      map.setView(bounds[0], GULF_ZOOM)
+      map.setView(bounds[0], UPPER_GULF_ZOOM)
     } else {
       map.fitBounds(bounds, { padding: [60, 60] })
     }
@@ -62,8 +60,8 @@ export default function RiskMap({ fitPoints, mode = 'risk', children }) {
   return (
     <MapContainer
       className={`leaflet-map map-mode-${mode}`}
-      center={GULF_CENTER}
-      zoom={GULF_ZOOM}
+      center={UPPER_GULF_CENTER}
+      zoom={UPPER_GULF_ZOOM}
       maxZoom={18}
       maxBounds={MAP_BOUNDS}
       maxBoundsViscosity={1}

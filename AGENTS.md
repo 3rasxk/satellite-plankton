@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This repository monitors harmful algal blooms in the Thai-side Gulf of Thailand study area.
+This repository monitors harmful algal blooms in the upper Gulf of Thailand.
 
 - `data-pipeline/src/` extracts Sentinel-2, MODIS, and rainfall data through Google Earth Engine; tests are in `data-pipeline/tests/`.
 - `detection/src/` computes spectral indices, climatology, thresholds, and rule-based risk; tests are in `detection/tests/`, reports in `detection/reports/`.
