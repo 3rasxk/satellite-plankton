@@ -135,6 +135,29 @@ check_point_in_study_area = _data_pipeline_bridge.check_point_in_study_area
 # backend/src/regional_scan/trigger.py's poll_and_maybe_scan().
 get_newest_scene_timestamp = _data_pipeline_bridge.get_newest_scene_timestamp
 
+# Whole-polygon raster composite (data-pipeline/src/raster.py, re-exported
+# through detection/src/_data_pipeline.py) -- used by
+# backend/src/raster_scan/scan.py. The pin path (grid.py's 7 sites,
+# scheduler.py, /risk-map) does not go anywhere near these; they are an
+# additional read of the same Sentinel-2 data across an area, not a
+# replacement for the per-point one.
+#
+# RASTER_BAND_REDUCERS and summarize_raster_cells come across together
+# because backend reduces an expired raster to its stored summary
+# (src/raster_scan/storage.py's retention) and must do that with
+# data-pipeline's aggregation policy -- mode for the acquisition date,
+# never mean -- rather than a backend-local copy that could drift.
+build_index_composite = _data_pipeline_bridge.build_index_composite
+download_composite_arrays = _data_pipeline_bridge.download_composite_arrays
+summarize_raster_cells = _data_pipeline_bridge.summarize_raster_cells
+RASTER_BAND_REDUCERS = _data_pipeline_bridge.RASTER_BAND_REDUCERS
+RASTER_BAND_ORDER = _data_pipeline_bridge.RASTER_BAND_ORDER
+RASTER_INDEX_BANDS = _data_pipeline_bridge.RASTER_INDEX_BANDS
+RASTER_DATE_BAND = _data_pipeline_bridge.RASTER_DATE_BAND
+DEFAULT_RASTER_SCALE_M = _data_pipeline_bridge.DEFAULT_RASTER_SCALE_M
+FabricatedDateError = _data_pipeline_bridge.FabricatedDateError
+DateBandPrecisionError = _data_pipeline_bridge.DateBandPrecisionError
+
 # Pure function for computing an anomaly z-score -- reused (not
 # reimplemented) for /timeseries, same call climatology.py itself makes
 # for the single-date case in detect().
@@ -156,4 +179,14 @@ __all__ = [
     "get_ndci_heatmap",
     "check_point_in_study_area",
     "get_newest_scene_timestamp",
+    "build_index_composite",
+    "download_composite_arrays",
+    "summarize_raster_cells",
+    "RASTER_BAND_REDUCERS",
+    "RASTER_BAND_ORDER",
+    "RASTER_INDEX_BANDS",
+    "RASTER_DATE_BAND",
+    "DEFAULT_RASTER_SCALE_M",
+    "FabricatedDateError",
+    "DateBandPrecisionError",
 ]

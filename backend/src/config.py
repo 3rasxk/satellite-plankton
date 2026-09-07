@@ -112,3 +112,22 @@ REGIONAL_SCAN_STALE_RUN_HOURS: int = int(os.environ.get("REGIONAL_SCAN_STALE_RUN
 # bounds the filterDate() query cost; does not affect the cooldown/trigger
 # decision itself (that compares timestamps, not window length).
 REGIONAL_SCAN_POLL_LOOKBACK_DAYS: int = int(os.environ.get("REGIONAL_SCAN_POLL_LOOKBACK_DAYS", "10"))
+
+# Raster scan (src/raster_scan/). Read scale in metres for the
+# whole-polygon index composite. Measured live over the study polygon:
+# 200 m -> 49,607 valid water cells, ~9.2 MB transferred, ~10 s; 100 m ->
+# 196,424 cells, 36.8 MB. 200 is the default because it already resolves
+# a bloom patch of a few hundred metres, and a 4x bigger transfer buys
+# detail the truth boundary (CLAUDE.md §0) says must not be over-read
+# anyway; 100 is available by setting this. Not a staleness setting --
+# how old a contributing scene may be stays the one system-wide rule,
+# SENTINEL2_MAX_SCENE_AGE_DAYS in data-pipeline.
+RASTER_SCAN_SCALE_M: int = int(os.environ.get("RASTER_SCAN_SCALE_M", "200"))
+# How long a run's full raster blob is kept on disk before retention
+# reduces the run to its stored summary row and deletes the blob
+# (src/raster_scan/storage.py). At ~2 MB per stored run a month of
+# roughly-daily rasters is tens of megabytes, which is affordable; the
+# limit exists so unbounded growth is a decision rather than an accident.
+# The run row, its metadata and its summary are never deleted by
+# retention -- only the blob is.
+RASTER_RETENTION_DAYS: int = int(os.environ.get("RASTER_RETENTION_DAYS", "30"))

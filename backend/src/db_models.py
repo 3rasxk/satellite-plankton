@@ -1,4 +1,5 @@
-"""SQLAlchemy ORM models for monitoring sites and regional scans.
+"""SQLAlchemy ORM models for monitoring sites, regional scans, and raster
+scans.
 
 - MonitoredSite     the grid `/risk-map`, `/summary`, and the scheduler
                     operate over (src/grid.py MONITORED_GRID, upserted at
@@ -121,6 +122,65 @@ class RegionalScanRun(Base):
     count_no_water_pixels: Mapped[int] = mapped_column(Integer, default=0)
     count_no_climatology: Mapped[int] = mapped_column(Integer, default=0)
     count_error: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class RasterScanRun(Base):
+    """One row per whole-polygon raster scan (history kept -- small rows).
+
+    Metadata only: the raster itself is far too large for a DB column
+    (~50,000 cells x 7 values at the 200 m default, and four times that
+    at 100 m), so the cells live in one compressed file on disk and this
+    row records where. `blob_path` is that file; it is nulled, and
+    `blob_deleted_at` set, once retention has expired the run
+    (`src/raster_scan/storage.py`). A row whose `blob_path` is null is
+    NOT an incomplete run -- check `status`: an expired 'ok' run still
+    has its `summary`, it just no longer has its cells.
+
+    `summary` is written when the run completes, not when retention
+    fires. Deliberate: if the summary were only computed at expiry, a
+    blob that had since been corrupted or removed by something other than
+    retention would take the whole run's findings with it on day 31, and
+    the failure would surface a month after the scan it belonged to.
+
+    On dates: `date_used` is the day the run asked about, and it is NOT
+    the date of the data. Each cell carries its own acquisition
+    timestamp, because the composite is a most-recent-wins mosaic over
+    every scene in the window -- one raster routinely mixes several
+    acquisitions (the same reason RegionalScanCluster carries a scene-date
+    *range* rather than one date). `oldest_scene_date`/`newest_scene_date`
+    state that span here; they are the real span of the scenes that
+    contributed, never backfilled from `date_used`.
+    """
+
+    __tablename__ = "raster_scan_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String)  # running|ok|no_data|error
+
+    date_used: Mapped[str] = mapped_column(String)  # "YYYY-MM-DD" asked about
+    scale_m: Mapped[int] = mapped_column(Integer)  # read scale (RASTER_SCAN_SCALE_M)
+    retention_days: Mapped[int] = mapped_column(Integer)  # the policy in force for THIS run
+
+    # -- what the composite was built from --
+    scene_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    oldest_scene_date: Mapped[str | None] = mapped_column(String, nullable=True)
+    newest_scene_date: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    # -- the raster itself --
+    cell_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    blob_path: Mapped[str | None] = mapped_column(String, nullable=True)
+    blob_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    blob_deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Whole-raster reduction kept after the blob goes. Carries the reducer
+    # each band was aggregated with, so a reader of an old summary can see
+    # that the acquisition date was selected (mode) and not averaged --
+    # see data-pipeline/src/raster.py's RASTER_BAND_REDUCERS.
+    summary: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class RegionalScanPoint(Base):

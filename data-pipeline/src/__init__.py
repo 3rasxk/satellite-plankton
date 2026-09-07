@@ -25,12 +25,27 @@ and other downstream consumers:
     get_newest_scene_timestamp(polygon_latlng, since_date)  -- Sentinel-2
                                                scene-freshness poll, see
                                                scene_poll.py
+    build_index_composite(polygon_latlng, date)   -- whole-polygon index
+    download_composite_arrays(composite, scale_m) raster, see raster.py
+    summarize_raster_cells(arrays)                (pure, no GEE call)
 """
 
 from .auth import GEEAuthError, initialize_ee
 from .imagery import get_ndci_heatmap, get_true_color_image
 from .modis import get_modis_chlorophyll_history, get_modis_sst
 from .rainfall import get_rainfall_proxy
+from .raster import (
+    DEFAULT_RASTER_SCALE_M,
+    RASTER_BAND_ORDER,
+    RASTER_BAND_REDUCERS,
+    RASTER_DATE_BAND,
+    RASTER_INDEX_BANDS,
+    DateBandPrecisionError,
+    FabricatedDateError,
+    build_index_composite,
+    download_composite_arrays,
+    summarize_raster_cells,
+)
 from .scene_poll import get_newest_scene_timestamp
 from .sentinel2 import (
     DEFAULT_MAX_SCENE_AGE_DAYS,
@@ -57,4 +72,14 @@ __all__ = [
     "check_point_in_study_area",
     "STUDY_AREA_POLYGON_LATLNG",
     "get_newest_scene_timestamp",
+    "build_index_composite",
+    "download_composite_arrays",
+    "summarize_raster_cells",
+    "RASTER_BAND_REDUCERS",
+    "RASTER_BAND_ORDER",
+    "RASTER_INDEX_BANDS",
+    "RASTER_DATE_BAND",
+    "DEFAULT_RASTER_SCALE_M",
+    "FabricatedDateError",
+    "DateBandPrecisionError",
 ]

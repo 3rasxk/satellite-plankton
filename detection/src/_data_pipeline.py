@@ -130,6 +130,29 @@ check_point_in_study_area = _dp.check_point_in_study_area
 # above.
 get_newest_scene_timestamp = _dp.get_newest_scene_timestamp
 
+# Whole-polygon raster composite (data-pipeline/src/raster.py) -- added for
+# backend-api's raster scan. Re-exported purely as a pass-through, same
+# reasoning as check_point_in_study_area above: detection/src's own
+# prediction path is per-point and never builds a raster, but backend/src/
+# _detection.py must reach these through this one bridge rather than
+# opening yet another path into data-pipeline/src.
+#
+# RASTER_BAND_REDUCERS travels with the functions on purpose. It is the
+# rule that the per-cell acquisition date is selected (mode) and never
+# averaged; a downstream project re-deriving its own aggregation policy
+# is exactly how a fabricated date would get in, so there is one constant
+# and every layer reads it.
+build_index_composite = _dp.build_index_composite
+download_composite_arrays = _dp.download_composite_arrays
+summarize_raster_cells = _dp.summarize_raster_cells
+RASTER_BAND_REDUCERS = _dp.RASTER_BAND_REDUCERS
+RASTER_BAND_ORDER = _dp.RASTER_BAND_ORDER
+RASTER_INDEX_BANDS = _dp.RASTER_INDEX_BANDS
+RASTER_DATE_BAND = _dp.RASTER_DATE_BAND
+DEFAULT_RASTER_SCALE_M = _dp.DEFAULT_RASTER_SCALE_M
+FabricatedDateError = _dp.FabricatedDateError
+DateBandPrecisionError = _dp.DateBandPrecisionError
+
 # `day_of_year_climatology` is a pure function in data-pipeline/src/modis.py
 # whose own docstring says bloom-detection is "expected to build on this
 # rather than reimplement it" — re-exported here for src/climatology.py so
@@ -159,4 +182,14 @@ __all__ = [
     "get_ndci_heatmap",
     "check_point_in_study_area",
     "get_newest_scene_timestamp",
+    "build_index_composite",
+    "download_composite_arrays",
+    "summarize_raster_cells",
+    "RASTER_BAND_REDUCERS",
+    "RASTER_BAND_ORDER",
+    "RASTER_INDEX_BANDS",
+    "RASTER_DATE_BAND",
+    "DEFAULT_RASTER_SCALE_M",
+    "FabricatedDateError",
+    "DateBandPrecisionError",
 ]

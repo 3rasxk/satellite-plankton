@@ -59,32 +59,38 @@ def _refuse_if_a_scan_is_already_running(db: Session, now: datetime) -> None:
     being served as an in-progress run. Anything younger than that is
     treated as genuinely live and this raises.
     """
-    active = db.execute(
+    # Every 'running' row, not just the newest: with allow_concurrent a
+    # ghost can end up behind a newer row, and a query that only ever
+    # inspects the newest would leave it 'running' forever, invisible to
+    # any future cleanup. Same fix as raster_scan/scan.py.
+    running = db.execute(
         select(RegionalScanRun)
         .where(RegionalScanRun.status == "running")
         .order_by(RegionalScanRun.started_at.desc())
-    ).scalars().first()
-    if active is None:
-        return
+    ).scalars().all()
 
-    age_hours = (now - as_aware_utc(active.started_at)).total_seconds() / 3600
-    if age_hours < REGIONAL_SCAN_STALE_RUN_HOURS:
-        raise ConcurrentScanError(
-            f"regional scan {active.id} has been running for {age_hours:.1f}h "
-            f"({active.total_points} points, started {active.started_at}). "
-            "Two scans would overwrite each other's points and clusters. "
-            "Wait for it to finish, or pass allow_concurrent=True "
-            "(scripts/run_regional_scan.py --force) if you are certain it is dead."
+    expired = False
+    for active in running:
+        age_hours = (now - as_aware_utc(active.started_at)).total_seconds() / 3600
+        if age_hours < REGIONAL_SCAN_STALE_RUN_HOURS:
+            raise ConcurrentScanError(
+                f"regional scan {active.id} has been running for {age_hours:.1f}h "
+                f"({active.total_points} points, started {active.started_at}). "
+                "Two scans would overwrite each other's points and clusters. "
+                "Wait for it to finish, or pass allow_concurrent=True "
+                "(scripts/run_regional_scan.py --force) if you are certain it is dead."
+            )
+        logger.warning(
+            "regional_scan: run %s still 'running' after %.1fh (> %dh) -- presuming it "
+            "died and marking it error so this scan can proceed",
+            active.id, age_hours, REGIONAL_SCAN_STALE_RUN_HOURS,
         )
+        active.status = "error"
+        active.completed_at = now
+        expired = True
 
-    logger.warning(
-        "regional_scan: run %s still 'running' after %.1fh (> %dh) -- presuming it "
-        "died and marking it error so this scan can proceed",
-        active.id, age_hours, REGIONAL_SCAN_STALE_RUN_HOURS,
-    )
-    active.status = "error"
-    active.completed_at = now
-    db.commit()
+    if expired:
+        db.commit()
 
 
 def run_scan(
