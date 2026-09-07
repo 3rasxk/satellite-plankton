@@ -108,14 +108,111 @@ def lattice(
     }
 
 
-def ramp_colours(samples: int = 100_001) -> set[tuple[int, int, int]]:
-    """Every RGB the ramp can produce, sampled densely and well past its
-    own domain in both directions (values outside clamp to the end
-    stops, so this is the closed set of value colours)."""
+# --------------------------------------------------------------------------
+# THE REFERENCE RULE
+#
+# Any test here that compares a measured value against a reference set
+# must state where that reference came from and whether it is EXHAUSTIVE
+# or APPROXIMATE.
+#
+#   exhaustive  -- every member is present by construction (e.g. the
+#                  distinct colours actually in an array). A value
+#                  outside it is a real finding.
+#   approximate -- built by sampling a continuous function. A value
+#                  outside it means EITHER the code is wrong OR the
+#                  reference is short. Such a test may report
+#                  INCONCLUSIVE. It may never report a defect until the
+#                  reference is shown to have saturated.
+#
+# This is not hypothetical bookkeeping. `ramp_colours(100_001)` returned
+# 774 of the ramp's 777 colours, and one assertion below (a rendered
+# pixel must BE a ramp colour) fails on any of the 3 it missed -- a
+# defect report against correct code. It is the third instance of one
+# pattern in this project: the z-score compared an index against another
+# quantity's baseline; the water mask read JRC's silence as a positive
+# assertion of land; this read a sample as the whole set. Each treated a
+# derived or partial reference as authoritative.
+# --------------------------------------------------------------------------
+
+RAMP_PALETTE_BASE_SAMPLES = 400_001
+_RAMP_PALETTE: dict[str, object] = {}
+
+
+def _sample_ramp(samples: int) -> set[tuple[int, int, int]]:
     low, high = render.NDCI_RAMP_DOMAIN
     span = high - low
     values = np.linspace(low - span, high + span, samples)
     return {tuple(int(channel) for channel in rgb) for rgb in render.ramp_rgb(values)}
+
+
+def saturated_ramp_palette(base: int = RAMP_PALETTE_BASE_SAMPLES):
+    """The ramp's colours, with evidence that the sample is complete.
+
+    APPROXIMATE by construction: the ramp is a continuous function, so
+    its output set can only be sampled. Sampling at base, 2x and 4x and
+    requiring the distinct count to stop growing is what turns that into
+    a usable reference -- if it is still growing, the set is short and
+    nothing may be concluded from a value being outside it.
+
+    Returns (palette, saturated, counts).
+    """
+    counts = []
+    palette: set[tuple[int, int, int]] = set()
+    for factor in (1, 2, 4):
+        palette = _sample_ramp(base * factor)
+        counts.append(len(palette))
+    saturated = counts[0] == counts[1] == counts[2]
+    return palette, saturated, counts
+
+
+def ramp_colours() -> set[tuple[int, int, int]]:
+    """Every RGB the ramp can produce. APPROXIMATE reference -- see the
+    reference rule above. Skips the calling test as INCONCLUSIVE rather
+    than letting a short reference masquerade as a finding."""
+    if "palette" not in _RAMP_PALETTE:
+        palette, saturated, counts = saturated_ramp_palette()
+        _RAMP_PALETTE.update(palette=palette, saturated=saturated, counts=counts)
+    if not _RAMP_PALETTE["saturated"]:
+        pytest.skip(
+            "INCONCLUSIVE -- the ramp palette has not saturated "
+            f"(counts at 1x/2x/4x: {_RAMP_PALETTE['counts']}). The reference is "
+            "incomplete, so nothing can be concluded about the code under test. "
+            "Raise RAMP_PALETTE_BASE_SAMPLES."
+        )
+    return _RAMP_PALETTE["palette"]
+
+
+def exact_colours(rgba: np.ndarray, mask: np.ndarray | None = None) -> set[tuple[int, int, int]]:
+    """The distinct RGBs actually present in an array. EXHAUSTIVE by
+    construction -- it enumerates, it does not sample."""
+    pixels = rgba[..., :3] if mask is None else rgba[mask][:, :3]
+    return {tuple(int(c) for c in px) for px in np.unique(pixels.reshape(-1, 3), axis=0)}
+
+
+def diagnose(offending, reference, *, source: set | None = None, label: str = "") -> str:
+    """A violation message that says which side is broken.
+
+    Reports the offending value, the closest reference entry and its
+    distance, and -- decisively -- whether the value is present in the
+    source. If it is, the reference is short and the "defect" is an
+    artefact of the measurement.
+    """
+    nearest = min(reference, key=lambda c: sum(abs(a - b) for a, b in zip(c, offending)))
+    distance = sum(abs(a - b) for a, b in zip(nearest, offending))
+    lines = [
+        f"{label}offending value: {offending}",
+        f"  nearest reference entry: {nearest} (L1 distance {distance})",
+        f"  reference size: {len(reference)}",
+    ]
+    if source is not None:
+        in_source = tuple(offending) in source
+        lines.append(f"  present in the source data: {in_source}")
+        if in_source:
+            lines.append(
+                "  => THE REFERENCE IS INCOMPLETE, not the code. This value really "
+                "occurs in the source, so the comparison set is short."
+            )
+    return "\n".join(lines)
 
 
 def rgb_set(rgba: np.ndarray, mask: np.ndarray) -> set[tuple[int, int, int]]:
@@ -613,3 +710,109 @@ def test_the_frontend_legend_fixture_still_matches_this_renderer():
     assert fixture["swatches"] == render.legend_swatches(render.NDCI_RAMP_DOMAIN), (
         "the legend fixture no longer matches the renderer's ramp -- regenerate it"
     )
+
+
+# --------------------------------------------------------------------------
+# Resampling: the overlay is scaled by the browser, and a blend of the
+# grey hatch with a ramp colour would paint unmeasured water in something
+# that reads as a reading. `image-rendering: pixelated` selects nearest
+# neighbour to prevent that.
+#
+# Reference: EXHAUSTIVE. Nearest neighbour SELECTS source pixels, so its
+# output is necessarily a subset of the source's own distinct colours --
+# which are enumerable, finite and exact. No sampling of ramp_rgb() is
+# involved or permitted here; that is what made the first version of this
+# check report an impossible violation.
+# --------------------------------------------------------------------------
+
+
+def _rendered_overlay_rgba():
+    """A real overlay containing all three states."""
+    cells = lattice(sweep=(-0.06, 0.16))
+    return render.render_overlay(cells, scale_m=200, polygon=TEST_POLYGON).rgba
+
+
+def test_nearest_neighbour_resampling_cannot_introduce_a_colour(pytestconfig):
+    """The guarantee behind image-rendering: pixelated.
+
+    Nearest neighbour cannot invent a colour -- it copies them. So an
+    output colour outside the source's own set is not a defect in the
+    renderer; it is proof the measurement is broken (the resampler was
+    not nearest, or the reference was built wrong). The assertion says
+    so, because a previous version of this check blamed the code.
+    """
+    from PIL import Image
+
+    rgba = _rendered_overlay_rgba()
+    source = exact_colours(rgba)
+    source_alpha = {int(a) for a in np.unique(rgba[..., 3])}
+    image = Image.fromarray(rgba, mode="RGBA")
+    width, height = image.size
+
+    for factor in (2, 3, 4, 8):
+        if width // factor < 2:
+            continue
+        small = np.asarray(
+            image.resize((width // factor, height // factor), Image.NEAREST)
+        )
+        produced = exact_colours(small)
+        introduced = produced - source
+        assert not introduced, (
+            "MEASUREMENT IS BROKEN, not the code under test: nearest-neighbour "
+            f"resampling at 1/{factor} produced a colour absent from the source. "
+            "Selection cannot create values.\n"
+            + diagnose(sorted(introduced)[0], source, source=source,
+                       label=f"  at 1/{factor}: ")
+        )
+        stray_alpha = {int(a) for a in np.unique(small[..., 3])} - source_alpha
+        assert not stray_alpha, (
+            f"nearest resampling at 1/{factor} produced alpha values {stray_alpha} "
+            f"absent from the source {sorted(source_alpha)} -- states have blended"
+        )
+
+
+def test_smooth_resampling_does_introduce_colours_so_the_check_is_sensitive():
+    """Without this, 'nearest introduced nothing' could be vacuous -- a
+    test that cannot fail proves nothing. Bilinear blends neighbours, so
+    it must produce colours the source never held."""
+    from PIL import Image
+
+    rgba = _rendered_overlay_rgba()
+    source = exact_colours(rgba)
+    image = Image.fromarray(rgba, mode="RGBA")
+    width, height = image.size
+
+    blended = np.asarray(image.resize((width // 4, height // 4), Image.BILINEAR))
+    introduced = exact_colours(blended) - source
+    assert introduced, (
+        "bilinear resampling introduced no new colours, so this check cannot "
+        "distinguish blending from selection and the nearest-neighbour result "
+        "above is not evidence of anything"
+    )
+
+
+def test_a_short_reference_reports_inconclusive_rather_than_a_defect():
+    """The rule itself, exercised: a deliberately truncated reference
+    must not let a test claim a defect."""
+    palette, saturated, counts = saturated_ramp_palette(base=101)
+    assert not saturated, "101 samples cannot have saturated a 777-colour ramp"
+    assert counts[0] < counts[-1], f"expected the count to still be growing, got {counts}"
+
+    full, full_saturated, full_counts = saturated_ramp_palette()
+    assert full_saturated, f"the configured base no longer saturates: {full_counts}"
+    assert palette < full, "the truncated reference should be a strict subset"
+
+
+def test_the_diagnostic_names_the_reference_when_the_reference_is_short():
+    """Failure output has to say which side is broken, or the next
+    person debugs the wrong thing -- as happened here."""
+    short = {(0, 0, 0), (255, 255, 255)}
+    real = (32, 92, 122)
+    message = diagnose(real, short, source={real}, label="test: ")
+    assert "THE REFERENCE IS INCOMPLETE" in message
+    assert "present in the source data: True" in message
+    assert str(real) in message
+
+    message_genuine = diagnose(real, short, source=set())
+    assert "present in the source data: False" in message_genuine
+    assert "THE REFERENCE IS INCOMPLETE" not in message_genuine
