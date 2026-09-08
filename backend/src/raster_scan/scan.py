@@ -37,6 +37,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
+import numpy as np
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -114,6 +115,56 @@ def _refuse_if_a_raster_scan_is_already_running(db: Session, now: datetime) -> N
 def _scene_date(epoch_ms: int) -> str:
     """"YYYY-MM-DD" (UTC) of one acquisition timestamp."""
     return datetime.fromtimestamp(epoch_ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+
+
+# Exact for int64 epoch milliseconds, which is what the date band is
+# stored as (storage.write_cells refuses anything narrower).
+MS_PER_DAY = 86_400_000
+
+
+def _scene_date_shares(dates_ms) -> list[dict]:
+    """Per-acquisition-day census of the cells this raster actually kept.
+
+    `oldest_scene_date`/`newest_scene_date` state the *span*; this states
+    the distribution inside it, which a span structurally cannot. A
+    raster whose cells are 61% from one pass and a raster spread evenly
+    over ten days have exactly the same span, and a reader shown only the
+    span will read the second one. Measured on the live 2026-09-08 run,
+    the picture is the first kind -- so the breakdown is data the viewer
+    needs, not a nicety.
+
+    Days, not scenes. Several Sentinel-2 tiles, and both orbits, can land
+    on one calendar day, so this list is never longer than `scene_count`
+    and the two must never be presented as the same number.
+
+    Grouped by integer UTC day (floor division of the stored epoch
+    millisecond, exact in int64) rather than by a formatted string, so
+    the census is computed on the timestamps themselves.
+
+    Ordered by cell count descending, then date descending. The dominant
+    acquisition is the fact the span hides, so it is stated first.
+
+    Returns:
+        [{"date": "YYYY-MM-DD", "cells": int, "share": float}, ...] --
+        `share` is a fraction of this run's kept cells, so the shares sum
+        to 1.0 up to float rounding. `[]` for an empty raster: a run that
+        kept nothing gets no day, never a fabricated one.
+    """
+    dates = np.asarray(dates_ms)
+    if dates.size == 0:
+        return []
+    days, counts = np.unique(dates.astype(np.int64) // MS_PER_DAY, return_counts=True)
+    total = int(dates.size)
+    shares = [
+        {
+            "date": _scene_date(int(day) * MS_PER_DAY),
+            "cells": int(count),
+            "share": int(count) / total,
+        }
+        for day, count in zip(days, counts)
+    ]
+    shares.sort(key=lambda share: (share["cells"], share["date"]), reverse=True)
+    return shares
 
 
 def run_raster_scan(
@@ -246,6 +297,10 @@ def run_raster_scan(
     # date as part of this raster's span would overstate what was read.
     run.oldest_scene_date = _scene_date(int(dates.min()))
     run.newest_scene_date = _scene_date(int(dates.max()))
+    # Computed from the same kept cells, and for the same reason: the
+    # span alone would let one dominant pass pass for ten days of
+    # coverage. See _scene_date_shares.
+    run.scene_dates = _scene_date_shares(dates)
     run.cell_count = written["cell_count"]
     run.blob_path = written["path"]
     run.blob_bytes = written["bytes"]

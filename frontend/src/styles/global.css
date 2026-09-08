@@ -2150,7 +2150,77 @@ table.events-table td.mono {
 }
 .raster-legend-note { margin: 8px 0 0; font-size: 11px; color: #6e6e73; }
 
-.raster-status { position: absolute; top: 16px; left: 16px; z-index: 500; max-width: 420px; }
+/* The raster scan banner (RasterScanBanner.jsx), which replaced this
+   page's earlier one-line .raster-status block. Top-left: the legend is
+   bottom-left and the clicked-cell panel top-right, so this is the one
+   free corner. The caveats it carries are long and none of them may be
+   dropped, so it scrolls inside a bounded height rather than growing
+   over the map -- same choice, for the same reason, as
+   .regional-scan-banner. */
+.raster-scan-banner {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 500;
+  width: min(400px, calc(100vw - 32px));
+  padding: 12px 14px;
+  gap: 6px;
+  /* Stops short of the bottom-left legend, which explains the colours
+     this banner describes -- the two are read together. */
+  max-height: min(60%, 560px);
+  overflow-y: auto;
+}
+
+/* Leave room for the inspector on medium-width maps. Below 680px the
+   panels enter document flow (see below), since two columns cannot fit. */
+@media (max-width: 860px) {
+  .raster-scan-banner {
+    width: min(300px, calc(100vw - 32px));
+    max-height: 45%;
+  }
+}
+
+.raster-scan-banner .headline { font-size: 13px; }
+.raster-scan-banner p { font-size: 12px; }
+.raster-scan-banner-note { font-size: 11px; color: #6e6e73; }
+
+/* The served picture is older than the newest attempt -- a fact about
+   every date below it, so it is marked rather than left as one more
+   paragraph. */
+.raster-scan-banner-stale {
+  border-left: 3px solid rgba(var(--risk-watch-rgb), 0.8);
+  padding-left: 8px;
+}
+
+/* Per-acquisition-day shares. The bar is proportional to the share and
+   decorative (aria-hidden): the percentage and the cell count beside it
+   carry the value, so nothing depends on reading a bar's width. */
+.raster-scan-day-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+}
+
+.raster-scan-day-list li {
+  display: grid;
+  grid-template-columns: 78px minmax(0, 1fr) 46px auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.raster-scan-day-bar {
+  height: 8px;
+  border-radius: 2px;
+  background: rgba(var(--risk-watch-rgb), 0.55);
+  min-width: 2px;
+}
+
+.raster-scan-day-share { text-align: right; }
+.raster-scan-day-cells { color: #6e6e73; white-space: nowrap; }
 
 /* The clicked-cell inspector. Top-right so it never covers the legend
    (bottom-left) that explains the colour the click landed on. */
@@ -2179,3 +2249,37 @@ table.events-table td.mono {
 .raster-pixel-value dd { margin: 0; }
 .raster-pixel-meta { margin: 8px 0 0; font-size: 11px; }
 .raster-pixel-note { margin: 8px 0 0; font-size: 11px; color: #6e6e73; }
+
+/* On phones, all three explanations need their own space. Normal flow
+   below a bounded map keeps variable-length Thai text and the inspector
+   from covering one another; the whole view scrolls. */
+@media (max-width: 680px) {
+  .overview-map-area:has(.raster-scan-banner) {
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    min-width: 0;
+  }
+
+  .overview-map-area:has(.raster-scan-banner) > .leaflet-map {
+    height: 50vh;
+    min-height: 260px;
+    flex-shrink: 0;
+  }
+
+  .raster-scan-banner,
+  .raster-pixel-panel,
+  .raster-legend {
+    position: static;
+    width: auto;
+    max-width: none;
+    max-height: none;
+    flex-shrink: 0;
+    margin: 8px 16px;
+    overflow: visible;
+  }
+
+  .raster-pixel-panel { order: 1; }
+  .raster-legend { order: 2; }
+  .raster-scan-banner { order: 3; }
+}

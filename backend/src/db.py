@@ -42,6 +42,12 @@ _ADDED_NULLABLE_COLUMNS: tuple[tuple[str, str, str], ...] = (
     # RasterScanRun.overlay -- rendered map assets and their bounds; the
     # raster_scan_runs table shipped one commit before the renderer did.
     ("raster_scan_runs", "overlay", "JSON"),
+    # RasterScanRun.scene_dates -- the per-acquisition-day breakdown of a
+    # run's cells, added with the raster scan banner. Null on every run
+    # taken before it existed, which is the honest value: that
+    # distribution was never measured for those runs and cannot be
+    # recovered from the span they did record.
+    ("raster_scan_runs", "scene_dates", "JSON"),
 )
 
 

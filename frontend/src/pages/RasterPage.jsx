@@ -9,9 +9,13 @@
  * shows what was already measured, so a click must answer with the number
  * behind the pixel on screen and give the same answer every time.
  *
- * The scan banner (dates, coverage, the no-anomaly statement) is a later
- * piece; this page carries the map, the overlay, the legend and the
- * per-cell inspector.
+ * Four pieces, all reading the same `/raster-scan` run: the overlay, the
+ * legend, the per-cell inspector, and `RasterScanBanner` — which states
+ * in words what the picture is (dates and their per-day shares, how much
+ * of the polygon carries a reading, what a cell actually samples, and
+ * that no anomaly statistic exists). The banner replaced this page's
+ * earlier inline status line, which showed only the target date, the
+ * scene-date range and the scale.
  */
 import { useCallback, useState } from 'react'
 import { useApi } from '../hooks/useApi.js'
@@ -21,18 +25,35 @@ import RasterOverlay from '../components/RasterOverlay.jsx'
 import RasterLegend from '../components/RasterLegend.jsx'
 import RasterPixelProbe from '../components/RasterPixelProbe.jsx'
 import RasterPixelPanel from '../components/RasterPixelPanel.jsx'
+import RasterScanBanner from '../components/RasterScanBanner.jsx'
 
 export default function RasterPage() {
   const { data, loading, error, refetch } = useApi(getRasterScan, [])
+
+  // A different scan replaces the picture and all inspector state in one
+  // render. An old reading or pending response must not outlive its image.
+  return (
+    <RasterView
+      key={data?.run_id ?? 'no-raster'}
+      data={data}
+      loading={loading}
+      error={error}
+      refetch={refetch}
+    />
+  )
+}
+
+function RasterView({ data, loading, error, refetch }) {
   const [picked, setPicked] = useState(null)
+  const runId = data?.run_id
 
   // Only ask once there is a raster to ask about; without a rendered run
   // the endpoint has nothing to answer from and returns 404, and a 404
   // rendered as an error would read as "nothing found here".
-  const hasRaster = Boolean(data?.run_id)
+  const hasRaster = Boolean(runId)
   const fetchPixel = useCallback(
-    () => (picked ? getRasterPixel(picked.lat, picked.lng) : Promise.resolve(null)),
-    [picked],
+    () => (picked ? getRasterPixel(picked.lat, picked.lng, runId) : Promise.resolve(null)),
+    [picked, runId],
   )
   const {
     data: pixel,
@@ -57,26 +78,7 @@ export default function RasterPage() {
           onClose={() => setPicked(null)}
         />
 
-        <div className="raster-status info-callout glass" role="status">
-          {loading && <p>กำลังโหลดภาพแรสเตอร์…</p>}
-          {error && (
-            <p>
-              โหลดภาพแรสเตอร์ไม่สำเร็จ{' '}
-              <button type="button" className="retry-btn" onClick={refetch}>ลองใหม่</button>
-            </p>
-          )}
-          {!loading && !error && !data?.run_id && (
-            <p>{data?.reason || 'ยังไม่มีภาพแรสเตอร์ — ต้องรันการสแกนก่อน'}</p>
-          )}
-          {data?.run_id && (
-            <p>
-              วันที่เป้าหมาย <span className="mono">{data.date_used}</span> · ภาพจาก{' '}
-              <span className="mono">{data.oldest_scene_date}</span> ถึง{' '}
-              <span className="mono">{data.newest_scene_date}</span> · ความละเอียด {data.scale_m} ม. ·
-              คลิกบนแผนที่เพื่อดูค่าของเซลล์
-            </p>
-          )}
-        </div>
+        <RasterScanBanner data={data} loading={loading} error={error} onRefresh={refetch} />
       </div>
     </div>
   )

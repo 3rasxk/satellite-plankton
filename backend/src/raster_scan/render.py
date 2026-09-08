@@ -645,9 +645,17 @@ def render_overlay(
         "no_data_pixels": int((inside & ~valued).sum()),
         "transparent_pixels": int((~inside & ~valued).sum()),
         "inside_polygon_pixels": inside_total,
+        # The numerator of measured_fraction, carried explicitly so a
+        # reader of this metadata (or of the API that serves it) never has
+        # to reconstruct a count by multiplying a rounded fraction back
+        # out against a total.
+        "measured_pixels": measured_inside,
         # Fraction of the study polygon this raster actually has a reading
         # for. The honest headline number for an overlay: everything else
-        # inside the boundary is hatch.
+        # inside the boundary is hatch. Denominator is the POLYGON, land
+        # included -- the polygon is a boundary, not a water mask, so the
+        # land inside it can never be measured and is counted against
+        # this figure. It is not a fraction of water.
         "measured_fraction": (measured_inside / inside_total) if inside_total else 0.0,
         # Readings that fell outside the polygon and were still drawn -- a
         # measurement is never erased for being marginally out of bounds.

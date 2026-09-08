@@ -98,13 +98,13 @@ cd backend  && source venv/bin/activate && uvicorn src.main:app --reload
 cd frontend && npm run dev
 ```
 
-Tests — three separate pytest suites, each with its own venv, no live GEE credentials required (GEE is mocked/bypassed at typed boundaries):
+Tests — three separate pytest suites, each with its own venv. Most GEE calls are mocked at typed boundaries; two backend satellite-image tests make live GEE calls and require credentials/network access:
 
 ```bash
 cd data-pipeline && ./venv/bin/python -m pytest tests/ -q   # 118 tests
 cd detection      && ./venv/bin/python -m pytest tests/ -q   # 60 tests
-cd backend        && ./venv/bin/python -m pytest tests/ -q   # 232 tests
-cd frontend       && npm test                                # 29 tests
+cd backend        && ./venv/bin/python -m pytest tests/ -q   # 259 tests (2 live GEE)
+cd frontend       && npm test                                # 51 tests
 ```
 
 Single test: `./venv/bin/python -m pytest tests/test_climatology.py::test_name -q` (run from the relevant subproject directory, with its venv active).

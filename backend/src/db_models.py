@@ -168,6 +168,17 @@ class RasterScanRun(Base):
     oldest_scene_date: Mapped[str | None] = mapped_column(String, nullable=True)
     newest_scene_date: Mapped[str | None] = mapped_column(String, nullable=True)
 
+    # How the kept cells are distributed across those acquisition days:
+    # [{"date": "YYYY-MM-DD", "cells": int, "share": float}, ...], share
+    # a fraction of this run's cells (see raster_scan/scan.py's
+    # _scene_date_shares). The pair above states the span and cannot
+    # state this -- a raster that is 61% one pass and a raster spread
+    # evenly across ten days have the same oldest/newest, and a reader
+    # given only the span will assume the second. Counted per calendar
+    # day, not per scene: several tiles can share a day, so this list is
+    # never longer than `scene_count`.
+    scene_dates: Mapped[list | None] = mapped_column(JSON, nullable=True)
+
     # -- the raster itself --
     cell_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     blob_path: Mapped[str | None] = mapped_column(String, nullable=True)

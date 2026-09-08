@@ -17,9 +17,10 @@ Three endpoints, deliberately split:
     what was already measured, and the answer must be the number behind
     the pixel on screen, identical every time it is asked.
 
-All three answer from the SAME run (`_latest_rendered_run`). Serving a
-click from a newer run than the picture would put readings on screen that
-belong to a different image, and nothing about the map would show it.
+Metadata binds the image URL and pixel queries to its run_id. Explicit
+run IDs never fall back to a newer render; callers omitting the ID retain
+the legacy newest-render behavior. Serving a click from a newer run than
+the picture would silently report readings from a different image.
 
 The legend travels with the metadata rather than being written into the
 frontend, so the swatches a reader sees are the same bytes the renderer
@@ -46,24 +47,53 @@ from ..config import as_aware_utc
 from ..db import get_db
 from ..db_models import RasterScanRun
 from ..raster_scan import pixel as pixel_lookup
-from ..schemas import RasterPixelResponse, RasterScanResponse
+from ..schemas import RasterCoverage, RasterPixelResponse, RasterScanResponse
 
 router = APIRouter(tags=["raster-scan"])
 
 OVERLAY_BAND = "ndci"
 
 
-def _latest_rendered_run(db: Session) -> RasterScanRun | None:
-    """The newest run that actually has an overlay on disk.
+def _coverage(overlay: dict) -> RasterCoverage | None:
+    """Coverage, straight from the stats the renderer recorded.
+
+    Every number is the one `render.render_overlay` recorded when it drew
+    the picture. Nothing is recomputed here and nothing is reconstructed:
+    an overlay rendered before `measured_pixels` was recorded keeps its
+    real fraction and reports a null count, rather than having a count
+    invented by multiplying a rounded fraction back out against the
+    total. An overlay with no coverage stats at all reports no coverage.
+    """
+    asset = (overlay.get("assets") or {}).get(OVERLAY_BAND) or {}
+    fraction = asset.get("measured_fraction")
+    total = asset.get("inside_polygon_pixels")
+    if fraction is None or total is None:
+        return None
+    measured = asset.get("measured_pixels")
+    return RasterCoverage(
+        measured_fraction=float(fraction),
+        measured_pixels=None if measured is None else int(measured),
+        polygon_pixels=int(total),
+    )
+
+
+def _rendered_run(db: Session, run_id: int | None = None) -> RasterScanRun | None:
+    """The requested render, or the newest usable one when no ID is given.
 
     Not simply the newest run: a later attempt can be running, failed,
     or have had its blob expired by retention, and none of those should
     hide the last picture that still exists. Mirrors the regional scan's
     "serve the newest usable snapshot" rule.
+
+    An explicit ID is restricted to its own row even when that render
+    has expired. A missing image must never be replaced by another run.
     """
-    runs = db.execute(
-        select(RasterScanRun).order_by(RasterScanRun.started_at.desc()).limit(25)
-    ).scalars().all()
+    query = select(RasterScanRun)
+    if run_id is None:
+        query = query.order_by(RasterScanRun.started_at.desc()).limit(25)
+    else:
+        query = query.where(RasterScanRun.id == run_id)
+    runs = db.execute(query).scalars().all()
     for run in runs:
         overlay = run.overlay
         if not isinstance(overlay, dict) or overlay.get("status") != "ok":
@@ -80,7 +110,7 @@ async def get_raster_scan(db: Session = Depends(get_db)) -> RasterScanResponse:
     latest = db.execute(
         select(RasterScanRun).order_by(RasterScanRun.started_at.desc())
     ).scalars().first()
-    rendered = _latest_rendered_run(db)
+    rendered = _rendered_run(db)
 
     if rendered is None:
         return RasterScanResponse(
@@ -105,18 +135,27 @@ async def get_raster_scan(db: Session = Depends(get_db)) -> RasterScanResponse:
         scene_count=rendered.scene_count,
         oldest_scene_date=rendered.oldest_scene_date,
         newest_scene_date=rendered.newest_scene_date,
+        # The span above says when; this says how much came from when.
+        # Recorded at scan time from the stored date band, never derived
+        # here from the span (which could not carry it).
+        scene_dates=rendered.scene_dates,
         completed_at=(
             as_aware_utc(rendered.completed_at).isoformat() if rendered.completed_at else None
         ),
+        coverage=_coverage(overlay),
         bounds=(overlay.get("bounds") or {}).get("leaflet_bounds"),
         legend=overlay.get("legend"),
-        overlay_url="/raster-scan/overlay.png",
+        overlay_url=f"/raster-scan/overlay.png?run_id={rendered.id}",
         stale_run_id=latest.id if latest and latest.id != rendered.id else None,
     )
 
 
 @router.get("/raster-scan/overlay.png")
-async def get_raster_overlay(db: Session = Depends(get_db)) -> FileResponse:
+async def get_raster_overlay(
+    run_id: int | None = Query(None, ge=1, le=2**63 - 1,
+                               description="Exact rendered run; omit for the latest available."),
+    db: Session = Depends(get_db),
+) -> FileResponse:
     """The overlay image itself, straight off disk.
 
     404 rather than a blank or placeholder image when nothing has been
@@ -124,7 +163,7 @@ async def get_raster_overlay(db: Session = Depends(get_db)) -> FileResponse:
     looked and saw nothing", which is exactly the claim this project
     refuses to make by accident.
     """
-    rendered = _latest_rendered_run(db)
+    rendered = _rendered_run(db, run_id)
     if rendered is None:
         raise HTTPException(
             status_code=404,
@@ -138,6 +177,8 @@ async def get_raster_overlay(db: Session = Depends(get_db)) -> FileResponse:
 async def get_raster_pixel(
     lat: float = Query(..., ge=-90, le=90, description="Latitude of the clicked point."),
     lng: float = Query(..., ge=-180, le=180, description="Longitude of the clicked point."),
+    run_id: int | None = Query(None, ge=1, le=2**63 - 1,
+                               description="Exact rendered run; omit for the latest available."),
     db: Session = Depends(get_db),
 ) -> RasterPixelResponse:
     """The stored cell under one coordinate of the served overlay.
@@ -158,7 +199,7 @@ async def get_raster_pixel(
     overlay is on screen has lost its cells -- the picture can still be
     shown, but no number behind it can honestly be quoted.
     """
-    rendered = _latest_rendered_run(db)
+    rendered = _rendered_run(db, run_id)
     if rendered is None:
         raise HTTPException(
             status_code=404,

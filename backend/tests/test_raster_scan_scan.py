@@ -189,6 +189,88 @@ def test_a_scene_that_contributed_no_cell_is_not_claimed_as_data(client, blob_ro
         assert run.newest_scene_date == "2026-09-04"
 
 
+# A second acquisition on the SAME UTC day as NEW_MS, one orbit (101 min)
+# later -- the ordinary case of two swaths covering the polygon in one day.
+SAME_DAY_MS = 1788498660000  # 2026-09-04T05:11:00Z
+MID_MS = 1788060600000       # 2026-08-30T03:30:00Z
+
+
+def test_the_scene_date_breakdown_states_the_share_the_span_hides(client, blob_root, monkeypatch):
+    """The span says 25 Aug to 4 Sep. It cannot say that 80% of the
+    picture is one pass, and a reader given only the span reads ten days
+    of coverage. The per-day breakdown is the fact the span structurally
+    cannot carry."""
+    install_raster(monkeypatch, arrays=fake_arrays(
+        (OLD_MS, MID_MS) + (NEW_MS,) * 8
+    ))
+
+    with SessionLocal() as db:
+        run = scan_module.run_raster_scan(db, "2026-09-06")
+
+        # The span itself is unchanged by any of this.
+        assert (run.oldest_scene_date, run.newest_scene_date) == ("2026-08-25", "2026-09-04")
+
+        # Largest share first, ties broken newest-first.
+        assert run.scene_dates == [
+            {"date": "2026-09-04", "cells": 8, "share": 0.8},
+            {"date": "2026-08-30", "cells": 1, "share": 0.1},
+            {"date": "2026-08-25", "cells": 1, "share": 0.1},
+        ]
+        # Every kept cell is counted exactly once, so the shares are a
+        # partition of the raster and not a sample of it.
+        assert sum(entry["cells"] for entry in run.scene_dates) == run.cell_count
+        assert abs(sum(entry["share"] for entry in run.scene_dates) - 1.0) < 1e-12
+        # What the span would have implied, and what is actually true.
+        assert run.scene_dates[0]["share"] != 1 / len(run.scene_dates)
+
+
+def test_the_breakdown_is_json_native_so_it_survives_the_database(client, blob_root, monkeypatch):
+    """The counts come out of numpy. A numpy int in a JSON column is not
+    serialisable, and the failure would appear at commit time on a real
+    scan rather than here."""
+    install_raster(monkeypatch, arrays=fake_arrays((OLD_MS, NEW_MS, NEW_MS)))
+
+    with SessionLocal() as db:
+        run = scan_module.run_raster_scan(db, "2026-09-06")
+        run_id = run.id
+
+    # Read back through a fresh session: this is the round trip a served
+    # response actually makes.
+    with SessionLocal() as db:
+        stored = db.get(RasterScanRun, run_id).scene_dates
+
+    for entry in stored:
+        assert type(entry["date"]) is str
+        assert type(entry["cells"]) is int
+        assert type(entry["share"]) is float
+
+
+def test_the_breakdown_counts_acquisition_days_not_scenes(client, blob_root, monkeypatch):
+    """Two swaths can cover the polygon on one calendar day. They are two
+    scenes and one day, and the breakdown must not be read as a scene
+    count -- so it collapses them and stays no longer than scene_count."""
+    install_raster(
+        monkeypatch,
+        arrays=fake_arrays((OLD_MS, NEW_MS, SAME_DAY_MS)),
+        composite=fake_composite((OLD_MS, NEW_MS, SAME_DAY_MS)),
+    )
+
+    with SessionLocal() as db:
+        run = scan_module.run_raster_scan(db, "2026-09-06")
+
+        assert run.scene_count == 3
+        assert len(run.scene_dates) == 2
+        assert run.scene_dates[0] == {"date": "2026-09-04", "cells": 2, "share": 2 / 3}
+        assert len(run.scene_dates) <= run.scene_count
+
+
+def test_a_raster_with_no_cells_gets_no_day_rather_than_a_fabricated_one():
+    """Pure function, no DB: an empty raster is summarised as empty. A
+    run that kept nothing is recorded as no_data and never reaches this,
+    but the breakdown must not invent a day if it ever does."""
+    assert scan_module._scene_date_shares(np.array([], dtype=np.int64)) == []
+
+
 # --------------------------------------------------------------------------
 # Failure modes.
 # --------------------------------------------------------------------------

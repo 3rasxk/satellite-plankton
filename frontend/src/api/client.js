@@ -64,8 +64,8 @@ export async function getRasterScan() {
 // shown on a click are the numbers behind the pixel on screen. A 404 here
 // means there is no raster to query (or its cells expired), NOT that the
 // water was measured and found empty.
-export async function getRasterPixel(lat, lng) {
-  const { data } = await client.get('/raster-scan/pixel', { params: { lat, lng } })
+export async function getRasterPixel(lat, lng, runId) {
+  const { data } = await client.get('/raster-scan/pixel', { params: { lat, lng, run_id: runId } })
   return data
 }
 

@@ -432,6 +432,47 @@ def test_the_overlay_always_covers_the_whole_study_polygon():
     assert rendered.stats["no_data_pixels"] > 10 * rendered.stats["valued_pixels"]
 
 
+def test_coverage_is_a_share_of_the_polygon_land_included_not_of_the_cells():
+    """The banner quotes this figure in words, so what it is a share OF
+    has to be pinned here rather than described in a docstring.
+
+    Denominator: every overlay pixel whose centre falls inside the study
+    polygon. The polygon is a boundary, not a water mask, so land inside
+    it is counted against coverage and this is NOT a fraction of water.
+    Numerator: only the pixels inside that boundary carrying a reading --
+    a cell that landed outside is still drawn (it is a real measurement)
+    but never inflates the figure.
+
+    Reference provenance: EXHAUSTIVE. Both counts are enumerations of the
+    rendered array -- its alpha channel and the polygon mask -- not
+    samples of a continuous function, so a disagreement is a real finding.
+    """
+    cells = lattice(lat_range=(12.9550, 12.9600), lng_range=(100.0050, 100.0100))
+    cells["lat"] = np.append(cells["lat"], 12.9400)  # just south of the polygon
+    cells["lng"] = np.append(cells["lng"], 100.0250)
+    cells["ndci"] = np.append(cells["ndci"], np.float32(HIGH))
+
+    rendered = render.render_overlay(cells, scale_m=200, polygon=TEST_POLYGON)
+    centre_lats, centre_lngs = rendered.grid.pixel_centres()
+    inside = render.points_in_polygon_mask(
+        centre_lats[:, None], centre_lngs[None, :], TEST_POLYGON
+    )
+    valued = rendered.rgba[..., 3] == render.VALUE_ALPHA
+    stats = rendered.stats
+
+    assert stats["inside_polygon_pixels"] == int(inside.sum())
+    assert stats["measured_pixels"] == int((inside & valued).sum())
+    assert stats["measured_fraction"] == stats["measured_pixels"] / stats["inside_polygon_pixels"]
+
+    # The out-of-bounds reading is drawn, and is not in the numerator.
+    assert stats["valued_pixels_outside_polygon"] == 1
+    assert stats["measured_pixels"] == stats["valued_pixels"] - 1
+
+    # Most of the polygon holds no cell at all and is counted against
+    # coverage. That is the entire reason the figure is worth quoting.
+    assert stats["inside_polygon_pixels"] > 10 * stats["measured_pixels"]
+
+
 def test_a_cell_lands_in_the_pixel_its_coordinates_name():
     """Placement, checked by inverting it: the one lit pixel's own centre,
     computed back from the returned bounds, is within half a pixel of the

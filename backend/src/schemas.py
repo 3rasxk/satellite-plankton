@@ -287,6 +287,52 @@ class SummaryResponse(DisclaimerMixin):
 # /regional-scan
 # --------------------------------------------------------------------------
 
+class RasterSceneDateShare(BaseModel):
+    """How much of one raster came from one acquisition day.
+
+    A raster is a most-recent-wins mosaic over every usable scene in the
+    window, so `oldest_scene_date`..`newest_scene_date` is a span, not a
+    description. The span cannot distinguish a picture whose cells are
+    mostly one pass from one spread evenly across ten days, and a reader
+    shown only the span will assume the second. These entries state which
+    it is.
+    """
+
+    date: str = Field(description="Acquisition day, YYYY-MM-DD (UTC).")
+    cells: int = Field(description="Cells in this raster whose own scene was acquired that day.")
+    share: float = Field(
+        description="`cells` as a fraction of the run's kept cells, 0..1. The entries sum "
+        "to 1.0 up to float rounding -- every kept cell has exactly one acquisition day.")
+
+
+class RasterCoverage(BaseModel):
+    """How much of the study area this overlay actually has a reading for.
+
+    Counted in overlay pixels, which is what a viewer sees, not in stored
+    cells: two cells can land on one overlay pixel, and a cell that fell
+    marginally outside the polygon is still drawn but is not counted here.
+
+    The denominator is the study POLYGON, land included. The polygon is a
+    boundary, not a water mask -- the coastline inside it can never carry
+    a reading and is counted against this figure -- so this is NOT the
+    fraction of *water* that was measured, and must not be presented as
+    one. The unmeasured remainder is cloud, land and "no scene covered
+    it" together: the stored raster cannot separate them (LIMITATIONS.md,
+    "Unmeasured is not zero").
+    """
+
+    measured_fraction: float = Field(
+        description="measured_pixels / polygon_pixels, 0..1, as the renderer computed it.")
+    measured_pixels: int | None = Field(
+        default=None, description="Overlay pixels inside the study polygon carrying a reading. "
+        "Null for an overlay rendered before this count was recorded -- the fraction beside it "
+        "is still the renderer's own, and the count is left absent rather than reconstructed "
+        "by multiplying a rounded fraction back out.")
+    polygon_pixels: int = Field(
+        description="Overlay pixels whose centre falls inside the study polygon -- land "
+        "included. The denominator.")
+
+
 class RasterScanResponse(DisclaimerMixin):
     """Metadata for the newest raster overlay still present on disk.
 
@@ -306,13 +352,22 @@ class RasterScanResponse(DisclaimerMixin):
         "see data-pipeline/src/raster.py.")
     cell_count: int | None = Field(default=None, description="Cells carrying a real reading.")
     scene_count: int | None = Field(
-        default=None, description="Distinct Sentinel-2 acquisitions contributing pixels.")
+        default=None, description="Candidate Sentinel-2 acquisitions considered for the mosaic. "
+        "Some may contribute no retained cells after masking and compositing.")
     oldest_scene_date: str | None = Field(
         default=None, description="Oldest acquisition date among the retained cells.")
     newest_scene_date: str | None = Field(
         default=None, description="Newest acquisition date among the retained cells. One raster "
         "routinely mixes several dates; each cell carries its own.")
+    scene_dates: list[RasterSceneDateShare] | None = Field(
+        default=None, description="Per-acquisition-day breakdown of the kept cells, largest "
+        "share first -- the distribution the oldest/newest span hides. Counted per calendar "
+        "day, so it is never longer than `scene_count` (several tiles can share a day). Null "
+        "for a run taken before this was recorded: unknown, not evenly spread.")
     completed_at: str | None = Field(default=None, description="When that run finished (UTC).")
+    coverage: RasterCoverage | None = Field(
+        default=None, description="How much of the study polygon carries a reading, and how "
+        "much therefore does not. Null when the overlay's render metadata predates this field.")
     bounds: list[list[float]] | None = Field(
         default=None, description="[[south, west], [north, east]] for a Leaflet ImageOverlay. "
         "Covers the whole study polygon, not merely the cells that returned data, so a cloudy "
