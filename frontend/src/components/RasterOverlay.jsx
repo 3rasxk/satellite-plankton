@@ -23,10 +23,13 @@
  * is not the same as "we have not looked".
  */
 import { ImageOverlay } from 'react-leaflet'
+import { apiAssetUrl } from '../api/client.js'
 
 export default function RasterOverlay({ data, opacity = 0.85 }) {
   const bounds = data?.bounds
-  const url = data?.overlay_url
+  // Through the API base, not bare: see apiAssetUrl. A bare path resolves
+  // against the dev server and renders nothing, silently.
+  const url = apiAssetUrl(data?.overlay_url)
   if (!bounds || !url) return null
 
   return (

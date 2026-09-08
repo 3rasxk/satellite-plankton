@@ -33,6 +33,22 @@ if (!import.meta.env.VITE_API_BASE_URL) {
 
 export const client = axios.create({ baseURL, timeout: 30000 })
 
+/** Absolute-ish URL for a non-XHR asset served by the API (an <img> src).
+ *
+ * axios prefixes `baseURL` for us; a browser fetching an image does not.
+ * With VITE_API_BASE_URL=/api the API is reached through Vite's proxy, so
+ * a bare "/raster-scan/overlay.png" resolves against the dev server, which
+ * answers with the SPA's index.html and leaves the <img> silently blank --
+ * no console error, no failed request in the network tab's error filter,
+ * just an empty map. Compose asset URLs through here so they travel the
+ * same path the JSON does.
+ */
+export function apiAssetUrl(path) {
+  if (!path) return null
+  if (/^https?:\/\//i.test(path)) return path
+  return `${baseURL.replace(/\/$/, '')}${path}`
+}
+
 export async function getRiskMap() {
   const { data } = await client.get('/risk-map')
   return data

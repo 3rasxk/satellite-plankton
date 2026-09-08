@@ -138,7 +138,8 @@ test('the overlay carries the pixelated class that stops resampling blends', () 
   const data = { bounds: fixture.polygon_bbox, overlay_url: '/raster-scan/overlay.png' }
   const html = renderToStaticMarkup(createElement(RasterOverlay, { data }))
   assert.match(html, /raster-overlay-image/)
-  assert.match(html, /data-overlay-url="\/raster-scan\/overlay\.png"/)
+  // Through the API base -- see the regression test below.
+  assert.match(html, /data-overlay-url="[^"]*raster-scan\/overlay\.png"/)
 })
 
 test('no overlay is drawn when there is nothing rendered yet', () => {
@@ -149,4 +150,31 @@ test('no overlay is drawn when there is nothing rendered yet', () => {
     renderToStaticMarkup(createElement(RasterOverlay, { data: { bounds: null, overlay_url: null } })),
     '',
   )
+})
+
+
+test('the overlay image is fetched through the API base, not as a bare path', () => {
+  // Regression: overlay_url was used verbatim. With VITE_API_BASE_URL=/api
+  // the API is reached through Vite's proxy, so a bare
+  // "/raster-scan/overlay.png" resolves against the dev server, which
+  // answers with index.html. The <img> then renders nothing and reports
+  // nothing -- the map was simply blank, and every unit test still passed.
+  const data = { bounds: fixture.polygon_bbox, overlay_url: '/raster-scan/overlay.png' }
+  const html = renderToStaticMarkup(createElement(RasterOverlay, { data }))
+  const src = html.match(/data-overlay-url="([^"]+)"/)[1]
+  assert.ok(
+    !src.startsWith('/raster-scan'),
+    `overlay src is a bare API path (${src}); it will resolve against the web ` +
+      'server rather than the API and render nothing',
+  )
+  assert.match(src, /raster-scan\/overlay\.png$/)
+})
+
+test('an absolute overlay URL is left alone', () => {
+  const data = {
+    bounds: fixture.polygon_bbox,
+    overlay_url: 'https://example.test/overlay.png',
+  }
+  const html = renderToStaticMarkup(createElement(RasterOverlay, { data }))
+  assert.match(html, /data-overlay-url="https:\/\/example\.test\/overlay\.png"/)
 })
