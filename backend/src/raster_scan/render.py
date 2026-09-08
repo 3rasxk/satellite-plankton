@@ -281,6 +281,62 @@ class OverlayGrid:
         cols = np.floor((np.asarray(lng) - self.west) / self.pixel_deg_lng).astype(np.int64)
         return np.clip(rows, 0, self.rows - 1), np.clip(cols, 0, self.cols - 1)
 
+    def locate(self, lat: float, lng: float) -> tuple[int, int] | None:
+        """The pixel a single arbitrary coordinate lands in, or None if it
+        lands outside this grid entirely.
+
+        The inverse of `cell_indices`, and it lives here rather than in
+        the module that inspects cells for exactly that reason: the two
+        directions must use the same `north`/`west` origin and the same
+        `floor()`, or a click would report the neighbour of the cell whose
+        colour is under the cursor. Off-by-one there is invisible -- both
+        cells are plausible readings -- so the pairing is kept structural
+        rather than left to two call sites agreeing.
+
+        The one deliberate difference is clipping. `cell_indices` clips,
+        because its input is a stored cell that belongs to this raster and
+        an extreme one must not fall off the edge. This takes a coordinate
+        from outside -- a click anywhere on a world map -- and clipping it
+        would answer a query about the open Pacific with the reading from
+        the raster's eastern edge. So out is None, not the nearest pixel;
+        only a coordinate exactly on the southern or eastern edge is
+        pulled back into the last pixel, which is the same boundary case
+        `cell_indices` clips for.
+        """
+        if not (self.south <= lat <= self.north and self.west <= lng <= self.east):
+            return None
+        row = int(np.floor((self.north - lat) / self.pixel_deg_lat))
+        col = int(np.floor((lng - self.west) / self.pixel_deg_lng))
+        # Exactly on the south/east edge (or a float hair past it): the
+        # edge belongs to the last pixel, as it does in `cell_indices`.
+        row = min(max(row, 0), self.rows - 1)
+        col = min(max(col, 0), self.cols - 1)
+        return row, col
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "OverlayGrid":
+        """Rebuild a grid from what `as_dict` stored on the run row.
+
+        Reconstructed, never recomputed: an overlay's geometry is a fact
+        about the picture that was drawn, and re-deriving it from the
+        cells later can quietly land somewhere else (`_pixel_degrees`
+        infers the spacing from the cells, so a differently-filtered read
+        of the same blob can pick a different pixel size). Anything that
+        must agree with the painted image reads the numbers the painter
+        recorded.
+        """
+        return cls(
+            north=float(data["north"]),
+            south=float(data["south"]),
+            west=float(data["west"]),
+            east=float(data["east"]),
+            rows=int(data["rows"]),
+            cols=int(data["cols"]),
+            pixel_deg_lat=float(data["pixel_deg_lat"]),
+            pixel_deg_lng=float(data["pixel_deg_lng"]),
+            pixel_size_source=str(data.get("pixel_size_source", "stored")),
+        )
+
 
 @dataclass(frozen=True)
 class RenderedOverlay:

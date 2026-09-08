@@ -35,6 +35,20 @@ the value, never backfilled with the requested date: read a pin as "this is what
 that water looked like on its own scene date", not as today's condition, and
 never compare two pins without comparing their dates.
 
+**A clicked cell is one pixel, not an area.** The raster view reports the
+reading stored for the single 10 m pixel that was sampled for that cell, at
+200 m spacing by default — not an average of the 200 m square it appears to
+fill on screen. A feature smaller than the sampling interval is hit or missed
+depending on where the sample landed, so a low reading in one cell is not
+evidence about the water beside it. Each cell carries its own acquisition
+date, and adjacent cells routinely come from different scenes.
+
+**Unmeasured is not zero.** Water inside the study area with no usable
+observation is reported as `not_measured` and drawn as a grey hatch, never as
+a reading. Cloud, land-masking and "no scene covered it" are one state, not
+three: the stored raster cannot tell them apart, and inventing the difference
+would be a claim the data does not support.
+
 **Turbidity and sediment confound optical indices.** River plumes and shallow
 coastal water can resemble a bloom signal. The indices are not species
 classifiers, and the B2/B3 feature is only a secondary, lower-confidence

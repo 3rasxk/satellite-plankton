@@ -101,9 +101,10 @@ cd frontend && npm run dev
 Tests — three separate pytest suites, each with its own venv, no live GEE credentials required (GEE is mocked/bypassed at typed boundaries):
 
 ```bash
-cd data-pipeline && ./venv/bin/python -m pytest tests/ -q   # 97 tests
+cd data-pipeline && ./venv/bin/python -m pytest tests/ -q   # 118 tests
 cd detection      && ./venv/bin/python -m pytest tests/ -q   # 60 tests
-cd backend        && ./venv/bin/python -m pytest tests/ -q   # 130 tests
+cd backend        && ./venv/bin/python -m pytest tests/ -q   # 232 tests
+cd frontend       && npm test                                # 29 tests
 ```
 
 Single test: `./venv/bin/python -m pytest tests/test_climatology.py::test_name -q` (run from the relevant subproject directory, with its venv active).

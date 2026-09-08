@@ -6,12 +6,20 @@ disk and the run row describing them. Nothing here calls Earth Engine,
 renders, or computes an index; a request that arrives before any scan
 has run gets an explicit "no raster yet", never a placeholder picture.
 
-Two endpoints, deliberately split:
+Three endpoints, deliberately split:
   - `GET /raster-scan` returns metadata only (bounds, legend, scene
     dates, coverage). Small, JSON, safe to poll.
   - `GET /raster-scan/overlay.png` returns the image bytes. Megabytes,
     cacheable, and fetched by the browser as an ordinary image rather
     than pulled through the JSON payload as base64.
+  - `GET /raster-scan/pixel?lat=&lng=` reads one cell out of the stored
+    blob the overlay was drawn from. Also not a live call: a click asks
+    what was already measured, and the answer must be the number behind
+    the pixel on screen, identical every time it is asked.
+
+All three answer from the SAME run (`_latest_rendered_run`). Serving a
+click from a newer run than the picture would put readings on screen that
+belong to a different image, and nothing about the map would show it.
 
 The legend travels with the metadata rather than being written into the
 frontend, so the swatches a reader sees are the same bytes the renderer
@@ -29,7 +37,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -37,7 +45,8 @@ from sqlalchemy.orm import Session
 from ..config import as_aware_utc
 from ..db import get_db
 from ..db_models import RasterScanRun
-from ..schemas import RasterScanResponse
+from ..raster_scan import pixel as pixel_lookup
+from ..schemas import RasterPixelResponse, RasterScanResponse
 
 router = APIRouter(tags=["raster-scan"])
 
@@ -123,3 +132,46 @@ async def get_raster_overlay(db: Session = Depends(get_db)) -> FileResponse:
         )
     path = Path(rendered.overlay["assets"][OVERLAY_BAND]["path"])
     return FileResponse(path, media_type="image/png", filename=path.name)
+
+
+@router.get("/raster-scan/pixel", response_model=RasterPixelResponse)
+async def get_raster_pixel(
+    lat: float = Query(..., ge=-90, le=90, description="Latitude of the clicked point."),
+    lng: float = Query(..., ge=-180, le=180, description="Longitude of the clicked point."),
+    db: Session = Depends(get_db),
+) -> RasterPixelResponse:
+    """The stored cell under one coordinate of the served overlay.
+
+    Reads the blob, not Earth Engine. Everything about the answer -- the
+    four index values, the cell's own acquisition date, its own
+    coordinate -- comes out of the file the picture was drawn from, so
+    clicking the same pixel twice cannot produce two different readings,
+    and a reading can never appear for a pixel the map draws as
+    unmeasured.
+
+    A coordinate with no cell is answered, not refused: `state` says
+    whether that is unmeasured water inside the study area or somewhere
+    outside it entirely. Those are different facts and a viewer can see
+    the difference on the map, so the API keeps it too.
+
+    404 when there is no raster to query at all, and when the run whose
+    overlay is on screen has lost its cells -- the picture can still be
+    shown, but no number behind it can honestly be quoted.
+    """
+    rendered = _latest_rendered_run(db)
+    if rendered is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No raster overlay is available to query. Run a raster scan first.",
+        )
+    try:
+        found = pixel_lookup.inspect_run(rendered, lat, lng)
+    except pixel_lookup.RasterCellsUnavailableError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return RasterPixelResponse(
+        run_id=rendered.id,
+        date_used=rendered.date_used,
+        scale_m=rendered.scale_m,
+        **found,
+    )

@@ -2151,3 +2151,31 @@ table.events-table td.mono {
 .raster-legend-note { margin: 8px 0 0; font-size: 11px; color: #6e6e73; }
 
 .raster-status { position: absolute; top: 16px; left: 16px; z-index: 500; max-width: 420px; }
+
+/* The clicked-cell inspector. Top-right so it never covers the legend
+   (bottom-left) that explains the colour the click landed on. */
+.raster-pixel-panel {
+  position: absolute;
+  top: 16px;
+  right: 60px;
+  z-index: 500;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  width: 280px;
+}
+
+.raster-pixel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.raster-pixel-title { font-weight: 600; }
+.raster-pixel-close {
+  border: 0; background: none; cursor: pointer;
+  font-size: 18px; line-height: 1; color: #6e6e73; padding: 0 2px;
+}
+.raster-pixel-values {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; margin: 8px 0 0;
+}
+.raster-pixel-value { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; }
+.raster-pixel-value dt { color: #6e6e73; }
+.raster-pixel-value dd { margin: 0; }
+.raster-pixel-meta { margin: 8px 0 0; font-size: 11px; }
+.raster-pixel-note { margin: 8px 0 0; font-size: 11px; color: #6e6e73; }

@@ -221,6 +221,34 @@ DEFAULT_DOWNLOAD_TIMEOUT_S = 300
 _MASKED_FILL = 0.0
 
 
+def valid_cell_mask(date_ms: Any) -> np.ndarray:
+    """Which cells of a raster carry a real observation, by their DATE.
+
+    The one definition of that test, exported so nothing downstream has
+    to keep a second copy of it. `download_composite_arrays` filters the
+    freshly read grid with it, and the backend re-applies it to cells
+    read back off disk (`backend/src/raster_scan/pixel.py`), so a click
+    on unmeasured water and a cell dropped at read time are decided by
+    the same line of code rather than by two that presently agree.
+
+    It is the date band that decides, never an index value. A masked
+    pixel comes back from GEE's NPY export as 0 in *every* band, and 0.0
+    is a perfectly ordinary NDCI reading -- water with equal reflectance
+    in B4 and B5. Testing an index for 0 would therefore throw away real
+    readings and, far worse, report the mask's own 0.0 as one. A real
+    Sentinel-2 acquisition time is ~1.79e12 ms and can never be 0:
+    1970-01-01 predates the mission by 45 years.
+
+    Args:
+        date_ms: the raster's date band, any numeric dtype.
+
+    Returns:
+        Boolean array, True where the cell was actually measured.
+    """
+    dates = np.asarray(date_ms, dtype=np.float64)
+    return np.isfinite(dates) & (dates > _MASKED_FILL)
+
+
 class FabricatedDateError(RuntimeError):
     """A returned cell date is not one of the composite's own source
     acquisitions -- i.e. something averaged or interpolated the date band
@@ -556,7 +584,7 @@ def download_composite_arrays(
         )
 
     raw_dates = np.asarray(grid[RASTER_DATE_BAND], dtype=np.float64)
-    valid = np.isfinite(raw_dates) & (raw_dates > _MASKED_FILL)
+    valid = valid_cell_mask(raw_dates)
     cell_count = int(valid.sum())
     if cell_count == 0:
         raise NoWaterPixelsError(

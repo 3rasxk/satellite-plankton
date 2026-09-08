@@ -43,6 +43,16 @@ export async function getRasterScan() {
   return data
 }
 
+// One cell of the raster overlay, by coordinate. Reads the stored blob the
+// picture was drawn from -- not a live Earth Engine call -- so the numbers
+// shown on a click are the numbers behind the pixel on screen. A 404 here
+// means there is no raster to query (or its cells expired), NOT that the
+// water was measured and found empty.
+export async function getRasterPixel(lat, lng) {
+  const { data } = await client.get('/raster-scan/pixel', { params: { lat, lng } })
+  return data
+}
+
 export async function getTimeseries(lat, lng) {
   const { data } = await client.get('/timeseries', { params: { lat, lng } })
   return data

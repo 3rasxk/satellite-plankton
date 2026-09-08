@@ -28,6 +28,7 @@ and other downstream consumers:
     build_index_composite(polygon_latlng, date)   -- whole-polygon index
     download_composite_arrays(composite, scale_m) raster, see raster.py
     summarize_raster_cells(arrays)                (pure, no GEE call)
+    valid_cell_mask(date_ms)                      (pure, no GEE call)
 """
 
 from .auth import GEEAuthError, initialize_ee
@@ -45,6 +46,7 @@ from .raster import (
     build_index_composite,
     download_composite_arrays,
     summarize_raster_cells,
+    valid_cell_mask,
 )
 from .scene_poll import get_newest_scene_timestamp
 from .sentinel2 import (
@@ -75,6 +77,7 @@ __all__ = [
     "build_index_composite",
     "download_composite_arrays",
     "summarize_raster_cells",
+    "valid_cell_mask",
     "RASTER_BAND_REDUCERS",
     "RASTER_BAND_ORDER",
     "RASTER_INDEX_BANDS",

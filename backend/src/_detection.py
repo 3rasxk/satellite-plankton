@@ -161,6 +161,11 @@ get_newest_scene_timestamp = _data_pipeline_bridge.get_newest_scene_timestamp
 build_index_composite = _data_pipeline_bridge.build_index_composite
 download_composite_arrays = _data_pipeline_bridge.download_composite_arrays
 summarize_raster_cells = _data_pipeline_bridge.summarize_raster_cells
+# The date-band validity test itself, not a backend copy of it -- see
+# data-pipeline/src/raster.py's valid_cell_mask. /raster-scan/pixel
+# re-applies it to cells read back off disk so that "not measured" means
+# the same thing on a click as it did when the raster was read.
+valid_cell_mask = _data_pipeline_bridge.valid_cell_mask
 RASTER_BAND_REDUCERS = _data_pipeline_bridge.RASTER_BAND_REDUCERS
 RASTER_BAND_ORDER = _data_pipeline_bridge.RASTER_BAND_ORDER
 RASTER_INDEX_BANDS = _data_pipeline_bridge.RASTER_INDEX_BANDS
@@ -197,6 +202,7 @@ __all__ = [
     "build_index_composite",
     "download_composite_arrays",
     "summarize_raster_cells",
+    "valid_cell_mask",
     "RASTER_BAND_REDUCERS",
     "RASTER_BAND_ORDER",
     "RASTER_INDEX_BANDS",

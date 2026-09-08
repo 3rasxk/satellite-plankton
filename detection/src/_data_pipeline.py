@@ -158,6 +158,7 @@ get_newest_scene_timestamp = _dp.get_newest_scene_timestamp
 build_index_composite = _dp.build_index_composite
 download_composite_arrays = _dp.download_composite_arrays
 summarize_raster_cells = _dp.summarize_raster_cells
+valid_cell_mask = _dp.valid_cell_mask
 RASTER_BAND_REDUCERS = _dp.RASTER_BAND_REDUCERS
 RASTER_BAND_ORDER = _dp.RASTER_BAND_ORDER
 RASTER_INDEX_BANDS = _dp.RASTER_INDEX_BANDS
@@ -202,6 +203,7 @@ __all__ = [
     "build_index_composite",
     "download_composite_arrays",
     "summarize_raster_cells",
+    "valid_cell_mask",
     "RASTER_BAND_REDUCERS",
     "RASTER_BAND_ORDER",
     "RASTER_INDEX_BANDS",

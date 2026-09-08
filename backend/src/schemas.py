@@ -330,6 +330,94 @@ class RasterScanResponse(DisclaimerMixin):
         default=None, description="Why no overlay is being served, when there is none.")
 
 
+class RasterPixelResponse(DisclaimerMixin):
+    """One cell of the served raster, looked up by coordinate.
+
+    Read straight out of the stored blob the overlay was drawn from --
+    never a live Earth Engine call, so the numbers here are the numbers
+    behind the picture on screen and cannot drift from it between clicks.
+
+    `state` answers in the same three states the overlay paints, because a
+    difference a reader can see must be a difference they can be told:
+    a reading, water inside the study area that was NOT measured, and
+    outside the study area. Cloud, land and no-pass are one state because
+    the stored raster holds no evidence separating them (see
+    `src/raster_scan/pixel.py`).
+    """
+
+    model_config = ConfigDict(json_schema_extra={"example": {
+        "run_id": 12, "state": "reading",
+        "query_lat": 13.05, "query_lng": 100.62,
+        "cell_lat": 13.049944, "cell_lng": 100.620321,
+        "pixel_centre_lat": 13.050137, "pixel_centre_lng": 100.620126,
+        "pixel_row": 214, "pixel_col": 401,
+        "index_values": {"ndci": 0.031, "bda2": 1.18, "bda3": 0.29, "b2_b3": 0.83},
+        "date_ms": 1788492600000, "acquired_date": "2026-09-04",
+        "acquired_at": "2026-09-04T03:30:00Z",
+        "scale_m": 200, "date_used": "2026-09-06",
+        "disclaimer": DISCLAIMER_TEXT,
+    }})
+
+    state: Literal["reading", "not_measured", "outside_study_area"] = Field(
+        description="Which of the overlay's three drawn states this coordinate is in. "
+        "'not_measured' is water inside the study area with no usable reading -- cloud, "
+        "land-masked, or no scene covered it. It is NOT a low reading and NOT a zero: "
+        "the three causes are one state because the stored raster cannot tell them apart.")
+    meaning: str = Field(description="What `state` means, in the legend's own words.")
+
+    run_id: int = Field(description="The run whose stored cells answered -- the same run "
+                        "whose overlay /raster-scan serves, so the number matches the picture.")
+    date_used: str | None = Field(default=None, description="Target date that run asked about. "
+                                  "NOT the date of this reading -- see `acquired_date`.")
+    scale_m: int | None = Field(
+        default=None, description="That run's read scale in metres, and the width of the "
+        "square this cell is drawn as. The cell is ONE nearest-neighbour sampled native "
+        "pixel at that spacing, not an average of the square -- a click anywhere in the "
+        "square returns that same single observation.")
+
+    query_lat: float = Field(description="Latitude asked about, echoed back.")
+    query_lng: float = Field(description="Longitude asked about, echoed back.")
+    cell_lat: float | None = Field(
+        default=None, description="The sampled pixel's OWN latitude, as Earth Engine "
+        "reported it. Where the observation actually is; null when nothing was measured.")
+    cell_lng: float | None = Field(
+        default=None, description="The sampled pixel's own longitude. See `cell_lat`.")
+    pixel_centre_lat: float | None = Field(
+        default=None, description="Centre latitude of the drawn square containing the query. "
+        "A display coordinate, not an observation -- `cell_lat` is the measurement's own.")
+    pixel_centre_lng: float | None = Field(
+        default=None, description="Centre longitude of the drawn square. See `pixel_centre_lat`.")
+    pixel_row: int | None = Field(
+        default=None, description="Row of that square in the overlay PNG (row 0 is northmost). "
+        "Null when the coordinate falls outside the image.")
+    pixel_col: int | None = Field(
+        default=None, description="Column of that square in the overlay PNG.")
+
+    index_values: dict[str, float | None] | None = Field(
+        default=None, description="The four spectral indices stored for this cell, under the "
+        "raster's own band names (ndci, bda2, bda3, b2_b3 -- the same quantities /detect "
+        "returns as ndci/2bda/3bda/b2_b3_ratio). Exactly the stored values, widened from "
+        "float32 and never rounded. Readings only: no anomaly score, no risk level, no "
+        "classification -- no valid spectral-index baseline exists. Null unless "
+        "state == 'reading'.")
+    unreadable_bands: list[str] = Field(
+        default_factory=list, description="Bands whose stored value is not a finite number "
+        "(an index is a ratio, and a zero-reflectance pixel can produce inf or NaN). Returned "
+        "as null rather than clamped to an end of the scale, which would invent a reading. "
+        "The overlay draws such a band as unmeasured even though the cell was measured.")
+
+    date_ms: int | None = Field(
+        default=None, description="THIS cell's own acquisition time (epoch ms, UTC) -- the "
+        "authoritative date field, carried as an integer because float32 cannot hold epoch "
+        "milliseconds without moving them off the scene they name. Neighbouring cells "
+        "routinely differ: the composite is most-recent-wins per pixel.")
+    acquired_date: str | None = Field(
+        default=None, description="`date_ms` as YYYY-MM-DD (UTC), derived from it, never the "
+        "other way round.")
+    acquired_at: str | None = Field(
+        default=None, description="`date_ms` as a full UTC timestamp.")
+
+
 REGIONAL_SCAN_CAVEAT_TEXT = (
     "Index values only — no anomaly detection active. Real "
     "Sentinel-2 readings across the full upper Gulf study-area polygon, "
