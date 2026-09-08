@@ -27,13 +27,12 @@ reports `no_imagery` rather than inventing or silently substituting data.
 **A reading is only as current as its own scene date.** Every reading comes from
 the newest *usable* image on or before the date asked about, up to 14 days old
 by default; past that the system reports no imagery instead of a staler value.
-Cloud makes that limit bite hard in the southwest monsoon — on the 2026-09-06
-upper-Gulf scan only 74 of 501 points had a scene that recent, and 221 more had
-one only at 19 days. Absence of a pin therefore means "no recent usable image
-here", never "no bloom here". The scene date is carried per point and shown with
-the value, never backfilled with the requested date: read a pin as "this is what
-that water looked like on its own scene date", not as today's condition, and
-never compare two pins without comparing their dates.
+Cloud makes that limit bite hard in the southwest monsoon. A 2026-09-06
+measurement of the now-retired 501-point sampler found only 74 points with a
+scene that recent, and 221 more only at 19 days. The raster now marks missing
+cells with a grey hatch. Absence of a reading means "no recent usable image
+here", never "no bloom here". Each measured cell carries its own scene date,
+never the requested target date.
 
 **A clicked cell is one pixel, not an area.** The raster view reports the
 reading stored for the single 10 m pixel that was sampled for that cell, at
@@ -67,9 +66,10 @@ reported.
 
 ## No spectral-index anomaly layer is active
 
-The regional scan shows raw indices and per-point scene dates. Because no valid
+The raster scan shows raw indices and per-cell scene dates. Because no valid
 spectral-index anomaly statistic exists, there is no active anomaly threshold,
-risk tier, or anomaly cluster. Numeric threshold entries in
+risk tier, or anomaly cluster. The retired 501-point path is no longer run or
+shown. Numeric threshold entries in
 `detection/src/config.yaml` are inactive placeholders and all `calibrated_*`
 values remain null.
 

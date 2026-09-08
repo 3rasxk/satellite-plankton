@@ -7,7 +7,7 @@ from src import db
 from src.db_models import DetectionCache, MonitoredSite
 
 
-def test_legacy_caches_reset_without_losing_sites(tmp_path, monkeypatch):
+def test_legacy_detection_cache_resets_without_losing_sites_or_archived_scans(tmp_path, monkeypatch):
     engine = create_engine(f"sqlite:///{tmp_path / 'legacy.db'}")
     monkeypatch.setattr(db, "engine", engine)
     db.init_db()
@@ -34,15 +34,13 @@ def test_legacy_caches_reset_without_losing_sites(tmp_path, monkeypatch):
     db.init_db()
     inspector = inspect(engine)
     with engine.connect() as connection:
-        for table in (
-            "detection_cache", "regional_scan_points",
-            "regional_scan_clusters", "regional_scan_runs",
-        ):
-            assert connection.execute(text(f"SELECT COUNT(*) FROM {table}")).scalar_one() == 0
-            assert all(
-                column["name"] not in {"anomaly_z", "mean_anomaly_z", "max_anomaly_z"}
-                for column in inspector.get_columns(table)
-            )
+        assert connection.execute(text("SELECT COUNT(*) FROM detection_cache")).scalar_one() == 0
+        assert "anomaly_z" not in {
+            column["name"] for column in inspector.get_columns("detection_cache")
+        }
+        assert connection.execute(text("SELECT point_id FROM regional_scan_points")).scalar_one() == "0_0"
+        assert connection.execute(text("SELECT id FROM regional_scan_clusters")).scalar_one() == 1
+        assert connection.execute(text("SELECT id FROM regional_scan_runs")).scalar_one() == 1
     with Session(engine) as session:
         assert session.get(MonitoredSite, "real_site").name == "Real site"
         session.add(DetectionCache(
@@ -67,8 +65,7 @@ def test_a_column_added_after_a_table_shipped_reaches_an_existing_database(tmp_p
     predates it -- and the next query naming it fails. This is the one
     path that fixes that, and no fresh test database ever exercises it.
 
-    RasterScanRun.overlay is the case in hand: raster_scan_runs shipped one
-    commit before the renderer that fills the column in.
+    RasterScanRun's optional metadata fields are the cases in hand.
     """
     engine = create_engine(f"sqlite:///{tmp_path / 'older.db'}")
     monkeypatch.setattr(db, "engine", engine)
@@ -90,12 +87,14 @@ def test_a_column_added_after_a_table_shipped_reaches_an_existing_database(tmp_p
 
     inspector = inspect(engine)
     columns = {column["name"] for column in inspector.get_columns("raster_scan_runs")}
-    assert "overlay" in columns
+    assert {"overlay", "scene_dates", "trigger_scene_timestamp"} <= columns
     with engine.connect() as connection:
         # The addition is not a reset: the row that was already there
         # survives, with the new column simply null.
-        rows = connection.execute(text("SELECT id, overlay FROM raster_scan_runs")).all()
-        assert rows == [(1, None)]
+        rows = connection.execute(text(
+            "SELECT id, overlay, scene_dates, trigger_scene_timestamp FROM raster_scan_runs"
+        )).all()
+        assert rows == [(1, None, None, None)]
 
     # Idempotent -- a second startup adds nothing and changes nothing.
     db.init_db()

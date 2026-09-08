@@ -206,16 +206,11 @@ Responsive down to 375px (map goes full-bleed, panel becomes a bottom sheet). Vi
 - Legend fixed bottom-left, showing the three levels *with what they mean*, not just colour swatches
 - ~~Click a cell → `SitePanel` opens, fetches `/timeseries` for that coordinate~~
 - ~~Panel shows: coordinates (mono), current index value, `AnomalyStrip`, `TimeSeriesChart`, and the detection verdict from `/detect`~~
-- (Correction, 2026-09-06: the overview map now shows only the regional
-  sampling grid, and a pin opens a Leaflet popup with that point's four index
-  readings, its status and its own scene date — no slide-in panel, no
-  `/timeseries` fetch on click. `SitePanel.jsx` had already been superseded by
-  the four right-panel cards and was left unreachable when the seven-station
-  layer came off this map; it has been deleted, along with `RiskMap`'s
-  `featureCollection`/`onSelectSite` props and the `selectMapFeatures` helper
-  that only that layer used. The seven named stations remain available through
-  `/risk-map`, which the NDCI, anomaly, aquaculture and summary pages still
-  read.)
+- (Correction, 2026-09-08: the root overview now shows the full-area raster.
+  Clicking a measured cell opens its four index readings and its own scene date.
+  The retired 501-point sampling grid is no longer fetched or rendered. The
+  seven named stations remain available through `/risk-map`, which the NDCI,
+  anomaly, aquaculture and summary pages still read.)
 
 ### Summary page (`/summary`)
 

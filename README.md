@@ -81,30 +81,25 @@ Once running:
 - API: http://localhost:8000 (interactive docs at `/docs`)
 - Dashboard: http://localhost:5173 (watch `scripts/dev.sh`'s own log output for the actual port Vite picked)
 
-The dashboard opens on the full upper-Gulf sampling grid (501 points at the
-default 5 km spacing), without threshold filtering. Click any pin for all four
-available indices, its status, and its actual scene date. Before a scan has
-saved results, the grid is still visible with `no_data_yet` and null readings;
-the browser checks the cache every 30 seconds, without triggering imagery
-requests. The named monitoring-station layer is not shown on this map.
-Every satellite reading in the system — the regional grid, `/detect`, the
-scheduler's site cache, and the true-color / NDCI thumbnails beside them — comes
-from the newest usable image acquired **on or before** the day being asked
-about, never one acquired after it. How old that image may be before the system
-gives up and reports no data is the one thing configurable about it:
-`SENTINEL2_MAX_SCENE_AGE_DAYS` in `data-pipeline/.env`, 14 days by default.
-Each pin keeps its own scene date and shows its age against the scan target, so
-a 3-day-old reading and a 5-week-old one are never presented as the same thing.
-Nothing usable inside the ceiling means a no-data pin — not a relaxed cloud
-mask, not a made-up index value.
+The dashboard opens on the full-area raster. It displays the stored NDCI image,
+a grey hatch for unmeasured cells, a legend that describes index values rather
+than risk, and a banner with target date, contributing scene dates, and coverage.
+Click a cell to read all four stored indices and that cell's own acquisition
+date. A 200 m cell is one nearest-neighbour sampled native pixel, not an average
+of the square drawn on screen.
 
-Expect the dates to differ pin to pin, and expect a lot of no-data pins in the
-monsoon. On the 2026-09-06 scan of 501 points, only 74 had a usable scene within
-14 days. A further 221 had one at 19 days — a single clear pass on 2026-08-18,
-every later acquisition over that water being fully clouded — and the 14-day
-ceiling deliberately reports those as no imagery rather than showing a
-three-week-old reading as if it described today. Raise the ceiling if you would
-rather see them, and read their scene dates.
+Run a raster manually when needed:
+
+```bash
+cd backend
+./venv/bin/python scripts/run_raster_scan.py --date 2026-09-08 --scale-m 200
+```
+
+The scheduler polls for new Sentinel-2 candidates without scanning at startup.
+It starts a new raster only after both a new acquisition and the configured
+cooldown. Full raster blobs and overlay PNGs are retained for 30 days by default;
+their run metadata and summaries remain after expiry. The fixed seven named
+stations continue to refresh separately for `/risk-map` and time-series use.
 
 If you'd rather run the two processes by hand instead of the script (e.g. to see each one's logs in its own terminal):
 
@@ -125,7 +120,9 @@ cd backend        && ./venv/bin/python -m pytest tests/ -q
 cd frontend       && npm test
 ```
 
-The service suites need no live GEE credentials; external calls are mocked or bypassed at typed boundaries.
+Most service tests mock external calls at typed boundaries. Two backend
+satellite-image tests deliberately call live GEE and require credentials and
+network access.
 
 ## Manual end-to-end verification
 
@@ -133,11 +130,10 @@ The stack has been manually exercised against real Earth Engine-backed data. Aut
 
 ## What's not automated
 
-Frontend tests cover map bounds, unevaluated monitoring pins, and rendering all
-regional grid statuses and per-point readings. Regional components are rendered
-with only the browser-dependent Leaflet/API boundaries stubbed; real map
-interaction coverage remains limited, so UI changes still need a browser check
-against the running API.
+Frontend tests cover raster bounds, palette/legend agreement, run-bound image
+and pixel lookup, no-data interpretation, and banner claims. Real map interaction
+coverage remains limited, so UI changes still need a browser check against the
+running API.
 
 ## Design decisions, locked
 

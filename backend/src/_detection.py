@@ -143,15 +143,14 @@ ndci_value_to_color = _data_pipeline_bridge.ndci_value_to_color
 check_point_in_study_area = _data_pipeline_bridge.check_point_in_study_area
 
 # Sentinel-2 scene-freshness poll -- used by
-# backend/src/regional_scan/trigger.py's poll_and_maybe_scan().
+# backend/src/raster_scan/trigger.py's poll_and_maybe_scan().
 get_newest_scene_timestamp = _data_pipeline_bridge.get_newest_scene_timestamp
 
 # Whole-polygon raster composite (data-pipeline/src/raster.py, re-exported
 # through detection/src/_data_pipeline.py) -- used by
-# backend/src/raster_scan/scan.py. The pin path (grid.py's 7 sites,
-# scheduler.py, /risk-map) does not go anywhere near these; they are an
-# additional read of the same Sentinel-2 data across an area, not a
-# replacement for the per-point one.
+# backend/src/raster_scan/scan.py. The named-station path (grid.py's 7
+# sites, scheduler.py, /risk-map) remains separate because it provides
+# fixed-place history; this raster replaced the 501-point regional grid.
 #
 # RASTER_BAND_REDUCERS and summarize_raster_cells come across together
 # because backend reduces an expired raster to its stored summary

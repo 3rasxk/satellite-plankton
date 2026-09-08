@@ -1,6 +1,5 @@
 """
-Sentinel-2 scene-freshness poll for the regional scan's event-driven
-trigger (docs/superpowers/specs/2026-08-31-regional-scan-design.md §5).
+Sentinel-2 scene-freshness poll for the raster scan's event-driven trigger.
 
 A single server-side metadata query (filterBounds + filterDate +
 aggregate_max('system:time_start')) -- no per-point loop, no pixel
@@ -46,9 +45,7 @@ def get_newest_scene_timestamp(
     # the exclusive end bound correctly includes all of today
     # (00:00:00Z through 23:59:59.999Z). This only changes what THIS
     # poll query can see -- it does not change trigger/cooldown logic
-    # or the full-polygon rescan behavior in backend/src/regional_scan/
-    # trigger.py, both of which are unchanged (spec §5; §12 per-tile
-    # partial scanning remains out of scope).
+    # or the full-polygon scan behavior in backend/src/raster_scan/trigger.py.
     now_date = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%d")
 
     max_ts = (

@@ -88,31 +88,6 @@ def today_str() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
-# Regional bloom scan (docs/superpowers/specs/2026-08-31-regional-scan-design.md
-# §8). Same env-override convention as SCHEDULER_INTERVAL_MINUTES above.
-REGIONAL_SCAN_GRID_SPACING_KM: float = float(os.environ.get("REGIONAL_SCAN_GRID_SPACING_KM", "5"))
-REGIONAL_SCAN_POLL_INTERVAL_HOURS: int = int(os.environ.get("REGIONAL_SCAN_POLL_INTERVAL_HOURS", "3"))
-REGIONAL_SCAN_COOLDOWN_HOURS: int = int(os.environ.get("REGIONAL_SCAN_COOLDOWN_HOURS", "20"))
-# How old a point's imagery may be is NOT configured here: it is one
-# system-wide rule owned by data-pipeline (sentinel2.py's
-# DEFAULT_MAX_SCENE_AGE_DAYS / SENTINEL2_MAX_SCENE_AGE_DAYS), applying
-# equally to the regional scan, /detect and the scheduler's site cache.
-# backend reads the effective value through src/_detection.py rather than
-# keeping a second copy that could disagree with the one actually used.
-# How long a run left in status='running' is believed before a new scan
-# treats it as dead and proceeds. Two scans writing the same
-# RegionalScanPoint rows interleave their upserts and each delete the
-# other's clusters, so run_scan refuses to start alongside a live one --
-# but a process killed mid-scan leaves that row 'running' forever, and
-# without an expiry every later scan would be blocked by a ghost. A full
-# 5 km scan of the Thai-side Gulf measures ~3.1 h, so 6 h is roughly
-# double the longest legitimate run.
-REGIONAL_SCAN_STALE_RUN_HOURS: int = int(os.environ.get("REGIONAL_SCAN_STALE_RUN_HOURS", "6"))
-# Lookback window for the poll's own Sentinel-2 metadata query (spec §5) --
-# bounds the filterDate() query cost; does not affect the cooldown/trigger
-# decision itself (that compares timestamps, not window length).
-REGIONAL_SCAN_POLL_LOOKBACK_DAYS: int = int(os.environ.get("REGIONAL_SCAN_POLL_LOOKBACK_DAYS", "10"))
-
 # Raster scan (src/raster_scan/). Read scale in metres for the
 # whole-polygon index composite. Measured live over the study polygon:
 # 200 m -> 49,607 valid water cells, ~9.2 MB transferred, ~10 s; 100 m ->
@@ -131,3 +106,16 @@ RASTER_SCAN_SCALE_M: int = int(os.environ.get("RASTER_SCAN_SCALE_M", "200"))
 # The run row, its metadata and its summary are never deleted by
 # retention -- only the blob is.
 RASTER_RETENTION_DAYS: int = int(os.environ.get("RASTER_RETENTION_DAYS", "30"))
+# Poll metadata cheaply and build a new raster only when a new candidate
+# Sentinel-2 acquisition has appeared and the cooldown has elapsed. The
+# legacy REGIONAL_* names are accepted as fallbacks for existing local
+# .env files during this transition; new configuration uses RASTER_*.
+RASTER_SCAN_POLL_INTERVAL_HOURS: int = int(os.environ.get(
+    "RASTER_SCAN_POLL_INTERVAL_HOURS", os.environ.get("REGIONAL_SCAN_POLL_INTERVAL_HOURS", "3")
+))
+RASTER_SCAN_COOLDOWN_HOURS: int = int(os.environ.get(
+    "RASTER_SCAN_COOLDOWN_HOURS", os.environ.get("REGIONAL_SCAN_COOLDOWN_HOURS", "20")
+))
+RASTER_SCAN_POLL_LOOKBACK_DAYS: int = int(os.environ.get(
+    "RASTER_SCAN_POLL_LOOKBACK_DAYS", os.environ.get("REGIONAL_SCAN_POLL_LOOKBACK_DAYS", "10")
+))

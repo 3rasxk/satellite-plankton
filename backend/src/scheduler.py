@@ -63,11 +63,12 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from . import _detection as bridge
-from .config import SCHEDULER_INTERVAL_MINUTES, REGIONAL_SCAN_POLL_INTERVAL_HOURS, today_str
+from .config import RASTER_SCAN_POLL_INTERVAL_HOURS, SCHEDULER_INTERVAL_MINUTES, today_str
 from .db import SessionLocal
 from .db_models import DetectionCache, MonitoredSite
 from .grid import MONITORED_GRID
-from .regional_scan.trigger import poll_and_maybe_scan
+from .raster_scan.storage import apply_retention
+from .raster_scan.trigger import poll_and_maybe_scan
 from .satellite_meta import fetch_satellite_meta
 from .services.cache_service import clear_cache
 
@@ -256,6 +257,16 @@ def refresh_grid() -> None:
     logger.info("scheduler: refresh_grid done")
 
 
+def expire_raster_scans() -> None:
+    """Apply blob retention while preserving every run row and summary."""
+    with SessionLocal() as db:
+        try:
+            result = apply_retention(db)
+            logger.info("raster retention: expired=%s kept=%s", result["expired"], result["kept"])
+        except Exception as exc:  # noqa: BLE001 -- scheduler-job boundary
+            logger.error("raster retention failed: %s: %s", type(exc).__name__, exc)
+
+
 def create_scheduler() -> BackgroundScheduler:
     scheduler = BackgroundScheduler()
     scheduler.add_job(
@@ -270,8 +281,8 @@ def create_scheduler() -> BackgroundScheduler:
     scheduler.add_job(
         poll_and_maybe_scan,
         "interval",
-        hours=REGIONAL_SCAN_POLL_INTERVAL_HOURS,
-        id="poll_regional_scan",
+        hours=RASTER_SCAN_POLL_INTERVAL_HOURS,
+        id="poll_raster_scan",
         max_instances=1,
         coalesce=True,
         # Deliberately no next_run_time override -- must NOT fire at
@@ -279,5 +290,14 @@ def create_scheduler() -> BackgroundScheduler:
         # on every --reload dev restart would be unworkable. max_instances=1
         # also doubles as overlap protection for the scan phase inside
         # poll_and_maybe_scan.
+    )
+    scheduler.add_job(
+        expire_raster_scans,
+        "interval",
+        days=1,
+        id="expire_raster_scans",
+        max_instances=1,
+        coalesce=True,
+        # No startup execution: retention is maintenance, never a boot gate.
     )
     return scheduler

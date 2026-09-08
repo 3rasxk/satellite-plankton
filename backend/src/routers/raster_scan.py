@@ -82,8 +82,7 @@ def _rendered_run(db: Session, run_id: int | None = None) -> RasterScanRun | Non
 
     Not simply the newest run: a later attempt can be running, failed,
     or have had its blob expired by retention, and none of those should
-    hide the last picture that still exists. Mirrors the regional scan's
-    "serve the newest usable snapshot" rule.
+    hide the last picture that still exists.
 
     An explicit ID is restricted to its own row even when that render
     has expired. A missing image must never be replaced by another run.

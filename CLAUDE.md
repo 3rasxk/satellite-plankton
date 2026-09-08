@@ -63,7 +63,7 @@ satellite-data ──► bloom-detection
 ## 4. What the human must do (agents cannot — remind the user)
 
 1. **Google Earth Engine** — sign up (free for research, needs approval), authenticate locally. If auth fails with an SSL certificate error, a Python from another toolchain (e.g. PlatformIO) is being used — create a clean virtualenv from the system Python instead.
-2. **Study area** — confirmed 2026-08-24 as a real polygon (not an axis-aligned bounding box), stored in `data-pipeline/src/study_area.py` (`STUDY_AREA_POLYGON_LATLNG`). This is a boundary-check only (`check_point_in_study_area`), not a scan area — `/risk-map` does not enumerate points inside it. The actual monitored sites are the fixed, hand-picked seven-point list in `backend/src/grid.py`.
+2. **Study area** — confirmed 2026-08-24 as a real polygon (not an axis-aligned bounding box), stored in `data-pipeline/src/study_area.py` (`STUDY_AREA_POLYGON_LATLNG`). The raster scans this polygon. `/risk-map` remains the separate fixed, hand-picked seven-site list in `backend/src/grid.py`.
 3. **Supabase/DB keys** + hosting account.
 4. **Review thresholds and escalation rules** in `detection/src/config.yaml` — accept or change.
 
@@ -103,8 +103,8 @@ Tests — three separate pytest suites, each with its own venv. Most GEE calls a
 ```bash
 cd data-pipeline && ./venv/bin/python -m pytest tests/ -q   # 118 tests
 cd detection      && ./venv/bin/python -m pytest tests/ -q   # 60 tests
-cd backend        && ./venv/bin/python -m pytest tests/ -q   # 259 tests (2 live GEE)
-cd frontend       && npm test                                # 51 tests
+cd backend        && ./venv/bin/python -m pytest tests/ -q   # 207 tests (2 live GEE)
+cd frontend       && npm test                                # 45 tests
 ```
 
 Single test: `./venv/bin/python -m pytest tests/test_climatology.py::test_name -q` (run from the relevant subproject directory, with its venv active).
@@ -128,7 +128,7 @@ Runs locally only. There is no deployed instance: the Render backend and Vercel 
 
 Consequence: `detection/venv` and `backend/venv` each need the *full* transitive dependency chain installed directly (`earthengine-api`, `numpy`, `PyYAML`), even where the importing project's own `requirements.txt` doesn't list them — see each subproject's README "Cross-project import(s)" section.
 
-Request flow: frontend (React/Vite) → `backend/src/routers/*.py` → `backend/src/_detection.py` bridge → `detection/src/prediction.py`'s `detect()` / `risk_level()` → `detection/src/_data_pipeline.py` bridge → `data-pipeline/src` GEE calls. `backend/src/scheduler.py` runs this same chain on a timer (`SCHEDULER_INTERVAL_MINUTES`, default 360) for the fixed 7-site grid (`backend/src/grid.py`) and caches results — plus pre-rendered true-color/NDCI PNGs — in the `detection_cache` table; `/risk-map` and `/summary` read that cache and never call GEE live. `/detect` and `/satellite-image` call the chain live, on demand.
+Request flow: frontend (React/Vite) → `backend/src/routers/*.py` → `backend/src/_detection.py` bridge → `detection/src/prediction.py`'s `detect()` / `risk_level()` → `detection/src/_data_pipeline.py` bridge → `data-pipeline/src` GEE calls. `backend/src/scheduler.py` runs this same chain on a timer (`SCHEDULER_INTERVAL_MINUTES`, default 360) for the fixed 7-site grid (`backend/src/grid.py`) and caches results — plus pre-rendered true-color/NDCI PNGs — in the `detection_cache` table; `/risk-map` and `/summary` read that cache and never call GEE live. A separate new-scene poll runs the full-area raster and stores its cells/overlay under `backend/data/rasters/`; `/raster-scan` serves that snapshot. `/detect` and `/satellite-image` call the chain live, on demand. The retired 501-point regional scanner is not scheduled or displayed; its DB tables remain as history and `/regional-scan` returns 410 with the replacement path.
 
 DB defaults to local SQLite (`backend/data/app.db`, gitignored) via `backend/src/config.py`; swapping to Postgres/Supabase is a single `DATABASE_URL` env var — `src/db.py`/`src/db_models.py` never branch on which DB is in use beyond one SQLite-only `connect_args` line.
 

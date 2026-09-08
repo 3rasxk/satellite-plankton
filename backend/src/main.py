@@ -175,6 +175,7 @@ def root() -> dict:
             "/detect",
             "/satellite-image",
             "/summary",
-            "/regional-scan",
+            "/raster-scan",
+            "/raster-scan/pixel",
         ],
     }

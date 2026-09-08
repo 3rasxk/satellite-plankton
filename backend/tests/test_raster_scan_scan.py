@@ -313,13 +313,20 @@ def test_no_usable_imagery_is_recorded_as_no_data_not_an_error(client, blob_root
     monkeypatch.setattr(scan_module.bridge, "build_index_composite", nothing_there)
 
     with SessionLocal() as db:
-        run = scan_module.run_raster_scan(db, "2026-09-06")
+        candidate = "2026-09-06T03:41:12+00:00"
+        run = scan_module.run_raster_scan(
+            db, "2026-09-06", trigger_scene_timestamp=candidate
+        )
 
         assert run.status == "no_data"
         assert "NoCloudFreeImageryError" in run.reason
         assert run.blob_path is None
         assert run.cell_count is None
         assert run.summary is None
+        assert run.trigger_scene_timestamp == candidate
+        run_id = run.id
+    with SessionLocal() as db:
+        assert db.get(RasterScanRun, run_id).trigger_scene_timestamp == candidate
     assert not storage.run_blob_dir(1, blob_root).exists()
 
 

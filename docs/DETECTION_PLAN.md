@@ -33,19 +33,17 @@ requires the unavailable spatial anomaly input. Until a valid baseline exists,
 the engine returns no level, no triggered rule, and the reason
 `not_computed_no_valid_baseline`.
 
-## Regional scan
+## Full-area raster
 
-The regional scan evaluates the same `detect()` pipeline at every grid point in
-the study-area polygon. Scene choice is not the scan's decision and cannot be
-varied per caller: `get_sentinel2_bands` applies one system-wide rule — the
-newest usable scene acquired on or before the requested day, never a later one,
-giving up past `SENTINEL2_MAX_SCENE_AGE_DAYS` (14) and reporting no imagery
-rather than reaching further back. `/detect`, the scheduler's site cache and the
-rendered thumbnails all read under that same rule, which is also what keeps a
-thumbnail and the number beside it on the same scene. Cloud and water-mask
-criteria are unchanged. The scan stores every point, including explicit no-data
-statuses, and preserves the real per-point `actual_date`. With anomaly scoring
-inactive, `spatial_anomaly_z`, `threshold_tier`, and clusters remain null/empty.
+The raster scan evaluates the four Sentinel-2 indices across the study-area
+polygon in one composite. Each retained cell stores its own acquisition time;
+cloudy, land, and otherwise unmeasured cells stay explicit in the overlay. A
+cheap metadata poll starts a scan only for a new candidate acquisition after the
+cooldown. The candidate timestamp is stored separately from retained cell dates
+so a wholly cloudy acquisition is still remembered. This product reports index
+readings and coverage only; it does not compute anomaly scores, risk tiers, or
+bloom verdicts. The fixed seven named stations remain available through
+`/risk-map` and use the same system-wide scene-age rule as `/detect`.
 
 ## Limitations
 

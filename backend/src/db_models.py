@@ -1,4 +1,4 @@
-"""SQLAlchemy ORM models for monitoring sites, regional scans, and raster
+"""SQLAlchemy ORM models for monitoring sites, archived regional scans, and raster
 scans.
 
 - MonitoredSite     the grid `/risk-map`, `/summary`, and the scheduler
@@ -101,7 +101,9 @@ class DetectionCache(Base):
 
 
 class RegionalScanRun(Base):
-    """One row per full-polygon regional-scan run (history kept -- small
+    """Archived metadata from the retired 501-point scan (read-only).
+
+    One row per former regional-scan run (history kept -- small
     rows, cheap). See docs/superpowers/specs/2026-08-31-regional-scan-design.md
     §6. `newest_scene_date` is the max Sentinel-2 scene timestamp the
     triggering poll considered -- read back by the next poll as its
@@ -167,6 +169,11 @@ class RasterScanRun(Base):
     scene_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     oldest_scene_date: Mapped[str | None] = mapped_column(String, nullable=True)
     newest_scene_date: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Full timestamp returned by the cheap metadata poll that caused this
+    # run. Separate from newest_scene_date, which is only a YYYY-MM-DD over
+    # retained cells. A wholly cloudy candidate can produce no cells but
+    # must still be remembered so it is not retried every polling cycle.
+    trigger_scene_timestamp: Mapped[str | None] = mapped_column(String, nullable=True)
 
     # How the kept cells are distributed across those acquisition days:
     # [{"date": "YYYY-MM-DD", "cells": int, "share": float}, ...], share
@@ -210,11 +217,13 @@ class RasterScanRun(Base):
 
 
 class RegionalScanPoint(Base):
-    """Latest-run snapshot, upserted by `point_id` (not appended) --
+    """Archived latest snapshot from the retired 501-point scan.
+
+    Formerly upserted by `point_id` (not appended) --
     same overwrite-latest convention as DetectionCache. No-data points
     are stored with their real status, never omitted (spec §0/§6).
     `point_id` is f"{row_idx}_{col_idx}" -- stable across runs at the
-    same grid spacing (backend/src/regional_scan/grid.py)."""
+    same grid spacing. No active service reads or rewrites these rows."""
 
     __tablename__ = "regional_scan_points"
 
@@ -240,7 +249,9 @@ class RegionalScanPoint(Base):
 
 
 class RegionalScanCluster(Base):
-    """Latest-run snapshot -- deleted and reinserted whole each run
+    """Archived clusters from the retired 501-point scan.
+
+    Formerly deleted and reinserted whole each run
     (unlike RegionalScanPoint's stable point_id, cluster membership can
     change entirely between runs). Computed only over real, status='ok'
     member cells by construction -- only already-flagged 'ok' points are

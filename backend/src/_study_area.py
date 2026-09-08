@@ -1,7 +1,6 @@
 """
-Cross-project bridge into `data-pipeline/src`, used only by
-`backend/src/regional_scan/grid.py` to filter a generated grid down to
-points inside the confirmed study-area polygon.
+Cross-project bridge into `data-pipeline/src`, used by the raster trigger
+to poll the confirmed study-area polygon for new acquisitions.
 
 `backend/src/_detection.py` already reaches `check_point_in_study_area`
 indirectly (through `detection/src/_data_pipeline.py`'s own bridge), but
@@ -12,7 +11,7 @@ private internals, this file is a third, direct instance of the exact
 `detection/src/_data_pipeline.py` established for the identical
 two-projects-both-named-`src` collision problem (see that module's own
 docstring) -- "the same one this codebase already uses twice"
-(docs/superpowers/specs/2026-08-31-regional-scan-design.md §1).
+(the namespaced bridge convention documented in CLAUDE.md §8).
 
 No data-pipeline logic is duplicated here -- both names below are the
 exact objects from `data-pipeline/src/__init__.py`. `check_point_in_study_area`

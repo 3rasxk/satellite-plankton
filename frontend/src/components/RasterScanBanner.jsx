@@ -214,7 +214,7 @@ export default function RasterScanBanner({ data, loading, error, onRefresh }) {
 
   return (
     <div className="raster-scan-banner info-callout glass" role="status">
-      <div className="regional-scan-banner-status-row">
+      <div className="raster-scan-banner-status-row">
         <span className="headline">ภาพแรสเตอร์ทั่วพื้นที่ศึกษา</span>
         {onRefresh && (
           <button type="button" className="retry-btn" onClick={onRefresh} disabled={loading}>

@@ -48,6 +48,11 @@ _ADDED_NULLABLE_COLUMNS: tuple[tuple[str, str, str], ...] = (
     # distribution was never measured for those runs and cannot be
     # recovered from the span they did record.
     ("raster_scan_runs", "scene_dates", "JSON"),
+    # Candidate acquisition that caused a scheduled attempt. This is
+    # deliberately distinct from the newest date among retained cells:
+    # a cloudy candidate can retain no cells and still must not be polled
+    # into another attempt every three hours.
+    ("raster_scan_runs", "trigger_scene_timestamp", "VARCHAR"),
 )
 
 
@@ -79,8 +84,9 @@ def init_db() -> None:
 
     Legacy spectral-index/MODIS chlor_a scores have incompatible units;
     they cannot be migrated or backfilled into spatial_anomaly_z. Only
-    disposable detection caches and regional scan snapshots and their run
-    metadata are reset. The retired validation tables are always dropped.
+    the disposable detection cache is reset. Retired regional scan tables
+    are preserved as historical records. The retired validation tables
+    are always dropped.
     Repeated startup preserves caches already using the current schema.
 
     Nullable columns added to a table that already exists are then filled
@@ -96,26 +102,17 @@ def init_db() -> None:
             if inspector.has_table(table_name):
                 Table(table_name, MetaData(), autoload_with=connection).drop(bind=connection)
                 inspector = inspect(connection)
-        legacy_columns = {
-            "detection_cache": "anomaly_z",
-            "regional_scan_points": "anomaly_z",
-            "regional_scan_clusters": "mean_anomaly_z",
-        }
-        has_legacy_scores = any(
-            inspector.has_table(table)
-            and column in {item["name"] for item in inspector.get_columns(table)}
-            for table, column in legacy_columns.items()
+        has_legacy_detection_score = (
+            inspector.has_table("detection_cache")
+            and "anomaly_z" in {
+                item["name"] for item in inspector.get_columns("detection_cache")
+            }
         )
-        if has_legacy_scores:
-            # Children first for databases that enforce foreign keys.
-            # Run metadata must go too: otherwise a finished legacy run
-            # would advertise counts despite having no retained points.
-            for model in (
-                db_models.RegionalScanCluster,
-                db_models.RegionalScanPoint,
-                db_models.RegionalScanRun,
-                db_models.DetectionCache,
-            ):
-                model.__table__.drop(bind=connection, checkfirst=True)
+        if has_legacy_detection_score:
+            # The site cache is disposable and rebuilt by the scheduler.
+            # Retired regional rows are historical records; startup no
+            # longer reads or rewrites them, even if their old schema
+            # contains the dimensionally invalid score columns.
+            db_models.DetectionCache.__table__.drop(bind=connection, checkfirst=True)
         _add_missing_columns(connection)
         Base.metadata.create_all(bind=connection)

@@ -5,28 +5,22 @@ through backend/src/_detection.py), downloads it at the configured scale,
 writes the cells to disk (src/raster_scan/storage.py), records the run, and
 draws its map overlay from the stored cells (src/raster_scan/render.py).
 
-What this is not: it does not replace, feed, or interfere with the pin
-path. The fixed 7-site grid (src/grid.py), the scheduler's DetectionCache
-refresh and /risk-map are untouched -- this is an additional area read of
+The fixed 7-site grid (src/grid.py), the scheduler's DetectionCache
+refresh and /risk-map remain a separate named-station product. This is an area read of
 the same Sentinel-2 data, with the same truth boundary (CLAUDE.md §0):
 index readings at pixel resolution, no anomaly score, no verdict, and a
-200 m cell is one sampled 10 m pixel, so a bloom smaller than the cell
-is diluted.
+200 m cell is one nearest-neighbour sampled 10 m pixel, so a smaller
+bloom can fall between sampled pixels and be missed.
 
 Only one raster scan may run at a time. Two concurrent runs would each
-fetch and store a full raster and both call retention, and a full read is
+fetch and store a full raster, and a full read is
 a single multi-megabyte GEE transfer -- so the second call is refused
-(ConcurrentRasterScanError) before it writes a row or a byte. The guard
-mirrors the shape of regional_scan's, which was written for the same
-class of problem; nothing is imported from that package, because the two
-scans share no body of logic (one loops points and upserts rows, this one
-transfers a raster and writes a file).
+(ConcurrentRasterScanError) before it writes a row or a byte.
 
 GEEAuthError aborts the run (status='error') without touching any blob or
 row a prior successful run wrote -- it means the whole pipeline is
 unusable, not that this raster is unavailable, and an aborted run must
-never discard the last known-good raster (mirrors the same distinction in
-scheduler.py and regional_scan/scan.py). "No usable imagery" and "every
+never discard the last known-good raster. "No usable imagery" and "every
 cell masked" are the opposite case: real, honest answers about the world,
 recorded as status='no_data' with the reason, never as an error and never
 as an empty raster that reads like a real one.
@@ -173,6 +167,7 @@ def run_raster_scan(
     scale_m: int | None = None,
     retention_days: int | None = None,
     allow_concurrent: bool = False,
+    trigger_scene_timestamp: str | None = None,
 ) -> RasterScanRun:
     """Run one raster scan over the study polygon and persist its results.
 
@@ -190,6 +185,9 @@ def run_raster_scan(
             later.
         allow_concurrent: skip the one-scan-at-a-time guard. Only for a
             caller that knows the other run is dead.
+        trigger_scene_timestamp: full acquisition timestamp returned by
+            the metadata poll that caused this run. Stored even when the
+            candidate yields no retained cells.
 
     Returns:
         The persisted RasterScanRun row (status='ok', 'no_data' or
@@ -216,6 +214,7 @@ def run_raster_scan(
         date_used=target_date,
         scale_m=scale_m,
         retention_days=retention_days,
+        trigger_scene_timestamp=trigger_scene_timestamp,
     )
     db.add(run)
     db.commit()
@@ -261,12 +260,10 @@ def run_raster_scan(
         summary = bridge.summarize_raster_cells(arrays)
     except bridge.GEEAuthError as exc:
         # Deliberately does NOT touch any prior run's row or blob -- an
-        # aborted run must never discard the last known-good raster
-        # (mirrors scheduler.py's stale-marking, and regional_scan's
-        # identical choice). db.rollback() first for the same reason
-        # regional_scan/scan.py gives: it discards this run's own pending
-        # work, and since rollback expires session objects, `run` is
-        # refreshed before its fields are set.
+        # aborted run must never discard the last known-good raster.
+        # db.rollback() discards this run's pending work; because rollback
+        # expires session objects, `run` is refreshed before its fields
+        # are set.
         db.rollback()
         db.refresh(run)
         return _finish(db, run, "error", f"GEEAuthError: {exc}")

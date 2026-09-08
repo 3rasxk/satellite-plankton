@@ -7,7 +7,6 @@ import 'leaflet/dist/leaflet.css'
 import './styles/tokens.css'
 import './styles/global.css'
 import App from './App.jsx'
-import OverviewPage from './pages/OverviewPage.jsx'
 import RasterPage from './pages/RasterPage.jsx'
 
 createRoot(document.getElementById('root')).render(
@@ -15,7 +14,7 @@ createRoot(document.getElementById('root')).render(
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<App />}>
-          <Route index element={<OverviewPage />} />
+          <Route index element={<RasterPage />} />
           <Route path="raster" element={<RasterPage />} />
         </Route>
       </Routes>
