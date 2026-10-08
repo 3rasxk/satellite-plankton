@@ -8,6 +8,7 @@ all of its remaining sites or archive windows first.
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 from threading import Event
 
@@ -107,11 +108,15 @@ def test_lifespan_clears_the_flag_at_start_and_sets_it_before_waiting(monkeypatc
 
     def cooperative_job() -> None:
         started.set()
-        # Stands in for refresh_grid's between-site checkpoint.
-        while not shutdown.stop_requested():
-            if stop_seen_by_job.wait(timeout=0.01):
-                break
-        stop_seen_by_job.set()
+        # Stands in for refresh_grid's between-site checkpoint. Bounded:
+        # if lifespan ever raised the flag only after shutdown(wait=True),
+        # an unbounded loop would hang the suite instead of failing it.
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            if shutdown.stop_requested():
+                stop_seen_by_job.set()
+                return
+            time.sleep(0.01)
 
     scheduler = BackgroundScheduler()
     scheduler.add_job(
@@ -134,9 +139,8 @@ def test_lifespan_clears_the_flag_at_start_and_sets_it_before_waiting(monkeypatc
             assert not shutdown.stop_requested(), "startup did not clear the stop flag"
             assert started.wait(timeout=1)
         assert flag_at_shutdown == [(True, True)]
-        assert stop_seen_by_job.is_set()
+        assert stop_seen_by_job.is_set(), "the running job never saw the stop flag"
     finally:
-        stop_seen_by_job.set()
         shutdown.clear_stop()
 
 

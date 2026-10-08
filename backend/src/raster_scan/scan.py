@@ -38,9 +38,9 @@ from sqlalchemy.orm import Session
 
 from .. import _detection as bridge
 from .. import _study_area
+from .. import config as _config
 from .. import shutdown
 from ..config import (
-    RASTER_BOOTSTRAP_BUDGET_MINUTES,
     RASTER_RETENTION_DAYS,
     RASTER_SCAN_SCALE_M,
     as_aware_utc,
@@ -153,21 +153,88 @@ def _source_metadata(
     }
 
 
+def _resume_point(db: Session, target_date: str) -> dict | None:
+    """Where a bootstrap should continue a prior stopped search, or None.
+
+    Looks at the newest run that recorded a search (rows with no
+    source_metadata -- stood down, presumed dead, refused config -- searched
+    nothing and are skipped). Resumes only when that run is a bootstrap
+    stopped by budget or shutdown (status='error', search_stopped set) and
+    its search_range.window_start parses as a date. The walk then starts
+    the day before that oldest searched date, which must be strictly older
+    than target_date and not before the archive start; anything else
+    (missing, malformed, a completed or otherwise failed search) returns
+    None and the bootstrap starts from target_date as before.
+    """
+    rows = db.execute(
+        select(RasterScanRun)
+        .where(RasterScanRun.status != "running")
+        .order_by(RasterScanRun.started_at.desc(), RasterScanRun.id.desc())
+    ).scalars()
+    prior = next((row for row in rows if row.source_metadata is not None), None)
+    if prior is None or prior.status != "error":
+        return None
+    metadata = prior.source_metadata
+    if not isinstance(metadata, dict) or metadata.get("bootstrap_mode") is not True:
+        return None
+    if metadata.get("search_stopped") not in ("budget", "shutdown"):
+        return None
+    span = metadata.get("search_range")
+    if span is None and isinstance(metadata.get("resumed_from"), dict):
+        # A resumed run stopped before its first window searched nothing:
+        # hand on the same resume point it was given.
+        span = {"window_start": metadata["resumed_from"].get("prior_oldest_window_start")}
+    try:
+        oldest = date.fromisoformat(span["window_start"])
+        target = date.fromisoformat(target_date)
+        archive_start = date.fromisoformat(bridge.SENTINEL2_SR_ARCHIVE_START_DATE)
+    except (TypeError, KeyError, ValueError):
+        return None
+    walk_start = oldest - timedelta(days=1)
+    if not archive_start <= walk_start < target:
+        return None
+    return {
+        "run_id": prior.id,
+        "prior_oldest_window_start": oldest.isoformat(),
+        "walk_starts_at": walk_start.isoformat(),
+    }
+
+
 def _build_and_download(
     target_date: str, scale_m: int, bootstrap_mode: bool,
+    resume: dict | None = None,
 ) -> tuple[dict, dict, dict]:
-    """Select newest usable bounded window and return its composite/cells."""
+    """Select newest usable bounded window and return its composite/cells.
+
+    `resume` (bootstrap only, from _resume_point) starts the window walk at
+    resume["walk_starts_at"] instead of target_date. The returned
+    provenance still lists only the windows searched in this call, plus a
+    `resumed_from` pointer to the stopped run -- never that run's coverage.
+    """
     if bootstrap_mode:
-        budget_minutes = RASTER_BOOTSTRAP_BUDGET_MINUTES
+        # Read from the config module at call time, not bound at import, so
+        # a later change to config (a test's monkeypatch, a reload path) is
+        # seen -- the same reason run_raster_scan resolves its defaults late.
+        budget_minutes = _config.RASTER_BOOTSTRAP_BUDGET_MINUTES
         if not 0 < budget_minutes < STALE_RUN_HOURS * 60:
             raise ValueError(
                 f"RASTER_BOOTSTRAP_BUDGET_MINUTES={budget_minutes} must be > 0 and below "
                 f"the {STALE_RUN_HOURS * 60}-minute stale-run threshold (STALE_RUN_HOURS), "
                 "or a second caller would presume this bootstrap dead and start another."
             )
+        def bootstrap_metadata(**kwargs) -> dict:
+            metadata = _source_metadata(
+                bootstrap_mode=True, target_date=target_date, searched_windows=searched,
+                **kwargs,
+            )
+            if resume is not None:
+                metadata["resumed_from"] = dict(resume)
+            return metadata
+
         started = _monotonic()
         searched: list[dict] = []
-        for window in bridge.iter_bootstrap_windows(target_date):
+        walk_start = resume["walk_starts_at"] if resume is not None else target_date
+        for window in bridge.iter_bootstrap_windows(walk_start):
             # Checkpoints between windows (never mid-request): a shutdown
             # request (src/shutdown.py) or an exhausted budget ends the
             # search honestly as incomplete -- the archive before the last
@@ -182,9 +249,7 @@ def _build_and_download(
                     "(RASTER_BOOTSTRAP_BUDGET_MINUTES)",
                 )
             if stop is not None:
-                metadata = _source_metadata(
-                    bootstrap_mode=True, target_date=target_date, searched_windows=searched
-                )
+                metadata = bootstrap_metadata()
                 metadata["search_stopped"] = stop[0]
                 span = metadata["search_range"]
                 searched_text = (
@@ -197,6 +262,20 @@ def _build_and_download(
                     "exhausted, so this is not a finding of no usable imagery.",
                     metadata,
                 )
+            # Upper bound on the walk: every window must lie strictly before
+            # the previous one and not before the archive start, so a walk
+            # (fresh or resumed) can cover each archive day at most once and
+            # always ends. A walk that does not move older is refused.
+            if (searched and window["window_end"] > searched[-1]["window_start"]) or (
+                window["window_start"] < bridge.SENTINEL2_SR_ARCHIVE_START_DATE
+            ):
+                exc = RuntimeError(
+                    f"bootstrap window {window['window_start']}..{window['window_end']} "
+                    "is not strictly older than the previous window or precedes the "
+                    "archive start; refusing to continue the search."
+                )
+                exc.source_metadata = bootstrap_metadata()
+                raise exc
             try:
                 composite = bridge.build_index_composite(
                     _study_area.STUDY_AREA_POLYGON_LATLNG,
@@ -215,28 +294,22 @@ def _build_and_download(
                 # bounded search, but the pages already attempted are still
                 # scientific provenance and must survive on the failed row.
                 searched.append(_window_record(window, "error", f"{type(exc).__name__}: {exc}"))
-                exc.source_metadata = _source_metadata(
-                    bootstrap_mode=True,
-                    target_date=target_date,
-                    searched_windows=searched,
-                )
+                exc.source_metadata = bootstrap_metadata()
                 raise
             searched.append(_window_record(window, "usable"))
-            return composite, arrays, _source_metadata(
-                bootstrap_mode=True,
-                target_date=target_date,
-                searched_windows=searched,
-                composite=composite,
-                arrays=arrays,
-            )
-        metadata = _source_metadata(
-            bootstrap_mode=True, target_date=target_date, searched_windows=searched
-        )
-        raise NoUsableRasterError(
+            return composite, arrays, bootstrap_metadata(composite=composite, arrays=arrays)
+        reason = (
             "No usable Sentinel-2 imagery with valid water pixels was found before "
-            f"the archive start ({bridge.SENTINEL2_SR_ARCHIVE_START_DATE}).",
-            metadata,
+            f"the archive start ({bridge.SENTINEL2_SR_ARCHIVE_START_DATE})."
         )
+        if resume is not None:
+            reason += (
+                f" This run continued run {resume['run_id']}'s stopped search from "
+                f"{resume['walk_starts_at']} and itself searched only the windows in "
+                "its source_metadata; the newer range was searched by the earlier "
+                "run(s)."
+            )
+        raise NoUsableRasterError(reason, bootstrap_metadata())
 
     target = date.fromisoformat(target_date)
     max_age_days = bridge.default_max_scene_age_days()
@@ -424,6 +497,10 @@ def run_raster_scan(
         select(RasterScanRun.id).where(RasterScanRun.status == "ok").limit(1)
     ) is None
 
+    # A bootstrap stopped by its budget or by shutdown is continued, not
+    # restarted from target_date (see _resume_point for the exact rule).
+    resume = _resume_point(db, target_date) if bootstrap_mode else None
+
     run = RasterScanRun(
         started_at=datetime.now(timezone.utc),
         status="running",
@@ -462,7 +539,7 @@ def run_raster_scan(
     source_metadata = None
     try:
         composite, arrays, source_metadata = _build_and_download(
-            target_date, scale_m, bootstrap_mode
+            target_date, scale_m, bootstrap_mode, resume
         )
         # Inside the try, deliberately: a disk error here (directory
         # full, permission denied, an interrupted write) must end the

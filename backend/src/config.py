@@ -130,6 +130,17 @@ RASTER_SCAN_POLL_LOOKBACK_DAYS: int = int(os.environ.get(
 # src/raster_scan/scan.py STALE_RUN_HOURS (1 h), or a second caller would
 # presume the live bootstrap dead and start a concurrent one; scan.py
 # refuses a value that is not.
-RASTER_BOOTSTRAP_BUDGET_MINUTES: int = int(os.environ.get(
-    "RASTER_BOOTSTRAP_BUDGET_MINUTES", "45"
-))
+# A non-integer value fails at import, like the other int settings above,
+# but with a message that names the variable (range is checked by scan.py).
+def _env_int(name: str, default: str) -> int:
+    raw = os.environ.get(name, default)
+    try:
+        return int(raw)
+    except ValueError:
+        raise ValueError(
+            f"{name}={raw!r} is not an integer; set it to a whole number "
+            f"(default {default}) in backend/.env or the environment."
+        ) from None
+
+
+RASTER_BOOTSTRAP_BUDGET_MINUTES: int = _env_int("RASTER_BOOTSTRAP_BUDGET_MINUTES", "45")

@@ -86,7 +86,7 @@ def test_poll_failure_does_not_start_a_scan(client, monkeypatch):
     assert calls == []
 
 
-def _poll_with_prior_run(monkeypatch, status, age=timedelta(days=2)):
+def _poll_with_prior_run(monkeypatch, status, age=timedelta(days=2), source_metadata=None):
     _clear()
     # Pin the cooldown (20 h) and age the prior run from the real clock, so
     # the result depends on neither RASTER_SCAN_COOLDOWN_HOURS nor the date.
@@ -98,7 +98,7 @@ def _poll_with_prior_run(monkeypatch, status, age=timedelta(days=2)):
             started_at=started,
             completed_at=None if status == "running" else started,
             status=status, date_used="2024-03-14", scale_m=200, retention_days=30,
-            trigger_scene_timestamp=candidate,
+            trigger_scene_timestamp=candidate, source_metadata=source_metadata,
         ))
         db.commit()
     monkeypatch.setattr(
@@ -138,3 +138,22 @@ def test_live_running_row_still_consumes_its_scene(client, monkeypatch):
     assert _poll_with_prior_run(
         monkeypatch, "running", age=timedelta(minutes=10),
     ) == []
+
+
+def test_shutdown_stopped_bootstrap_does_not_start_the_cooldown(client, monkeypatch):
+    # A bootstrap interrupted by shutdown (2 h ago, inside the 20 h cooldown)
+    # was cut short by the process, not by the data; the next poll retries.
+    calls = _poll_with_prior_run(
+        monkeypatch, "error", age=timedelta(hours=2),
+        source_metadata={"bootstrap_mode": True, "search_stopped": "shutdown"},
+    )
+    assert len(calls) == 1
+
+
+def test_budget_stopped_bootstrap_still_starts_the_cooldown(client, monkeypatch):
+    # A budget stop spent its full wall-clock budget; retry spacing applies.
+    calls = _poll_with_prior_run(
+        monkeypatch, "error", age=timedelta(hours=2),
+        source_metadata={"bootstrap_mode": True, "search_stopped": "budget"},
+    )
+    assert calls == []
