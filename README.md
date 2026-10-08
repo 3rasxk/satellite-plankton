@@ -1,6 +1,6 @@
 # Gulf of Thailand Algal Bloom Monitor
 
-Software-only monitoring system for harmful algal blooms (green *Noctiluca* / red tide) in the upper Gulf of Thailand, targeting SDG 14. **Physics-based, not machine learning** — the detection path reports spectral index values with actual scene dates. Anomaly scoring and rule-based risk evaluation are disabled: no valid baseline exists for those indices. MODIS `chlor_a` history and its same-quantity seasonal anomalies remain available separately. See `CLAUDE.md` and `LIMITATIONS.md` for the current scope, and `docs/DETECTION_PLAN.md` §0 for why supervised ML was rejected.
+Software-only monitoring system for harmful algal blooms (green *Noctiluca* / red tide) in the upper Gulf of Thailand, targeting SDG 14. **Physics-based, not machine learning** — the detection path reports spectral index values with actual scene dates. Anomaly scoring and rule-based risk evaluation are disabled: no scientifically compatible Sentinel-2 baseline exists for those indices. The API reserves `signal_anomaly_level` as a separate nullable field; it and `risk_level` remain null. MODIS `chlor_a` history and its same-quantity seasonal anomalies remain available separately. See `CLAUDE.md` and `LIMITATIONS.md` for the current scope, and `docs/DETECTION_PLAN.md` §0 for why supervised ML was rejected.
 
 **Read `LIMITATIONS.md` before trusting any output.** The detection path supplies index readings only; it has no valid anomaly statistic or presence/absence verdict. Its prediction rules cannot evaluate risk without that input.
 
@@ -81,9 +81,13 @@ Once running:
 - API: http://localhost:8000 (interactive docs at `/docs`)
 - Dashboard: http://localhost:5173 (watch `scripts/dev.sh`'s own log output for the actual port Vite picked)
 
-The dashboard opens on the full-area raster. It displays the stored NDCI image,
-a grey hatch for unmeasured cells, a legend that describes index values rather
-than risk, and a banner with target date, contributing scene dates, and coverage.
+The dashboard opens on the full-area raster. Its selector has three exclusive
+modes: `True Color` for the selected run's stored Sentinel-2 B4/B3/B2 companion,
+`Light Map` for Esri World Light Gray Canvas alone, and `NDCI Raster` for the
+stored NDCI image over that same Light Map. Historical runs without a stored,
+run-aligned RGB companion disable `True Color`. Unmeasured pixels are fully
+transparent, and the legend describes index values rather than risk. The banner
+shows the target date, contributing scene dates, and coverage.
 Click a cell to read all four stored indices and that cell's own acquisition
 date. A 200 m cell is one nearest-neighbour sampled native pixel, not an average
 of the square drawn on screen.
@@ -100,6 +104,15 @@ It starts a new raster only after both a new acquisition and the configured
 cooldown. Full raster blobs and overlay PNGs are retained for 30 days by default;
 their run metadata and summaries remain after expiry. The fixed seven named
 stations continue to refresh separately for `/risk-map` and time-series use.
+
+On an installation with no successful raster row, the first scan searches
+newest-first in non-overlapping windows containing the window target and at most
+14 preceding days. Each next window starts 15 days earlier. Search stops at the
+`COPERNICUS/S2_SR_HARMONIZED` archive start, 2017-03-28, and records every
+searched window plus selected scene provenance. Once any successful raster row
+exists, all subsequent scans enforce the system-wide scene-age limit
+(`SENTINEL2_MAX_SCENE_AGE_DAYS`, 14 days by default); file retention and
+failed attempts do not reset that database fact.
 
 If you'd rather run the two processes by hand instead of the script (e.g. to see each one's logs in its own terminal):
 
@@ -120,9 +133,10 @@ cd backend        && ./venv/bin/python -m pytest tests/ -q
 cd frontend       && npm test
 ```
 
-Most service tests mock external calls at typed boundaries. Two backend
-satellite-image tests deliberately call live GEE and require credentials and
-network access.
+Ordinary backend tests mock external calls at typed boundaries, disable the
+scheduler, and skip live GEE checks. Run the two opt-in satellite-image checks
+with `cd backend && ./venv/bin/python -m pytest tests/test_satellite_image.py
+--live-gee -m live_gee -q`; they require credentials and network access.
 
 ## Manual end-to-end verification
 

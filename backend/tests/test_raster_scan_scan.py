@@ -119,10 +119,7 @@ def test_a_completed_run_records_its_blob_and_the_row_matches_the_file(client, b
         assert stored[DATE_BAND].dtype == np.int64
 
 
-def test_the_scan_asks_for_the_study_polygon_and_names_no_scene_policy(client, blob_root, monkeypatch):
-    """Which scenes answer for a date is one system-wide rule in
-    data-pipeline, not a per-caller argument the raster scan could set
-    differently from the pin path."""
+def test_the_scan_asks_for_the_study_polygon_with_a_bounded_14_day_page(client, blob_root, monkeypatch):
     from src import _study_area
 
     calls = install_raster(monkeypatch)
@@ -132,7 +129,7 @@ def test_the_scan_asks_for_the_study_polygon_and_names_no_scene_policy(client, b
     (polygon, date, args, kwargs), = calls["composite"]
     assert polygon == _study_area.STUDY_AREA_POLYGON_LATLNG
     assert date == "2026-09-06"
-    assert args == () and kwargs == {}
+    assert args == () and kwargs == {"max_scene_age_days": 14}
     # The scale is the one thing the scan does choose.
     (_, _, download_kwargs), = calls["download"]
     assert download_kwargs == {"scale_m": 200}
@@ -319,7 +316,9 @@ def test_no_usable_imagery_is_recorded_as_no_data_not_an_error(client, blob_root
         )
 
         assert run.status == "no_data"
-        assert "NoCloudFreeImageryError" in run.reason
+        assert "archive start" in run.reason
+        assert run.source_metadata["bootstrap_mode"] is True
+        assert run.source_metadata["searched_windows"][0]["result"] == "no_scenes"
         assert run.blob_path is None
         assert run.cell_count is None
         assert run.summary is None
@@ -579,12 +578,11 @@ def test_a_completed_scan_records_where_its_overlay_was_drawn(client, blob_root,
         png = Path(overlay["assets"]["ndci"]["path"])
         assert png.exists() and png.parent == storage.run_blob_dir(run.id, blob_root)
         assert overlay["assets"]["ndci"]["bytes"] == png.stat().st_size
-        # Four cells were stored; the rest of the study area is drawn as
-        # unmeasured rather than left blank.
+        # Four cells were stored; the rest remains transparent no-data.
         assert overlay["assets"]["ndci"]["valued_pixels"] == 4
         assert overlay["assets"]["ndci"]["no_data_pixels"] > 4
         assert overlay["assets"]["ndci"]["measured_fraction"] < 0.001
-        assert render.NO_DATA_MIN_ALPHA > 0
+        assert overlay["legend"]["no_data"]["rgba"] == [0, 0, 0, 0]
 
 
 def test_a_failed_render_does_not_cost_the_scan_its_raster(client, blob_root, monkeypatch):
@@ -612,3 +610,31 @@ def test_a_failed_render_does_not_cost_the_scan_its_raster(client, blob_root, mo
         # rendered" (null) and from an expired run's removed overlay.
         assert run.overlay["status"] == "error"
         assert "no pixels for you" in run.overlay["error"]
+
+
+def test_source_metadata_dates_come_from_unique_timestamps_not_every_cell(monkeypatch):
+    seen = []
+    real = scan_module._scene_date
+    monkeypatch.setattr(scan_module, "_scene_date", lambda ms: seen.append(ms) or real(ms))
+    arrays = fake_arrays((NEW_MS, OLD_MS) * 5_000 + (NEW_MS + 1,))
+
+    meta = scan_module._source_metadata(
+        bootstrap_mode=False, target_date="2026-09-06", searched_windows=[],
+        composite=fake_composite(), arrays=arrays,
+    )
+
+    assert meta["acquisition_dates"] == ["2026-08-25", "2026-09-04"]
+    assert len(seen) <= 3
+
+
+def test_normal_mode_follows_the_system_wide_scene_age_setting(monkeypatch):
+    monkeypatch.setenv("SENTINEL2_MAX_SCENE_AGE_DAYS", "5")
+    calls = install_raster(monkeypatch)
+
+    _, _, meta = scan_module._build_and_download("2026-09-06", 200, False)
+
+    (_, _, _, kwargs), = calls["composite"]
+    assert kwargs == {"max_scene_age_days": 5}
+    assert meta["max_scene_age_days"] == 5
+    assert meta["selected_window"]["max_scene_age_days"] == 5
+    assert meta["selected_window"]["window_start"] == "2026-09-01"

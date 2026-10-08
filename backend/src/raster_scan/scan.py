@@ -29,7 +29,7 @@ as an empty raster that reads like a real one.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import numpy as np
 from sqlalchemy import select
@@ -63,6 +63,150 @@ class ConcurrentRasterScanError(RuntimeError):
     is written or any byte transferred, so a refused call leaves both the
     database and the blob directory untouched.
     """
+
+
+class NoUsableRasterError(RuntimeError):
+    """A finite search completed without any usable water pixels."""
+
+    def __init__(self, reason: str, source_metadata: dict):
+        super().__init__(reason)
+        self.source_metadata = source_metadata
+
+
+def _window_record(window: dict, result: str, reason: str | None = None) -> dict:
+    record = {
+        "target_date": window["target_date"],
+        "max_scene_age_days": int(window["max_scene_age_days"]),
+        "window_start": window["window_start"],
+        "window_end": window["window_end"],
+        "result": result,
+    }
+    if reason:
+        record["reason"] = reason
+    return record
+
+
+def _source_metadata(
+    *, bootstrap_mode: bool, target_date: str, searched_windows: list[dict],
+    composite: dict | None = None, arrays: dict | None = None,
+) -> dict:
+    timestamps = [int(value) for value in (composite or {}).get("scene_timestamps_ms", ())]
+    kept_timestamps = (
+        [int(value) for value in np.unique(np.asarray(arrays[bridge.RASTER_DATE_BAND]))]
+        if arrays is not None else []
+    )
+    selected = searched_windows[-1] if composite is not None and searched_windows else None
+    search_range = (
+        {
+            "window_start": min(window["window_start"] for window in searched_windows),
+            "window_end": max(window["window_end"] for window in searched_windows),
+        }
+        if searched_windows else None
+    )
+    return {
+        "bootstrap_mode": bootstrap_mode,
+        "target_date": target_date,
+        "archive_start_date": bridge.SENTINEL2_SR_ARCHIVE_START_DATE,
+        # Bootstrap windows use their own per-window age (see each record in
+        # searched_windows); report what was actually used, not the system
+        # default, which only governs normal mode.
+        "max_scene_age_days": (
+            int(searched_windows[0]["max_scene_age_days"])
+            if bootstrap_mode and searched_windows
+            else bridge.default_max_scene_age_days()
+        ),
+        "searched_windows": searched_windows,
+        "search_range": search_range,
+        "selected_window": selected,
+        "scene_ids": list((composite or {}).get("scene_ids", ())),
+        "scene_timestamps_ms": timestamps,
+        "acquisition_dates": sorted({_scene_date(value) for value in kept_timestamps}),
+    }
+
+
+def _build_and_download(
+    target_date: str, scale_m: int, bootstrap_mode: bool,
+) -> tuple[dict, dict, dict]:
+    """Select newest usable bounded window and return its composite/cells."""
+    if bootstrap_mode:
+        searched: list[dict] = []
+        for window in bridge.iter_bootstrap_windows(target_date):
+            try:
+                composite = bridge.build_index_composite(
+                    _study_area.STUDY_AREA_POLYGON_LATLNG,
+                    window["target_date"],
+                    max_scene_age_days=window["max_scene_age_days"],
+                )
+                arrays = bridge.download_composite_arrays(composite, scale_m=scale_m)
+            except bridge.NoCloudFreeImageryError as exc:
+                searched.append(_window_record(window, "no_scenes", str(exc)))
+                continue
+            except bridge.NoWaterPixelsError as exc:
+                searched.append(_window_record(window, "no_valid_water_pixels", str(exc)))
+                continue
+            except Exception as exc:
+                # Authentication, transport and unexpected failures stop the
+                # bounded search, but the pages already attempted are still
+                # scientific provenance and must survive on the failed row.
+                searched.append(_window_record(window, "error", f"{type(exc).__name__}: {exc}"))
+                exc.source_metadata = _source_metadata(
+                    bootstrap_mode=True,
+                    target_date=target_date,
+                    searched_windows=searched,
+                )
+                raise
+            searched.append(_window_record(window, "usable"))
+            return composite, arrays, _source_metadata(
+                bootstrap_mode=True,
+                target_date=target_date,
+                searched_windows=searched,
+                composite=composite,
+                arrays=arrays,
+            )
+        metadata = _source_metadata(
+            bootstrap_mode=True, target_date=target_date, searched_windows=searched
+        )
+        raise NoUsableRasterError(
+            "No usable Sentinel-2 imagery with valid water pixels was found before "
+            f"the archive start ({bridge.SENTINEL2_SR_ARCHIVE_START_DATE}).",
+            metadata,
+        )
+
+    target = date.fromisoformat(target_date)
+    max_age_days = bridge.default_max_scene_age_days()
+    window = {
+        "target_date": target_date,
+        "max_scene_age_days": max_age_days,
+        "window_start": (target - timedelta(days=max_age_days)).isoformat(),
+        "window_end": (target + timedelta(days=1)).isoformat(),
+    }
+    try:
+        composite = bridge.build_index_composite(
+            _study_area.STUDY_AREA_POLYGON_LATLNG,
+            target_date,
+            max_scene_age_days=max_age_days,
+        )
+        arrays = bridge.download_composite_arrays(composite, scale_m=scale_m)
+    except (bridge.NoCloudFreeImageryError, bridge.NoWaterPixelsError) as exc:
+        result = (
+            "no_scenes" if isinstance(exc, bridge.NoCloudFreeImageryError)
+            else "no_valid_water_pixels"
+        )
+        searched = [_window_record(window, result, str(exc))]
+        raise NoUsableRasterError(
+            f"{type(exc).__name__}: {exc}",
+            _source_metadata(
+                bootstrap_mode=False, target_date=target_date, searched_windows=searched
+            ),
+        ) from exc
+    searched = [_window_record(window, "usable")]
+    return composite, arrays, _source_metadata(
+        bootstrap_mode=False,
+        target_date=target_date,
+        searched_windows=searched,
+        composite=composite,
+        arrays=arrays,
+    )
 
 
 def _refuse_if_a_raster_scan_is_already_running(db: Session, now: datetime) -> None:
@@ -208,6 +352,12 @@ def run_raster_scan(
     if not allow_concurrent:
         _refuse_if_a_raster_scan_is_already_running(db, now)
 
+    # A retained success row is the installation marker. Blob retention
+    # deliberately does not affect it; failed and incomplete attempts do.
+    bootstrap_mode = db.scalar(
+        select(RasterScanRun.id).where(RasterScanRun.status == "ok").limit(1)
+    ) is None
+
     run = RasterScanRun(
         started_at=datetime.now(timezone.utc),
         status="running",
@@ -243,11 +393,11 @@ def run_raster_scan(
         "raster_scan: run %s started -- target=%s scale_m=%s", run.id, target_date, scale_m
     )
 
+    source_metadata = None
     try:
-        composite = bridge.build_index_composite(
-            _study_area.STUDY_AREA_POLYGON_LATLNG, target_date
+        composite, arrays, source_metadata = _build_and_download(
+            target_date, scale_m, bootstrap_mode
         )
-        arrays = bridge.download_composite_arrays(composite, scale_m=scale_m)
         # Inside the try, deliberately: a disk error here (directory
         # full, permission denied, an interrupted write) must end the
         # run as 'error' like any other failure. Outside it, the
@@ -266,14 +416,17 @@ def run_raster_scan(
         # are set.
         db.rollback()
         db.refresh(run)
+        if getattr(exc, "source_metadata", None) is not None:
+            run.source_metadata = exc.source_metadata
         return _finish(db, run, "error", f"GEEAuthError: {exc}")
-    except (bridge.NoCloudFreeImageryError, bridge.NoWaterPixelsError) as exc:
+    except NoUsableRasterError as exc:
         # Real answers about the world, not failures: no Sentinel-2 scene
         # covered the polygon in the window, or every cell was cloud or
         # land. Recorded as such, with no blob and no fabricated raster.
         db.rollback()
         db.refresh(run)
-        return _finish(db, run, "no_data", f"{type(exc).__name__}: {exc}")
+        run.source_metadata = exc.source_metadata
+        return _finish(db, run, "no_data", str(exc))
     except Exception as exc:  # noqa: BLE001 -- one run, one failure; recorded, not swallowed
         # Includes FabricatedDateError/DateBandPrecisionError: a raster
         # whose cell dates cannot be trusted is refused upstream and
@@ -283,11 +436,15 @@ def run_raster_scan(
         )
         db.rollback()
         db.refresh(run)
+        failure_metadata = getattr(exc, "source_metadata", source_metadata)
+        if failure_metadata is not None:
+            run.source_metadata = failure_metadata
         return _finish(db, run, "error", f"{type(exc).__name__}: {exc}")
 
     dates = arrays[bridge.RASTER_DATE_BAND]
 
     run.scene_count = len(composite["scene_timestamps_ms"])
+    run.source_metadata = source_metadata
     # From the cells that were actually kept, not from every scene in the
     # window: a scene can be in the window and contribute no surviving
     # pixel at all (wholly cloudy over this polygon), and claiming its
