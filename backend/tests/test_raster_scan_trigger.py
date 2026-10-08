@@ -52,10 +52,14 @@ def test_poll_runs_raster_and_records_the_full_candidate_timestamp(client, monke
 
 def test_cloudy_candidate_is_not_retried_after_a_no_data_run(client, monkeypatch):
     _clear()
+    # Pin the cooldown so the outcome does not depend on the environment.
+    monkeypatch.setattr(trigger_module, "RASTER_SCAN_COOLDOWN_HOURS", 20)
+    real_now = datetime.now(timezone.utc)
     candidate = "2026-09-08T03:42:10+00:00"
     with SessionLocal() as db:
         db.add(RasterScanRun(
-            started_at=_NOW - timedelta(hours=21), completed_at=_NOW - timedelta(hours=20),
+            started_at=real_now - timedelta(hours=21),
+            completed_at=real_now - timedelta(hours=20),
             status="no_data", date_used="2026-09-08", scale_m=200, retention_days=30,
             trigger_scene_timestamp=candidate,
         ))
@@ -82,12 +86,17 @@ def test_poll_failure_does_not_start_a_scan(client, monkeypatch):
     assert calls == []
 
 
-def _poll_with_prior_run(monkeypatch, status):
+def _poll_with_prior_run(monkeypatch, status, age=timedelta(days=2)):
     _clear()
+    # Pin the cooldown (20 h) and age the prior run from the real clock, so
+    # the result depends on neither RASTER_SCAN_COOLDOWN_HOURS nor the date.
+    monkeypatch.setattr(trigger_module, "RASTER_SCAN_COOLDOWN_HOURS", 20)
+    started = datetime.now(timezone.utc) - age
     candidate = "2024-03-14T03:00:00Z"
     with SessionLocal() as db:
         db.add(RasterScanRun(
-            started_at=_NOW - timedelta(days=2), completed_at=_NOW - timedelta(days=2),
+            started_at=started,
+            completed_at=None if status == "running" else started,
             status=status, date_used="2024-03-14", scale_m=200, retention_days=30,
             trigger_scene_timestamp=candidate,
         ))
@@ -110,3 +119,22 @@ def test_errored_scan_retries_its_own_scene(client, monkeypatch):
 
 def test_successful_scan_still_consumes_its_scene(client, monkeypatch):
     assert _poll_with_prior_run(monkeypatch, "ok") == []
+
+
+def test_partial_error_scan_retries_its_scene(client, monkeypatch):
+    # Not written by the raster scan today; if it ever is, incomplete data
+    # must not consume the scene.
+    assert len(_poll_with_prior_run(monkeypatch, "partial_error")) == 1
+
+
+def test_stale_running_row_does_not_consume_its_scene(client, monkeypatch):
+    # A crash leaves status='running' forever; older than STALE_RUN_HOURS it is
+    # presumed dead and its scene must be retried (cooldown elapsed here).
+    assert len(_poll_with_prior_run(monkeypatch, "running", age=timedelta(days=2))) == 1
+
+
+def test_live_running_row_still_consumes_its_scene(client, monkeypatch):
+    # Younger than STALE_RUN_HOURS the run may be genuinely live.
+    assert _poll_with_prior_run(
+        monkeypatch, "running", age=timedelta(minutes=10),
+    ) == []

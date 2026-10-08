@@ -96,7 +96,7 @@ def test_legacy_cached_levels_cannot_escape_without_an_active_signal_baseline(
         assert summary["most_recent_detected_signal"] is None
 
         alerts = client.get("/alerts").json()
-        assert alerts["total_active_alerts"] == 0
+        assert alerts["total_active_alerts"] is None
         assert alerts["highest_risk_tier"] is None
         assert alerts["stations"] == []
     finally:
@@ -127,7 +127,7 @@ def test_cached_alerts_cannot_bypass_the_inactive_scientific_gate(client):
     )
     try:
         payload = client.get("/alerts").json()
-        assert payload["total_active_alerts"] == 0
+        assert payload["total_active_alerts"] is None
         assert payload["highest_risk_tier"] is None
         assert payload["stations"] == []
     finally:

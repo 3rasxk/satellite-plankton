@@ -115,6 +115,8 @@ SIGNAL_ANOMALY_MAX_OBSERVATION_AGE_DAYS = _signal_anomaly.MAX_OBSERVATION_AGE_DA
 # actual_date, so routers/detect.py and src/scheduler.py never make a
 # second get_sentinel2_bands call for them.
 GEEAuthError = _data_pipeline_bridge.GEEAuthError
+# Invalid GEE env setting (ValueError subclass); mapped to a config 503.
+GEEConfigError = _data_pipeline_bridge.GEEConfigError
 NoCloudFreeImageryError = _data_pipeline_bridge.NoCloudFreeImageryError
 NoWaterPixelsError = _data_pipeline_bridge.NoWaterPixelsError
 get_sentinel2_bands = _data_pipeline_bridge.get_sentinel2_bands
@@ -199,6 +201,7 @@ __all__ = [
     "SIGNAL_ANOMALY_MIN_INDEPENDENT_DATES",
     "SIGNAL_ANOMALY_MAX_OBSERVATION_AGE_DAYS",
     "GEEAuthError",
+    "GEEConfigError",
     "NoCloudFreeImageryError",
     "NoWaterPixelsError",
     "get_sentinel2_bands",

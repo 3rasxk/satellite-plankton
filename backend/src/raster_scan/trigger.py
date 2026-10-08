@@ -18,7 +18,7 @@ from ..config import (
 )
 from ..db import SessionLocal
 from ..db_models import RasterScanRun
-from .scan import ConcurrentRasterScanError, run_raster_scan
+from .scan import STALE_RUN_HOURS, ConcurrentRasterScanError, run_raster_scan
 
 logger = logging.getLogger("backend.raster_scan.trigger")
 
@@ -45,6 +45,26 @@ def should_trigger_scan(
     return is_new_scene and cooldown_met
 
 
+def _consumes_scene(row: RasterScanRun, now: datetime) -> bool:
+    """Whether this run's trigger scene counts as already handled.
+
+    'error' and 'partial_error' did not deliver a complete raster, and a
+    'running' row older than STALE_RUN_HOURS belongs to a crashed process
+    (scan.py presumes it dead on the next scan), so none of them may block a
+    retry of their scene. A younger 'running' row may be live and still
+    consumes it. Retry spacing is still enforced by the cooldown, which
+    counts every attempt.
+    """
+    if row.trigger_scene_timestamp is None:
+        return False
+    if row.status in ("error", "partial_error"):
+        return False
+    if row.status == "running":
+        age = now - as_aware_utc(row.started_at)
+        return age < timedelta(hours=STALE_RUN_HOURS)
+    return True
+
+
 def poll_and_maybe_scan() -> None:
     """Scheduled poll; failures are logged and never crash the scheduler."""
     if shutdown.stop_requested():
@@ -55,16 +75,17 @@ def poll_and_maybe_scan() -> None:
             latest_attempt = db.execute(
                 select(RasterScanRun).order_by(RasterScanRun.started_at.desc())
             ).scalars().first()
-            latest_triggered = db.execute(
-                select(RasterScanRun)
-                .where(
-                    RasterScanRun.trigger_scene_timestamp.is_not(None),
-                    # A failed run must not consume its scene; retry is
-                    # still spaced by the cooldown via latest_attempt.
-                    RasterScanRun.status != "error",
-                )
-                .order_by(RasterScanRun.started_at.desc())
-            ).scalars().first()
+            now = datetime.now(timezone.utc)
+            latest_triggered = next(
+                (
+                    row
+                    for row in db.execute(
+                        select(RasterScanRun).order_by(RasterScanRun.started_at.desc())
+                    ).scalars()
+                    if _consumes_scene(row, now)
+                ),
+                None,
+            )
 
             since = datetime.now(timezone.utc) - timedelta(
                 days=RASTER_SCAN_POLL_LOOKBACK_DAYS

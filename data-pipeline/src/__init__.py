@@ -31,7 +31,7 @@ and other downstream consumers:
     valid_cell_mask(date_ms)                      (pure, no GEE call)
 """
 
-from .auth import GEEAuthError, initialize_ee
+from .auth import GEEAuthError, GEEConfigError, initialize_ee
 from .imagery import get_ndci_heatmap, get_true_color_image
 from .modis import get_modis_chlorophyll_history, get_modis_sst
 from .rainfall import get_rainfall_proxy
@@ -41,10 +41,14 @@ from .raster import (
     RASTER_BAND_REDUCERS,
     RASTER_DATE_BAND,
     RASTER_INDEX_BANDS,
+    RASTER_STORED_BANDS,
+    RASTER_TRUE_COLOR_BANDS,
+    SENTINEL2_SR_ARCHIVE_START_DATE,
     DateBandPrecisionError,
     FabricatedDateError,
     build_index_composite,
     download_composite_arrays,
+    iter_bootstrap_windows,
     summarize_raster_cells,
     valid_cell_mask,
 )
@@ -60,6 +64,7 @@ from .study_area import STUDY_AREA_POLYGON_LATLNG, check_point_in_study_area
 
 __all__ = [
     "GEEAuthError",
+    "GEEConfigError",
     "initialize_ee",
     "get_sentinel2_bands",
     "get_modis_chlorophyll_history",
@@ -76,12 +81,16 @@ __all__ = [
     "get_newest_scene_timestamp",
     "build_index_composite",
     "download_composite_arrays",
+    "iter_bootstrap_windows",
     "summarize_raster_cells",
     "valid_cell_mask",
     "RASTER_BAND_REDUCERS",
     "RASTER_BAND_ORDER",
     "RASTER_INDEX_BANDS",
+    "RASTER_TRUE_COLOR_BANDS",
+    "RASTER_STORED_BANDS",
     "RASTER_DATE_BAND",
+    "SENTINEL2_SR_ARCHIVE_START_DATE",
     "DEFAULT_RASTER_SCALE_M",
     "FabricatedDateError",
     "DateBandPrecisionError",

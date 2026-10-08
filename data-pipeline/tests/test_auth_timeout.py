@@ -89,5 +89,8 @@ def test_invalid_request_timeout_is_a_config_error_not_an_auth_error(
         auth.initialize_ee(force=True)
 
     assert not isinstance(excinfo.value, auth.GEEAuthError)
+    # Typed so the backend can map it to a config 503 (still a ValueError).
+    assert isinstance(excinfo.value, auth.GEEConfigError)
+    assert "authenticate" not in str(excinfo.value)
     assert events == []
     assert auth._initialized is False

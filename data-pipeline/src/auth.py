@@ -82,6 +82,16 @@ class GEEAuthError(RuntimeError):
     """
 
 
+class GEEConfigError(ValueError):
+    """A GEE-related environment setting is invalid (not an auth failure).
+
+    Subclasses ValueError so existing `except ValueError` / `pytest.raises
+    (ValueError)` callers keep working. Callers map it to a configuration
+    error that names the variable, never to the "run earthengine
+    authenticate" advice carried by GEEAuthError.
+    """
+
+
 def _gee_timeout_seconds() -> float:
     """Return the validated GEE request timeout in seconds.
 
@@ -98,7 +108,7 @@ def _gee_timeout_seconds() -> float:
     except ValueError:
         timeout_seconds = float("nan")
     if not isfinite(timeout_seconds) or timeout_seconds <= 0:
-        raise ValueError(
+        raise GEEConfigError(
             f"{GEE_REQUEST_TIMEOUT_ENV_VAR} must be a finite positive number, "
             f"got {value!r}"
         )
@@ -115,7 +125,7 @@ def initialize_ee(force: bool = False) -> None:
     terminal while this process was already running).
 
     Raises:
-        ValueError: GEE_REQUEST_TIMEOUT_SECONDS is set to a value that is not
+        GEEConfigError (a ValueError): GEE_REQUEST_TIMEOUT_SECONDS is set to a value that is not
             a finite positive number (a config error, raised before any
             Earth Engine call).
         GEEAuthError: auth is missing, expired, or the session otherwise

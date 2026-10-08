@@ -98,6 +98,7 @@ _dp = _load_data_pipeline_package()
 
 # Re-exported, unmodified, from data-pipeline/src.
 GEEAuthError = _dp.GEEAuthError
+GEEConfigError = _dp.GEEConfigError
 get_sentinel2_bands = _dp.get_sentinel2_bands
 # The system-wide scene-age ceiling and its env override live in
 # data-pipeline (sentinel2.py); re-exported so backend/ can report the
@@ -128,6 +129,8 @@ get_ndci_heatmap = _dp.get_ndci_heatmap
 # ramp, read by both, and never a second copy of the stops or the domain.
 NDCI_RAMP_HEX = _dp.imagery.NDCI_RAMP_HEX
 NDCI_RAMP_DOMAIN = _dp.imagery.NDCI_RAMP_DOMAIN
+TRUE_COLOR_MIN = _dp.imagery.TRUE_COLOR_MIN
+TRUE_COLOR_MAX = _dp.imagery.TRUE_COLOR_MAX
 hex_to_rgb = _dp.imagery.hex_to_rgb
 ndci_value_to_color = _dp.imagery.ndci_value_to_color
 
@@ -157,12 +160,16 @@ get_newest_scene_timestamp = _dp.get_newest_scene_timestamp
 # and every layer reads it.
 build_index_composite = _dp.build_index_composite
 download_composite_arrays = _dp.download_composite_arrays
+iter_bootstrap_windows = _dp.iter_bootstrap_windows
 summarize_raster_cells = _dp.summarize_raster_cells
 valid_cell_mask = _dp.valid_cell_mask
 RASTER_BAND_REDUCERS = _dp.RASTER_BAND_REDUCERS
 RASTER_BAND_ORDER = _dp.RASTER_BAND_ORDER
 RASTER_INDEX_BANDS = _dp.RASTER_INDEX_BANDS
+RASTER_TRUE_COLOR_BANDS = _dp.RASTER_TRUE_COLOR_BANDS
+RASTER_STORED_BANDS = _dp.RASTER_STORED_BANDS
 RASTER_DATE_BAND = _dp.RASTER_DATE_BAND
+SENTINEL2_SR_ARCHIVE_START_DATE = _dp.SENTINEL2_SR_ARCHIVE_START_DATE
 DEFAULT_RASTER_SCALE_M = _dp.DEFAULT_RASTER_SCALE_M
 FabricatedDateError = _dp.FabricatedDateError
 DateBandPrecisionError = _dp.DateBandPrecisionError
@@ -183,6 +190,7 @@ NoWaterPixelsError = _dp.sentinel2.NoWaterPixelsError
 
 __all__ = [
     "GEEAuthError",
+    "GEEConfigError",
     "get_sentinel2_bands",
     "DEFAULT_MAX_SCENE_AGE_DAYS",
     "default_max_scene_age_days",
@@ -196,18 +204,24 @@ __all__ = [
     "get_ndci_heatmap",
     "NDCI_RAMP_HEX",
     "NDCI_RAMP_DOMAIN",
+    "TRUE_COLOR_MIN",
+    "TRUE_COLOR_MAX",
     "hex_to_rgb",
     "ndci_value_to_color",
     "check_point_in_study_area",
     "get_newest_scene_timestamp",
     "build_index_composite",
     "download_composite_arrays",
+    "iter_bootstrap_windows",
     "summarize_raster_cells",
     "valid_cell_mask",
     "RASTER_BAND_REDUCERS",
     "RASTER_BAND_ORDER",
     "RASTER_INDEX_BANDS",
+    "RASTER_TRUE_COLOR_BANDS",
+    "RASTER_STORED_BANDS",
     "RASTER_DATE_BAND",
+    "SENTINEL2_SR_ARCHIVE_START_DATE",
     "DEFAULT_RASTER_SCALE_M",
     "FabricatedDateError",
     "DateBandPrecisionError",

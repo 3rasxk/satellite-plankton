@@ -74,3 +74,50 @@ def test_timeseries_router_level_geeautherror_to_503(client, monkeypatch):
     assert resp.status_code == 503
     assert _no_traceback_leaked(resp)
     assert "not authenticated" in resp.json()["detail"]
+
+
+# --- GEEConfigError (bad GEE_REQUEST_TIMEOUT_SECONDS etc.) -> 503 -----------
+# A config ValueError from initialize_ee is not an auth failure: the 503 must
+# name the variable and must not send the operator to `earthengine authenticate`.
+
+_CONFIG_MSG = "GEE_REQUEST_TIMEOUT_SECONDS must be a finite positive number, got 'abc'"
+
+
+def _assert_config_503(resp):
+    assert resp.status_code == 503
+    assert _no_traceback_leaked(resp)
+    detail = resp.json()["detail"]
+    assert "GEE_REQUEST_TIMEOUT_SECONDS" in detail
+    assert "authenticate" not in detail
+    assert "not authenticated" not in detail
+
+
+def test_detect_config_error_to_503(client, monkeypatch):
+    def _raise(*_a, **_k):
+        raise bridge.GEEConfigError(_CONFIG_MSG)
+
+    monkeypatch.setattr(detect_router.bridge, "detect", _raise)
+    _assert_config_503(
+        client.get("/detect", params={"lat": 13.2, "lng": 100.9, "date": "2024-03-15"})
+    )
+
+
+def test_timeseries_config_error_to_503(client, monkeypatch):
+    def _raise(*_a, **_k):
+        raise bridge.GEEConfigError(_CONFIG_MSG)
+
+    monkeypatch.setattr(bridge, "get_modis_chlorophyll_history", _raise)
+    _assert_config_503(client.get("/timeseries", params={"lat": 13.2, "lng": 100.9}))
+
+
+def test_satellite_image_config_error_to_503(client, monkeypatch):
+    def _raise(*_a, **_k):
+        raise bridge.GEEConfigError(_CONFIG_MSG)
+
+    monkeypatch.setattr(bridge, "get_true_color_image", _raise)
+    _assert_config_503(
+        client.get(
+            "/satellite-image",
+            params={"lat": 13.2, "lng": 100.9, "date": "2024-03-15", "image_type": "true_color"},
+        )
+    )

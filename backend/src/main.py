@@ -147,6 +147,17 @@ def gee_auth_error_handler(request, exc: bridge.GEEAuthError) -> JSONResponse:
     )
 
 
+@app.exception_handler(bridge.GEEConfigError)
+def gee_config_error_handler(request, exc: bridge.GEEConfigError) -> JSONResponse:
+    # An invalid GEE setting (e.g. GEE_REQUEST_TIMEOUT_SECONDS) is a server
+    # configuration problem, not an authentication one: the message names the
+    # variable and deliberately omits any `earthengine authenticate` advice.
+    return JSONResponse(
+        status_code=503,
+        content={"detail": f"Google Earth Engine is misconfigured: {exc}"},
+    )
+
+
 @app.get("/", tags=["meta"])
 def root() -> dict:
     """Service metadata plus honest first-refresh progress.

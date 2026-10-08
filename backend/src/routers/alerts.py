@@ -39,7 +39,8 @@ class AlertsResponse(BaseModel):
     # None when not_evaluated: no evaluation happened, so there is no time to report.
     updated_at: Optional[str] = None
     evaluation_status: Literal["active", "not_evaluated"] = "active"
-    total_active_alerts: int
+    # None when not_evaluated: 0 would read as "evaluated, none active".
+    total_active_alerts: Optional[int] = None
     highest_risk_tier: Optional[str] = None
     stations: List[AlertStation]
 
@@ -58,7 +59,7 @@ async def get_alerts_summary(db: Session = Depends(get_db)) -> AlertsResponse:
         return AlertsResponse(
             updated_at=None,
             evaluation_status="not_evaluated",
-            total_active_alerts=0,
+            total_active_alerts=None,
             highest_risk_tier=None,
             stations=[],
         )
