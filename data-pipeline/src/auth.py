@@ -34,11 +34,16 @@ from __future__ import annotations
 
 import os
 import threading
+from math import isfinite
 
 import ee
+import httplib2
 
 _initialized = False
 _lock = threading.Lock()
+
+DEFAULT_GEE_REQUEST_TIMEOUT_SECONDS = 120.0
+GEE_REQUEST_TIMEOUT_ENV_VAR = "GEE_REQUEST_TIMEOUT_SECONDS"
 
 FIX_IT_MESSAGE = (
     "Google Earth Engine is not authenticated (or the session failed to "
@@ -77,6 +82,29 @@ class GEEAuthError(RuntimeError):
     """
 
 
+def _gee_timeout_seconds() -> float:
+    """Return the validated GEE request timeout in seconds.
+
+    Unset or blank uses DEFAULT_GEE_REQUEST_TIMEOUT_SECONDS.
+
+    Raises:
+        ValueError: the env var is not a finite positive number.
+    """
+    value = os.environ.get(GEE_REQUEST_TIMEOUT_ENV_VAR, "").strip()
+    if not value:
+        return DEFAULT_GEE_REQUEST_TIMEOUT_SECONDS
+    try:
+        timeout_seconds = float(value)
+    except ValueError:
+        timeout_seconds = float("nan")
+    if not isfinite(timeout_seconds) or timeout_seconds <= 0:
+        raise ValueError(
+            f"{GEE_REQUEST_TIMEOUT_ENV_VAR} must be a finite positive number, "
+            f"got {value!r}"
+        )
+    return timeout_seconds
+
+
 def initialize_ee(force: bool = False) -> None:
     """Ensure a Google Earth Engine session is initialized.
 
@@ -87,6 +115,9 @@ def initialize_ee(force: bool = False) -> None:
     terminal while this process was already running).
 
     Raises:
+        ValueError: GEE_REQUEST_TIMEOUT_SECONDS is set to a value that is not
+            a finite positive number (a config error, raised before any
+            Earth Engine call).
         GEEAuthError: auth is missing, expired, or the session otherwise
             fails to initialize. The message includes the fix-it steps and
             the original exception for debugging.
@@ -103,17 +134,44 @@ def initialize_ee(force: bool = False) -> None:
         # option wasn't explicitly configured), initialize_ee() behaves
         # exactly as it did before this branch existed.
         service_account_key_json = os.environ.get("GEE_SERVICE_ACCOUNT_KEY_JSON") or None
+        # A malformed timeout is a configuration error, not an auth failure:
+        # parse it before the try so it is not wrapped in GEEAuthError (whose
+        # fix-it text would send the user to `earthengine authenticate`).
+        timeout_seconds = _gee_timeout_seconds()
         try:
+            # ee.Initialize() itself downloads API discovery metadata and
+            # algorithms. Give those cold-start requests a finite socket
+            # timeout; ee.data.setDeadline() cannot be called until the
+            # Earth Engine data module has initialized its HTTP session.
+            initialization_transport = httplib2.Http(timeout=timeout_seconds)
             if service_account_key_json:
                 # email is omitted deliberately -- ee.ServiceAccountCredentials
                 # reads client_email out of the JSON key itself when key_data
                 # is a full service-account key (see its own docstring).
                 credentials = ee.ServiceAccountCredentials(key_data=service_account_key_json)
-                ee.Initialize(credentials=credentials, project=project)
+                initialize_kwargs = {
+                    "credentials": credentials,
+                    "project": project,
+                }
             elif project:
-                ee.Initialize(project=project)
+                initialize_kwargs = {"project": project}
             else:
-                ee.Initialize()
+                initialize_kwargs = {}
+            ee.Initialize(
+                **initialize_kwargs,
+                http_transport=initialization_transport,
+            )
+            # Bound every Earth Engine Cloud API request made through
+            # getInfo(), getDownloadURL(), and related client methods.
+            # Without this, a scheduler worker can remain blocked in an
+            # SSL read after application or pytest teardown has begun.
+            ee.data.setDeadline(timeout_seconds * 1000)
+            # The custom httplib2 transport is needed only to bound the first
+            # cold start. Re-initialize through the public API to restore
+            # Earth Engine's normal requests-based transport for runtime
+            # concurrency while preserving an explicit or credential-derived
+            # Cloud project. The rebuild is bounded by the deadline above.
+            ee.Initialize(**initialize_kwargs, http_transport=None)
             # ee.Initialize() can succeed even with a stale/invalid
             # credential file — it only builds the client, it does not
             # necessarily contact the server. Force one cheap round-trip
