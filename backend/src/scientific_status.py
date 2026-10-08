@@ -40,7 +40,11 @@ def _load_config() -> dict:
 
 
 def _signal_anomaly_active(config: dict) -> bool:
-    """Validate the minimum provenance declarations for an active baseline."""
+    """Validate the minimum provenance declarations for an active baseline.
+
+    The date-count floor and age ceiling are detection/src/signal_anomaly.py's
+    constants, read through the bridge -- not backend literals.
+    """
     signal = config.get("signal_anomaly", {})
     try:
         minimum_dates = int(signal.get("minimum_independent_dates", 0))
@@ -49,8 +53,8 @@ def _signal_anomaly_active(config: dict) -> bool:
         return False
     return bool(
         signal.get("status") == "active"
-        and minimum_dates >= 30
-        and 0 <= max_age_days <= 14
+        and minimum_dates >= bridge.SIGNAL_ANOMALY_MIN_INDEPENDENT_DATES
+        and 0 <= max_age_days <= bridge.SIGNAL_ANOMALY_MAX_OBSERVATION_AGE_DAYS
         and signal.get("location_specific") is True
         and signal.get("season_specific") is True
         and signal.get("history_before_target_only") is True

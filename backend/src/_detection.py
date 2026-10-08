@@ -83,6 +83,7 @@ def _load_detection_module(filename: str, module_name: str):
 
 _prediction = _load_detection_module("prediction.py", "detection_src_prediction")
 _climatology_bridge = _load_detection_module("climatology.py", "detection_src_climatology")
+_signal_anomaly = _load_detection_module("signal_anomaly.py", "detection_src_signal_anomaly")
 
 # `prediction.py` imports `_data_pipeline` under its bare sibling name.
 # Reuse that loaded object. Climatology is loaded explicitly above because
@@ -96,16 +97,23 @@ detect = _prediction.detect
 risk_level = _prediction.risk_level
 load_prediction_config = _prediction.load_config
 
+# --- Signal-anomaly activation floors ---------------------------------------
+# The one definition lives in detection/src/signal_anomaly.py (config.yaml
+# values are validated against it there). scientific_status reads these
+# objects at call time instead of carrying its own literals, so the backend
+# gate and the detection contract cannot disagree.
+SIGNAL_ANOMALY_MIN_INDEPENDENT_DATES = _signal_anomaly.MIN_INDEPENDENT_DATES
+SIGNAL_ANOMALY_MAX_OBSERVATION_AGE_DAYS = _signal_anomaly.MAX_OBSERVATION_AGE_DAYS
+
 # --- Errors / lower-level pipeline calls -----------------------------------
 # GEEAuthError must always propagate out of backend routers too (never
 # caught-and-faked, per CLAUDE.md) -- routers catch it only to translate
 # it into a clear 503, not to hide it. NoCloudFreeImageryError/
 # NoWaterPixelsError are the "real-world data gap" errors that
-# detect()/risk_level() already convert into status fields internally;
-# backend re-raises/re-catches these itself only in the one place it
-# makes its own extra get_sentinel2_bands call (see routers/detect.py and
-# src/scheduler.py) to surface cloud_fraction/actual_date, which
-# detect()'s/risk_level()'s return shapes do not expose.
+# detect()/risk_level() already convert into status fields internally.
+# detect() also returns the resolved scene's cloud_fraction and
+# actual_date, so routers/detect.py and src/scheduler.py never make a
+# second get_sentinel2_bands call for them.
 GEEAuthError = _data_pipeline_bridge.GEEAuthError
 NoCloudFreeImageryError = _data_pipeline_bridge.NoCloudFreeImageryError
 NoWaterPixelsError = _data_pipeline_bridge.NoWaterPixelsError
@@ -135,6 +143,8 @@ get_ndci_heatmap = _data_pipeline_bridge.get_ndci_heatmap
 # the scalar reference the renderer's vectorised ramp is tested against.
 NDCI_RAMP_HEX = _data_pipeline_bridge.NDCI_RAMP_HEX
 NDCI_RAMP_DOMAIN = _data_pipeline_bridge.NDCI_RAMP_DOMAIN
+TRUE_COLOR_MIN = _data_pipeline_bridge.TRUE_COLOR_MIN
+TRUE_COLOR_MAX = _data_pipeline_bridge.TRUE_COLOR_MAX
 hex_to_rgb = _data_pipeline_bridge.hex_to_rgb
 ndci_value_to_color = _data_pipeline_bridge.ndci_value_to_color
 
@@ -159,6 +169,7 @@ get_newest_scene_timestamp = _data_pipeline_bridge.get_newest_scene_timestamp
 # never mean -- rather than a backend-local copy that could drift.
 build_index_composite = _data_pipeline_bridge.build_index_composite
 download_composite_arrays = _data_pipeline_bridge.download_composite_arrays
+iter_bootstrap_windows = _data_pipeline_bridge.iter_bootstrap_windows
 summarize_raster_cells = _data_pipeline_bridge.summarize_raster_cells
 # The date-band validity test itself, not a backend copy of it -- see
 # data-pipeline/src/raster.py's valid_cell_mask. /raster-scan/pixel
@@ -168,7 +179,10 @@ valid_cell_mask = _data_pipeline_bridge.valid_cell_mask
 RASTER_BAND_REDUCERS = _data_pipeline_bridge.RASTER_BAND_REDUCERS
 RASTER_BAND_ORDER = _data_pipeline_bridge.RASTER_BAND_ORDER
 RASTER_INDEX_BANDS = _data_pipeline_bridge.RASTER_INDEX_BANDS
+RASTER_TRUE_COLOR_BANDS = _data_pipeline_bridge.RASTER_TRUE_COLOR_BANDS
+RASTER_STORED_BANDS = _data_pipeline_bridge.RASTER_STORED_BANDS
 RASTER_DATE_BAND = _data_pipeline_bridge.RASTER_DATE_BAND
+SENTINEL2_SR_ARCHIVE_START_DATE = _data_pipeline_bridge.SENTINEL2_SR_ARCHIVE_START_DATE
 DEFAULT_RASTER_SCALE_M = _data_pipeline_bridge.DEFAULT_RASTER_SCALE_M
 FabricatedDateError = _data_pipeline_bridge.FabricatedDateError
 DateBandPrecisionError = _data_pipeline_bridge.DateBandPrecisionError
@@ -182,6 +196,8 @@ __all__ = [
     "detect",
     "risk_level",
     "load_prediction_config",
+    "SIGNAL_ANOMALY_MIN_INDEPENDENT_DATES",
+    "SIGNAL_ANOMALY_MAX_OBSERVATION_AGE_DAYS",
     "GEEAuthError",
     "NoCloudFreeImageryError",
     "NoWaterPixelsError",
@@ -194,18 +210,24 @@ __all__ = [
     "get_ndci_heatmap",
     "NDCI_RAMP_HEX",
     "NDCI_RAMP_DOMAIN",
+    "TRUE_COLOR_MIN",
+    "TRUE_COLOR_MAX",
     "hex_to_rgb",
     "ndci_value_to_color",
     "check_point_in_study_area",
     "get_newest_scene_timestamp",
     "build_index_composite",
     "download_composite_arrays",
+    "iter_bootstrap_windows",
     "summarize_raster_cells",
     "valid_cell_mask",
     "RASTER_BAND_REDUCERS",
     "RASTER_BAND_ORDER",
     "RASTER_INDEX_BANDS",
+    "RASTER_TRUE_COLOR_BANDS",
+    "RASTER_STORED_BANDS",
     "RASTER_DATE_BAND",
+    "SENTINEL2_SR_ARCHIVE_START_DATE",
     "DEFAULT_RASTER_SCALE_M",
     "FabricatedDateError",
     "DateBandPrecisionError",

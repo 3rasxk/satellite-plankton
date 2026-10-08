@@ -171,6 +171,24 @@ def initialize_ee(force: bool = False) -> None:
             # Earth Engine's normal requests-based transport for runtime
             # concurrency while preserving an explicit or credential-derived
             # Cloud project. The rebuild is bounded by the deadline above.
+            #
+            # Why two Initialize calls (earthengine-api 1.7.47, read from
+            # ee/__init__.py, ee/data.py, ee/_cloud_api_utils.py): the only
+            # thing that bounds the default requests transport is
+            # state.deadline_ms, which _install_cloud_api_resource turns into
+            # the _Http(session, timeout). The public setter, setDeadline(),
+            # rebuilds the Cloud API resource and asserts a requests session
+            # exists, so it fails before the first Initialize; setting the
+            # deadline earlier needs the private ee.data._get_state(). A single
+            # Initialize(http_transport=None) would therefore fetch discovery
+            # and the algorithm list with no timeout at all. Re-initializing
+            # with ee.data.initialize() alone would skip the algorithm reload
+            # but reset the project to the SDK default unless we re-derive it.
+            # Cost, counted offline with build_cloud_resource stubbed: six
+            # discovery builds (2 per Initialize, 2 per setDeadline) and two
+            # algorithm-list loads per cold start, all bounded by
+            # timeout_seconds. Keep both calls unless a supported pre-init
+            # deadline setter exists.
             ee.Initialize(**initialize_kwargs, http_transport=None)
             # ee.Initialize() can succeed even with a stale/invalid
             # credential file — it only builds the client, it does not

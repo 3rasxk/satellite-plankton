@@ -19,11 +19,9 @@ one number"):
     config.yaml must be read by any caller before that word ("warning",
     "watch") reaches a UI without the caveat attached.
 
-Limitation restated (docs/DETECTION_PLAN.md §3): published ML
-forecasting reaches ~96% accuracy at 8-day lead time; this rule-based
-layer is not claimed to be comparable, and no lead-time accuracy number
-is computed anywhere in this module. Risk escalation is inactive while
-the required spatial anomaly statistic is not computed.
+No lead-time accuracy number is computed anywhere in this module. Risk
+escalation is inactive while the required spatial anomaly statistic is not
+computed.
 """
 
 from __future__ import annotations
@@ -153,7 +151,8 @@ def detect(lat: float, lng: float, date: str, config: dict | None = None) -> dic
 
     Returns:
         {'index_values': dict | None, 'index_used': str, 'status': str,
-         'reason': str | None, 'actual_date': str | None}
+         'reason': str | None, 'actual_date': str | None,
+         'cloud_fraction': float | None}
         `status` is one of: 'ok', 'no_imagery' (cloud/no scene in
         window), or 'no_water_pixels' (on land/shore).
         `actual_date` is the real Sentinel-2 scene date this reading came
@@ -164,6 +163,8 @@ def detect(lat: float, lng: float, date: str, config: dict | None = None) -> dic
         weeks apart. It is None only on the two statuses where no imagery
         was ever obtained ('no_imagery', 'no_water_pixels').
         Never substitute the requested `date` for it.
+        `cloud_fraction` is the cloud fraction of that same scene, None on
+        the same two statuses as `actual_date`.
 
     Raises:
         GEEAuthError: propagated, never caught (CLAUDE.md "never
@@ -184,6 +185,7 @@ def detect(lat: float, lng: float, date: str, config: dict | None = None) -> dic
             "reason": str(exc),
             # No scene was resolved at all -- null, never the requested date.
             "actual_date": None,
+            "cloud_fraction": None,
         }
     except NoWaterPixelsError as exc:
         return {
@@ -194,6 +196,7 @@ def detect(lat: float, lng: float, date: str, config: dict | None = None) -> dic
             # Raised from inside get_sentinel2_bands, before it returns a
             # band dict -- no resolved scene date is available here.
             "actual_date": None,
+            "cloud_fraction": None,
         }
 
     index_values = compute_all_indices(bands)
@@ -204,6 +207,10 @@ def detect(lat: float, lng: float, date: str, config: dict | None = None) -> dic
         "reason": None,
         # The real scene backing this reading -- may be days from `date`.
         "actual_date": bands["actual_date"],
+        # Cloud fraction of that same scene. Callers must take it from here
+        # rather than re-resolving the scene: a second read could pick a
+        # newer acquisition and pair its cloud fraction with these indices.
+        "cloud_fraction": bands.get("cloud_fraction"),
     }
 
 
@@ -303,7 +310,8 @@ def risk_level(lat: float, lng: float, date: str, config: dict | None = None) ->
         config: pre-loaded config.yaml dict; loaded fresh if omitted.
 
     Returns:
-        {'level': None, 'reason': 'not_computed_no_valid_baseline',
+        {'level': None, 'signal_anomaly_level': None,
+         'reason': 'not_computed_no_valid_baseline',
          'triggered_rules': [...], 'detection': {...detect() output...},
          'trend_14d': {...}, 'sst': {...} | None,
          'rainfall': {...} | None,
@@ -345,6 +353,9 @@ def risk_level(lat: float, lng: float, date: str, config: dict | None = None) ->
 
     return {
         "level": None,
+        # A pure robust-z contract exists in signal_anomaly.py, but no
+        # compatible Sentinel-2 baseline is persisted or supplied here.
+        "signal_anomaly_level": None,
         "reason": "not_computed_no_valid_baseline",
         "triggered_rules": evaluation["triggered_rules"],
         "detection": detection,

@@ -22,11 +22,6 @@ def _valid_detect_result() -> dict:
 
 def test_detect_response_has_disclaimer(client, monkeypatch):
     monkeypatch.setattr(detect_router.bridge, "detect", lambda *a, **k: _valid_detect_result())
-    monkeypatch.setattr(
-        detect_router,
-        "fetch_satellite_meta",
-        lambda *a, **k: {"cloud_fraction": 0.1, "actual_date": "2024-03-14"},
-    )
 
     resp = client.get("/detect", params={"lat": 13.2, "lng": 100.9, "date": "2024-03-15"})
     assert resp.status_code == 200

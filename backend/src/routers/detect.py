@@ -11,7 +11,6 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, HTTPException, Query
 
 from .. import _detection as bridge
-from ..satellite_meta import fetch_satellite_meta
 from ..schemas import DetectResponse
 
 router = APIRouter()
@@ -51,23 +50,14 @@ async def get_detect(
     # substituted a fabricated result (index_values={"ndci": 0.04},
     # cloud_fraction=0.15) -- a direct violation of CLAUDE.md's "never
     # catch-and-fabricate" rule, since the real call almost always takes
-    # longer than 0.6s. detect() and fetch_satellite_meta() already
-    # report real "no data" conditions (no_imagery/no_water_pixels)
-    # as honest status fields, not exceptions -- the
-    # only exception either can raise is GEEAuthError, which is caught
-    # here only to translate it into a clear 503 (never to hide it or
+    # longer than 0.6s. detect() already reports real "no data"
+    # conditions (no_imagery/no_water_pixels) as honest status fields,
+    # not exceptions -- the only exception it can raise is GEEAuthError,
+    # which is caught here only to translate it into a clear 503 (never to hide it or
     # substitute a fake reading), matching src/_detection.py's own
     # documented contract for this bridge.
     try:
         result = await asyncio.to_thread(bridge.detect, lat, lng, date)
-    except bridge.GEEAuthError as exc:
-        raise HTTPException(
-            status_code=503,
-            detail=f"Google Earth Engine is not authenticated -- the pipeline is unusable: {exc}",
-        )
-
-    try:
-        meta = await asyncio.to_thread(fetch_satellite_meta, lat, lng, date)
     except bridge.GEEAuthError as exc:
         raise HTTPException(
             status_code=503,
@@ -90,10 +80,13 @@ async def get_detect(
         status=result["status"],
         detected=None,
         spatial_anomaly_z=None,
+        signal_anomaly_level=None,
         index_used=result["index_used"],
         index_values=result["index_values"],
         reason=result["reason"],
-        cloud_fraction=meta["cloud_fraction"],
+        # Same scene as index_values/actual_date: detect() returns it, so
+        # no second Sentinel-2 read can pair it with a newer acquisition.
+        cloud_fraction=result.get("cloud_fraction"),
         actual_date=actual_date,
         true_color_image_url=true_color_url,
         ndci_heatmap_image_url=ndci_heatmap_url,

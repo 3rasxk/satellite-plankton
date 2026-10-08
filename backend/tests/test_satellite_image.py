@@ -6,19 +6,17 @@ caching for the 6-site monitored grid).
 
 Same convention as the rest of this suite: real FastAPI TestClient, real
 isolated SQLite DB (conftest.py), GEE mocked at the `bridge` boundary for
-the bulk of these tests. Two tests at the bottom
-(`test_live_*`) are deliberately NOT mocked -- they make a real GEE call
-(this machine has EE_PROJECT_ID configured, see data-pipeline/.env) to
-prove actual PNG bytes come back and that the same-scene guarantee
-(data-pipeline/src/imagery.py) really does extend through the HTTP layer,
-not just in theory. They are the slow (several-second), live-network
-tests in this file -- everything else is fast and network-free.
+the bulk of these tests. Two tests at the bottom (`test_live_*`) are
+deliberately NOT mocked. They run only with `--live-gee`, make a real GEE
+call, and prove actual PNG bytes and the same-scene guarantee through the
+HTTP layer. Everything in the ordinary suite is network-free.
 """
 
 from __future__ import annotations
 
 import urllib.error
 
+import pytest
 from sqlalchemy import delete, select
 
 from src import _detection as bridge
@@ -169,11 +167,6 @@ def _valid_detect_result() -> dict:
 
 def test_detect_includes_image_urls_when_status_ok(client, monkeypatch):
     monkeypatch.setattr(detect_router.bridge, "detect", lambda *a, **k: _valid_detect_result())
-    monkeypatch.setattr(
-        detect_router,
-        "fetch_satellite_meta",
-        lambda *a, **k: {"cloud_fraction": 0.1, "actual_date": "2024-03-14"},
-    )
 
     resp = client.get("/detect", params={"lat": 13.2, "lng": 100.9, "date": "2024-03-15"})
     assert resp.status_code == 200
@@ -193,11 +186,6 @@ def test_detect_image_urls_null_when_status_not_ok(client, monkeypatch):
     result = dict(_valid_detect_result())
     result.update(status="no_imagery", actual_date=None, reason="no cloud-free scene")
     monkeypatch.setattr(detect_router.bridge, "detect", lambda *a, **k: result)
-    monkeypatch.setattr(
-        detect_router,
-        "fetch_satellite_meta",
-        lambda *a, **k: {"cloud_fraction": None, "actual_date": None},
-    )
 
     resp = client.get("/detect", params={"lat": 13.2, "lng": 100.9, "date": "2024-03-15"})
     assert resp.status_code == 200
@@ -455,9 +443,6 @@ def test_refresh_one_site_geeautherror_from_images_marks_whole_site_stale(monkey
             raise bridge.GEEAuthError("forced -- image render hits auth failure")
 
         monkeypatch.setattr(scheduler_module.bridge, "risk_level", _fake_risk_level)
-        monkeypatch.setattr(
-            scheduler_module, "fetch_satellite_meta", lambda *a, **k: {"cloud_fraction": 0.05, "actual_date": "2024-03-14"}
-        )
         monkeypatch.setattr(scheduler_module.bridge, "get_true_color_image", _raise_auth)
 
         refresh_one_site(db, site, "2024-03-15")
@@ -487,6 +472,7 @@ def test_refresh_one_site_geeautherror_from_images_marks_whole_site_stale(monkey
 _LIVE_LAT, _LIVE_LNG, _LIVE_DATE = 13.4500, 100.6500, "2024-03-15"
 
 
+@pytest.mark.live_gee
 def test_live_satellite_image_true_color_returns_real_png(client):
     resp = client.get(
         "/satellite-image",
@@ -499,6 +485,7 @@ def test_live_satellite_image_true_color_returns_real_png(client):
     assert resp.headers["x-actual-date"]  # real scene date, non-empty
 
 
+@pytest.mark.live_gee
 def test_live_satellite_image_actual_date_matches_detect_same_scene_guarantee(client):
     """The same-scene guarantee (data-pipeline/src/imagery.py), proven
     live through the full HTTP stack: /detect's own actual_date for this

@@ -129,11 +129,6 @@ def test_detect_response_never_carries_prediction_fields(client, monkeypatch):
     risk_level/triggered_rules/level/confidence_label, which would mean
     the two outputs got merged somewhere in the response-building path."""
     monkeypatch.setattr(detect_router.bridge, "detect", lambda *a, **k: _fake_detect_result())
-    monkeypatch.setattr(
-        detect_router,
-        "fetch_satellite_meta",
-        lambda *a, **k: {"cloud_fraction": 0.08, "actual_date": "2024-03-14"},
-    )
 
     resp = client.get("/detect", params={"lat": 13.2, "lng": 100.9, "date": "2024-03-15"})
     assert resp.status_code == 200
@@ -180,11 +175,6 @@ def test_risk_map_keeps_detection_and_prediction_as_separate_fields_through_sche
             db.refresh(site)
 
         monkeypatch.setattr(scheduler_module.bridge, "risk_level", lambda *a, **k: _fake_risk_level_result())
-        monkeypatch.setattr(
-            scheduler_module,
-            "fetch_satellite_meta",
-            lambda *a, **k: {"cloud_fraction": 0.08, "actual_date": "2024-03-14"},
-        )
         monkeypatch.setattr(scheduler_module, "_refresh_images", lambda *a, **k: {})
 
         refresh_one_site(db, site, "2024-03-15")

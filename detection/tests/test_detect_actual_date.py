@@ -8,7 +8,7 @@ that scans many points on one target date routinely gets readings backed
 by scenes days or weeks apart. Until this field existed, `detect()` computed that
 scene date and then discarded it, leaving every consumer to either omit
 it or re-derive it with a second GEE round-trip
-(backend/src/satellite_meta.py).
+(a since-removed backend helper).
 
 GEE is never touched here: `get_sentinel2_bands` is monkeypatched at the
 typed boundary. Real index math runs; climatology and z-score calls are
@@ -194,3 +194,38 @@ def test_every_detect_return_path_includes_actual_date(
     assert "detected" not in result
     assert "anomaly_z" not in result
     assert "spatial_anomaly_z" not in result
+
+
+# --------------------------------------------------------------------------
+# cloud_fraction travels with the same scene as actual_date and the index
+# values. Consumers (backend scheduler, /detect) must not re-resolve the
+# scene with a second get_sentinel2_bands call just to learn it, because a
+# new acquisition between the two reads would pair one scene's cloud
+# fraction with another scene's indices.
+# --------------------------------------------------------------------------
+
+
+def test_detect_ok_returns_the_same_scenes_cloud_fraction(monkeypatch, config):
+    calls = []
+
+    def bands(lat, lng, date):
+        calls.append(date)
+        return dict(_BANDS)
+
+    monkeypatch.setattr(prediction, "get_sentinel2_bands", bands)
+    result = detect(13.4, 100.6, REQUESTED_DATE, config)
+
+    assert calls == [REQUESTED_DATE]
+    assert result["cloud_fraction"] == _BANDS["cloud_fraction"]
+    assert result["actual_date"] == SCENE_DATE
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [prediction.NoCloudFreeImageryError("forced"), prediction.NoWaterPixelsError("forced")],
+)
+def test_detect_without_imagery_returns_null_cloud_fraction(monkeypatch, config, exc):
+    _patch_bands_raising(monkeypatch, exc)
+    result = detect(13.4, 100.6, REQUESTED_DATE, config)
+    assert "cloud_fraction" in result
+    assert result["cloud_fraction"] is None

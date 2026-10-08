@@ -70,7 +70,6 @@ from .db_models import DetectionCache, MonitoredSite
 from .grid import MONITORED_GRID
 from .raster_scan.storage import apply_retention
 from .raster_scan.trigger import poll_and_maybe_scan
-from .satellite_meta import fetch_satellite_meta
 from .services.cache_service import clear_cache
 
 logger = logging.getLogger("backend.scheduler")
@@ -180,7 +179,6 @@ def refresh_one_site(db: Session, site: MonitoredSite, target_date: str) -> None
 
     try:
         prediction = bridge.risk_level(site.lat, site.lng, target_date)
-        meta = fetch_satellite_meta(site.lat, site.lng, target_date)
         detection = prediction["detection"]
         image_fields = _refresh_images(site.lat, site.lng, target_date, detection["status"])
 
@@ -199,7 +197,9 @@ def refresh_one_site(db: Session, site: MonitoredSite, target_date: str) -> None
             sst_anomaly=prediction["sst_anomaly"],
             trend_14d_rising=prediction["trend_14d"].get("rising"),
             rainfall_mm=(prediction["rainfall"] or {}).get("recent_rainfall_mm"),
-            cloud_fraction=meta["cloud_fraction"],
+            # From the same detect() read as index_values/actual_date --
+            # never a second scene resolution that could see a newer scene.
+            cloud_fraction=detection.get("cloud_fraction"),
             actual_date=detection.get("actual_date"),
             fetched_at=datetime.now(timezone.utc),
             stale=False,

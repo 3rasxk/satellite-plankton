@@ -16,7 +16,7 @@
 indices:
   primary: ndci            # docs/DETECTION_PLAN.md §2: NDCI is the primary chlorophyll proxy
   compare: [ndci, 2bda, 3bda]
-  secondary_discrimination: b2_b3_ratio  # Noctiluca-only, lower confidence -- see indices.py docstring
+  secondary_discrimination: b2_b3_ratio  # exploratory context only; not a validated species classifier
 
 climatology:
   window_days: 7            # +/- days around target day-of-year pooled across all MODIS archive years
@@ -85,8 +85,37 @@ trend:
   rising_slope_min: 0.0
 
 # Prediction confidence statement -- read literally by prediction.py's
-# docstring and never overridden per-call. Published ML forecasting has
-# reached ~96% accuracy at 8-day lead time (docs/DETECTION_PLAN.md §3);
-# this rule-based layer is not claimed to be comparable. No lead-time
-# accuracy figure is computed or reported anywhere in this codebase.
+# docstring and never overridden per-call. No lead-time accuracy figure is
+# computed or reported anywhere in this codebase.
 prediction_confidence_label: "indicative, rule-based -- not a validated forecast"
+
+# Public risk/API output stays disabled even if an older cache row contains a
+# legacy level. Enabling this requires validated anomaly and risk calibration.
+risk_evaluation:
+  active: false
+  status: "inactive_no_calibrated_thresholds"
+
+# Provisional statistical signal levels. These are defined for a future
+# scientifically compatible Sentinel-2 history and are not connected to
+# production output yet: this repository does not persist a baseline with the
+# required location, season, acquisition-date, and preprocessing identity.
+# They are not bloom thresholds and do not populate risk_level.
+#
+# The five numbers below are FIXED by the documented robust-z method; their
+# single definition is the constants in detection/src/signal_anomaly.py
+# (MIN_INDEPENDENT_DATES, MAX_OBSERVATION_AGE_DAYS, MAD_SCALE, WATCH_AT_Z,
+# HIGH_AT_Z). They are listed here so every rule is readable in config, not so
+# they can be tuned: signal_anomaly._config() (used by assess_signal_anomaly
+# and classify_robust_z) and detection/tests/test_signal_anomaly.py reject
+# mad_scale/watch_at_z/high_at_z that differ, a minimum_independent_dates below
+# 30, or a max_observation_age_days outside 0..14. Raising the date
+# count or lowering the age here only tightens; the backend activation gate
+# (backend/src/scientific_status.py) reads the same constants through
+# backend/src/_detection.py, so it can never open on a looser value.
+signal_anomaly:
+  status: "inactive_no_consistent_sentinel2_baseline"
+  minimum_independent_dates: 30
+  max_observation_age_days: 14
+  mad_scale: 1.4826
+  watch_at_z: 2.0
+  high_at_z: 3.0
