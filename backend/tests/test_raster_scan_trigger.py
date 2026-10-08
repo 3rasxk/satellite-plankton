@@ -80,3 +80,33 @@ def test_poll_failure_does_not_start_a_scan(client, monkeypatch):
     monkeypatch.setattr(trigger_module, "run_raster_scan", lambda *a, **k: calls.append((a, k)))
     trigger_module.poll_and_maybe_scan()
     assert calls == []
+
+
+def _poll_with_prior_run(monkeypatch, status):
+    _clear()
+    candidate = "2024-03-14T03:00:00Z"
+    with SessionLocal() as db:
+        db.add(RasterScanRun(
+            started_at=_NOW - timedelta(days=2), completed_at=_NOW - timedelta(days=2),
+            status=status, date_used="2024-03-14", scale_m=200, retention_days=30,
+            trigger_scene_timestamp=candidate,
+        ))
+        db.commit()
+    monkeypatch.setattr(
+        trigger_module.bridge, "get_newest_scene_timestamp", lambda *_: candidate,
+    )
+    calls = []
+    monkeypatch.setattr(trigger_module, "run_raster_scan", lambda *a, **k: calls.append((a, k)))
+    try:
+        trigger_module.poll_and_maybe_scan()
+    finally:
+        _clear()
+    return calls
+
+
+def test_errored_scan_retries_its_own_scene(client, monkeypatch):
+    assert len(_poll_with_prior_run(monkeypatch, "error")) == 1
+
+
+def test_successful_scan_still_consumes_its_scene(client, monkeypatch):
+    assert _poll_with_prior_run(monkeypatch, "ok") == []

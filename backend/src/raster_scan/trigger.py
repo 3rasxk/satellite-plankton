@@ -53,7 +53,12 @@ def poll_and_maybe_scan() -> None:
             ).scalars().first()
             latest_triggered = db.execute(
                 select(RasterScanRun)
-                .where(RasterScanRun.trigger_scene_timestamp.is_not(None))
+                .where(
+                    RasterScanRun.trigger_scene_timestamp.is_not(None),
+                    # A failed run must not consume its scene; retry is
+                    # still spaced by the cooldown via latest_attempt.
+                    RasterScanRun.status != "error",
+                )
                 .order_by(RasterScanRun.started_at.desc())
             ).scalars().first()
 
