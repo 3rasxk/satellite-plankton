@@ -103,6 +103,12 @@ def _rendered_run(db: Session, run_id: int | None = None) -> RasterScanRun | Non
     return None
 
 
+def _asset_on_disk(overlay: dict, name: str) -> bool:
+    """True when the named asset is recorded AND its PNG still exists."""
+    asset = (overlay.get("assets") or {}).get(name)
+    return bool(asset) and "path" in asset and Path(asset["path"]).exists()
+
+
 @router.get("/raster-scan", response_model=RasterScanResponse)
 async def get_raster_scan(db: Session = Depends(get_db)) -> RasterScanResponse:
     """Metadata for the newest raster overlay that still exists on disk."""
@@ -138,6 +144,7 @@ async def get_raster_scan(db: Session = Depends(get_db)) -> RasterScanResponse:
         # Recorded at scan time from the stored date band, never derived
         # here from the span (which could not carry it).
         scene_dates=rendered.scene_dates,
+        source_metadata=rendered.source_metadata,
         completed_at=(
             as_aware_utc(rendered.completed_at).isoformat() if rendered.completed_at else None
         ),
@@ -145,6 +152,11 @@ async def get_raster_scan(db: Session = Depends(get_db)) -> RasterScanResponse:
         bounds=(overlay.get("bounds") or {}).get("leaflet_bounds"),
         legend=overlay.get("legend"),
         overlay_url=f"/raster-scan/overlay.png?run_id={rendered.id}",
+        true_color_url=(
+            f"/raster-scan/true-color.png?run_id={rendered.id}"
+            if _asset_on_disk(overlay, "true_color")
+            else None
+        ),
         stale_run_id=latest.id if latest and latest.id != rendered.id else None,
     )
 
@@ -172,8 +184,30 @@ async def get_raster_overlay(
     return FileResponse(path, media_type="image/png", filename=path.name)
 
 
+@router.get("/raster-scan/true-color.png")
+async def get_raster_true_color(
+    run_id: int | None = Query(None, ge=1, le=2**63 - 1,
+                               description="Exact rendered run; omit for the latest available."),
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    """True-color companion generated from this run's stored RGB bands."""
+    rendered = _rendered_run(db, run_id)
+    asset = (
+        ((rendered.overlay or {}).get("assets") or {}).get("true_color")
+        if rendered is not None
+        else None
+    )
+    if not asset or not Path(asset["path"]).exists():
+        raise HTTPException(
+            status_code=404,
+            detail="This raster run has no run-aligned true-color image.",
+        )
+    path = Path(asset["path"])
+    return FileResponse(path, media_type="image/png", filename=path.name)
+
+
 @router.get("/raster-scan/pixel", response_model=RasterPixelResponse)
-async def get_raster_pixel(
+def get_raster_pixel(
     lat: float = Query(..., ge=-90, le=90, description="Latitude of the clicked point."),
     lng: float = Query(..., ge=-180, le=180, description="Longitude of the clicked point."),
     run_id: int | None = Query(None, ge=1, le=2**63 - 1,

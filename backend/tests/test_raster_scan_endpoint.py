@@ -47,7 +47,7 @@ def _run(tmp_path, *, run_id_hint: str, started: datetime, overlay_ok: bool = Tr
         "legend": {
             "value": {"ramp_hex": ["#0A1929"], "domain": [-0.05, 0.15],
                       "swatches": [{"value": -0.05, "hex": "#0a1929"}]},
-            "no_data": {"base_rgba": [176, 176, 176, 205], "stripe_rgba": [92, 92, 92, 235]},
+            "no_data": {"rgba": [0, 0, 0, 0], "meaning": "transparent no usable measurement"},
         },
     }
     return RasterScanRun(
@@ -77,6 +77,9 @@ def _rendered_reading(db, tmp_path, *, started, value, date_ms):
         "lat": np.array([12.97]),
         "lng": np.array([100.01]),
         **{band: np.array([value], dtype=np.float32) for band in bridge.RASTER_INDEX_BANDS},
+        **{band: np.array([channel], dtype=np.float32) for band, channel in zip(
+            bridge.RASTER_TRUE_COLOR_BANDS, (900, 600, 300)
+        )},
         bridge.RASTER_DATE_BAND: np.array([date_ms], dtype=np.int64),
     }
     run.blob_path = storage.write_cells(run.id, cells, root=tmp_path)["path"]
@@ -114,6 +117,8 @@ def test_metadata_binds_image_and_pixel_to_its_run_when_a_new_scan_finishes(clie
     assert pixel["index_values"]["ndci"] == 0.125
     assert pixel["acquired_date"] == "2026-08-25"
     assert displayed["overlay_url"] == f"/raster-scan/overlay.png?run_id={old_id}"
+    assert displayed["true_color_url"] == f"/raster-scan/true-color.png?run_id={old_id}"
+    assert client.get(displayed["true_color_url"]).status_code == 200
     assert latest["overlay_url"] == f"/raster-scan/overlay.png?run_id={newer_id}"
     assert displayed["overlay_url"] != latest["overlay_url"]
 
@@ -164,6 +169,7 @@ def test_no_scan_yet_says_so_instead_of_serving_a_blank_overlay(client):
     assert body["run_id"] is None
     assert body["bounds"] is None
     assert body["overlay_url"] is None
+    assert body["true_color_url"] is None
     assert "No raster overlay" in body["reason"]
     assert client.get("/raster-scan/overlay.png").status_code == 404
 
@@ -206,7 +212,7 @@ def test_bounds_and_legend_travel_with_the_metadata(client, tmp_path):
     body = client.get("/raster-scan").json()
     assert body["bounds"] == [[12.5, 99.9], [13.6, 101.0]]
     assert body["legend"]["value"]["swatches"][0]["hex"] == "#0a1929"
-    assert body["legend"]["no_data"]["base_rgba"] == [176, 176, 176, 205]
+    assert body["legend"]["no_data"]["rgba"] == [0, 0, 0, 0]
     assert body["scale_m"] == 200
     assert body["oldest_scene_date"] == "2026-08-23"
     assert body["newest_scene_date"] == "2026-09-02"
@@ -332,3 +338,38 @@ def test_overlay_bounds_cover_the_whole_study_polygon(client, tmp_path):
     for lat, lng in _study_area.STUDY_AREA_POLYGON_LATLNG:
         assert south <= lat <= north, f"polygon vertex {lat} outside the overlay bounds"
         assert west <= lng <= east, f"polygon vertex {lng} outside the overlay bounds"
+
+
+def test_pixel_handler_is_sync_so_blob_read_runs_in_threadpool():
+    import inspect
+    from src.routers import raster_scan as raster_scan_router
+
+    assert not inspect.iscoroutinefunction(raster_scan_router.get_raster_pixel)
+
+
+@pytest.mark.parametrize("asset_kind", ["missing_file", "no_path_key", "existing_file"])
+def test_true_color_url_only_when_the_png_exists_on_disk(client, tmp_path, asset_kind):
+    _clear()
+    run = _run(tmp_path, run_id_hint="tc", started=datetime.now(timezone.utc))
+    tc_png = tmp_path / "tc_true_color.png"
+    if asset_kind == "existing_file":
+        tc_png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 64)
+        tc_asset = {"path": str(tc_png)}
+    elif asset_kind == "missing_file":
+        tc_asset = {"path": str(tc_png)}
+    else:
+        tc_asset = {"bytes": 72}
+    overlay = dict(run.overlay)
+    overlay["assets"] = {**overlay["assets"], "true_color": tc_asset}
+    run.overlay = overlay
+    with SessionLocal() as db:
+        db.add(run)
+        db.commit()
+        run_id = run.id
+
+    body = client.get("/raster-scan").json()
+    assert body["run_id"] == run_id
+    if asset_kind == "existing_file":
+        assert body["true_color_url"] == f"/raster-scan/true-color.png?run_id={run_id}"
+    else:
+        assert body["true_color_url"] is None
