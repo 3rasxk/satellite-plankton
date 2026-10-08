@@ -1,88 +1,16 @@
-"""
-Map-ready PNG overlay for one stored raster scan.
+"""Render stored raster cells as run-owned, map-ready PNG assets.
 
-Data source: none of its own. This module reads the cells one raster scan
-already stored (`src/raster_scan/storage.py`'s `.npz` blob, written from
-`data-pipeline/src/raster.py`'s whole-polygon Sentinel-2 index composite)
-and turns them into pixels. It never calls Google Earth Engine, never
-opens a network connection, and never invents a cell that was not stored:
-if a run's blob is gone, rendering fails loudly rather than drawing an
-empty map. Everything the picture claims was measured comes from that
-file.
+The renderer never calls Earth Engine or any network service. NDCI and
+true-color pixels come from the same stored per-pixel Sentinel-2 mosaic and
+its date-validity mask. Only valid cells whose centres fall inside the study
+polygon are painted. Cloud-masked, land-masked, uncovered, non-finite, and
+out-of-polygon pixels remain fully transparent; missing values are never
+converted to zero or to the bottom of the NDCI ramp.
 
-What the picture says, and the one confusion it exists to prevent
-----------------------------------------------------------------
-The overlay draws exactly three states, and they are drawn differently on
-purpose:
-
-  1. **Valued water** -- a cell with a usable reading. Painted on the
-     project's own NDCI ramp (`NDCI_RAMP_HEX` over `NDCI_RAMP_DOMAIN`,
-     read through the bridge from `data-pipeline/src/imagery.py`, so the
-     overlay and the per-site heatmap colour the same index the same
-     way), fully opaque.
-  2. **Unmeasured water** -- inside the study polygon, no usable reading.
-     Painted as an explicit grey hatch, never left transparent. This is
-     the entire reason this module exists. A transparent hole over a blue
-     basemap reads to a viewer as "measured, and low" -- which is this
-     project's cardinal overclaim in raster form. A viewer must be able
-     to tell "we looked and saw little chlorophyll" from "we could not
-     see here", and a colour is the only way a map says that.
-  3. **Outside the study polygon** -- fully transparent (alpha 0).
-     Nothing is drawn, because the basemap already shows what is there
-     and an overlay adds no information.
-
-Alpha alone separates the three: 0 outside, 255 for a reading, and
-strictly between the two for unmeasured water. So "was this pixel
-measured?" is answerable from one channel, without matching colours
-against a palette.
-
-The hatch is achromatic by construction (r == g == b) and the ramp is
-chromatic everywhere (no interpolation between its five stops ever yields
-r == g == b). So no unmeasured pixel can carry a colour the ramp can
-produce, at any value, and the distinction survives a viewer's screen,
-a screenshot and a JPEG re-encode. It also survives downscaling: a blend
-of two greys is grey. `backend/tests/test_raster_scan_render.py` asserts
-this against the ramp enumerated densely, not against the code's shape.
-
-Limitations -- read before showing this to anyone
--------------------------------------------------
-* **The hatch means "no usable reading", not "cloud".** A cell inside the
-  polygon can be missing because it was cloudy, because the JRC water
-  mask calls it land, or because no scene in the window covered it. The
-  stored blob keeps only the cells that survived, so this module cannot
-  tell those three apart and does not pretend to: they are one state with
-  one honest label. The practical cost is that land *inside* the polygon
-  (the coastline, and the polygon's corners, which sit inland) is hatched
-  rather than left clear -- the picture says "nothing was measured here",
-  which is true, rather than guessing at a coastline it has no data for.
-  Guessing would be the worse failure: a wrong guess punches a
-  transparent hole through real water, which is exactly state 2 being
-  mistaken for state 1.
-* **A cell is one nearest-neighbour-sampled native pixel, not an area
-  average** (`data-pipeline/src/raster.py`, "Resolution"). Drawing it as
-  a filled square of the sampling interval is a display convention, not a
-  claim that the whole square was observed. A bloom smaller than the
-  sampling interval is hit or missed depending on where the sample landed.
-* **Colours are readings, not verdicts.** The ramp is a cosmetic display
-  domain (CLAUDE.md §0/§1): there is no valid spectral-index baseline in
-  this project, so nothing here scores, ranks or classifies a cell. Red
-  is a high NDCI reading, not "a bloom".
-* **One overlay routinely mixes acquisition dates.** The composite is
-  most-recent-wins per pixel, so neighbouring pixels can come from scenes
-  days apart. The run row's `oldest_scene_date`/`newest_scene_date` state
-  the span; the picture itself cannot show it, and a single date must
-  never be printed next to it as if it were the overlay's date.
-* **Placement is plate carrée, stretched by Leaflet.** The PNG is a
-  regular lat/lng grid handed to an `ImageOverlay` with corner bounds.
-  Leaflet stretches it into Web Mercator linearly, and over this
-  polygon's ~1.1 degrees of latitude that misplaces mid-image rows by a
-  fraction of a percent of the image height -- irrelevant at regional
-  scale, wrong for measuring a coastline against.
-
-For whoever draws it (piece 3): the PNG is exact per-pixel state, so it
-wants `image-rendering: pixelated` rather than the browser's default
-smoothing, which blends hatch and value colours into intermediates at
-their shared edges.
+The PNG alone intentionally cannot distinguish transparent no-data inside the
+study area from transparent space outside it. Click lookup uses the run's
+stored grid, polygon, date band, and sparse cell arrays to make that distinction
+without a live request or a fabricated value.
 """
 
 from __future__ import annotations
@@ -127,23 +55,14 @@ BAND_DOMAINS: dict[str, tuple[float, float]] = {"ndci": NDCI_RAMP_DOMAIN}
 RENDERED_BANDS: tuple[str, ...] = ("ndci",)
 
 # --------------------------------------------------------------------------
-# The three states, as pixels. RGBA, straight alpha.
+# Pixel states. RGBA, straight alpha.
 # --------------------------------------------------------------------------
 #
-# Alpha alone says which state a pixel is in, and the values below are
-# chosen so that stays true:
+# Alpha says whether a usable measurement exists:
 #
-#     alpha == 0                  outside the study area, nothing drawn
+#     alpha == 0                  no usable measurement, nothing drawn
 #     alpha == VALUE_ALPHA (255)  a real reading, on the ramp
-#     0 < alpha < 255             inside the study area, nothing usable
-#
-# That is a property worth paying for rather than a coincidence: it means
-# "is this pixel a measurement?" can be answered from one channel, by a
-# test, by whatever draws a legend, and by anyone poking at the PNG --
-# without matching RGB against a palette. It is why the hatch tones stop
-# short of full opacity.
-#
-# State 3 -- outside the study polygon. Nothing drawn at all.
+# Geometry and stored cell presence distinguish inside no-data from outside.
 OUTSIDE_RGBA: tuple[int, int, int, int] = (0, 0, 0, 0)
 
 # State 1 -- a real reading. Fully opaque, so a value is never dimmed
@@ -151,38 +70,6 @@ OUTSIDE_RGBA: tuple[int, int, int, int] = (0, 0, 0, 0)
 # whole layer is shown at reduced opacity is the map's decision, made once
 # for the layer, not something baked per-pixel here.
 VALUE_ALPHA = 255
-
-# State 2 -- inside the polygon, nothing usable. Two greys in a diagonal
-# hatch, both opaque enough to be unmistakably drawn rather than absent.
-#
-# Grey is not a decoration here, it is the guarantee: both tones are
-# achromatic (r == g == b), and the ramp's five stops are chromatic and
-# stay chromatic between every adjacent pair, so no unmeasured pixel can
-# ever equal a value pixel. The stripes make it read as "no data" at a
-# glance rather than as a flat fill that could be mistaken for one more
-# ramp colour, and they stay distinguishable when the map is zoomed out
-# far enough to blur them (a blend of two greys is still grey).
-#
-# The tones are also deliberately far from the ramp's LOW end (#0A1929,
-# near-black navy), because "low reading" vs "no reading" is the specific
-# confusion this module exists to prevent -- a dark grey hatch against a
-# near-black low colour would have defeated the point.
-#
-# Neither tone is fully opaque, so that alpha keeps meaning what the block
-# above says it means: 255 is reserved for a reading. They are still far
-# from transparent -- an unmeasured pixel has to be seen.
-NO_DATA_BASE_RGBA: tuple[int, int, int, int] = (176, 176, 176, 205)
-NO_DATA_STRIPE_RGBA: tuple[int, int, int, int] = (92, 92, 92, 235)
-
-# The weakest alpha any unmeasured pixel is allowed to carry, and the
-# strongest. Stated as constants so "unmeasured is never transparent, and
-# never mistakable for a reading" is a checkable rule rather than an
-# accident of the two tuples above.
-NO_DATA_MIN_ALPHA = min(NO_DATA_BASE_RGBA[3], NO_DATA_STRIPE_RGBA[3])
-NO_DATA_MAX_ALPHA = max(NO_DATA_BASE_RGBA[3], NO_DATA_STRIPE_RGBA[3])
-
-HATCH_PERIOD_PX = 6
-HATCH_STRIPE_PX = 2
 
 # --------------------------------------------------------------------------
 # Grid geometry.
@@ -445,17 +332,6 @@ def points_in_polygon_mask(
     return inside
 
 
-def hatch_mask(rows: int, cols: int) -> np.ndarray:
-    """Diagonal stripe pattern, True on the stripe.
-
-    Position-based rather than data-based: the stripes must not encode
-    anything, or a viewer could read structure into them. Their only job
-    is to make a no-data region unmistakable as a region.
-    """
-    yy, xx = np.mgrid[0:rows, 0:cols]
-    return ((xx + yy) % HATCH_PERIOD_PX) < HATCH_STRIPE_PX
-
-
 def _pixel_degrees(values: np.ndarray, scale_m: int) -> tuple[float, str]:
     """Pixel size in degrees for one axis, and where it came from.
 
@@ -504,9 +380,10 @@ def build_grid(
     an overlay sized to the cells would shrink on a cloudy day, and the
     water that went missing would leave the image entirely instead of
     being drawn as unmeasured. The area a scan covers must not depend on
-    how much of it the scan could see. (The union also keeps a cell that
-    landed marginally outside the polygon inside the picture, rather than
-    cropping a real reading away.)
+    how much of it the scan could see. (The union is also what keeps the
+    picture covering the whole polygon when the cells span less than it;
+    cells outside the polygon are still never painted -- see
+    `render_overlay`.)
 
     Raises:
         OverlayTooLargeError: the grid would exceed MAX_OVERLAY_PIXELS.
@@ -574,12 +451,10 @@ def render_overlay(
 ) -> RenderedOverlay:
     """Draw one band of one stored raster as RGBA pixels.
 
-    Painting order is the guarantee, not an implementation detail:
-    everything starts transparent (state 3), the polygon's interior is
-    then filled with the no-data hatch (state 2), and only then are the
-    stored cells painted over it (state 1). A real reading therefore
-    always wins over the hatch, and any pixel that is not a reading is
-    left saying so. Nothing can silently invert that.
+    Everything starts transparent. Only finite, date-valid stored cells
+    whose pixel centre falls inside the study polygon are painted. Missing,
+    cloud-masked, land-masked and uncovered cells therefore remain alpha 0;
+    the stored date band remains the authority for click lookup.
 
     A cell whose value is not finite (an index is a ratio, and a division
     by a zero-reflectance pixel can produce inf or NaN even where the
@@ -593,7 +468,7 @@ def render_overlay(
             `lat`, `lng` and `band`.
         band: which index to draw (see BAND_DOMAINS).
         scale_m: the run's read scale, for pixel sizing.
-        polygon: study-area boundary; the hatch is drawn inside it.
+        polygon: study-area boundary; cells outside it are not drawn.
         domain: display domain override; defaults to BAND_DOMAINS[band].
 
     Raises:
@@ -621,14 +496,15 @@ def render_overlay(
 
     rgba = np.zeros((grid.rows, grid.cols, 4), dtype=np.uint8)
     rgba[...] = OUTSIDE_RGBA
-    stripes = hatch_mask(grid.rows, grid.cols)
-    rgba[inside & stripes] = NO_DATA_STRIPE_RGBA
-    rgba[inside & ~stripes] = NO_DATA_BASE_RGBA
-
-    finite = np.isfinite(values)
+    dates = np.asarray(cells[bridge.RASTER_DATE_BAND])
+    finite = np.isfinite(values) & bridge.valid_cell_mask(dates)
     rows_idx, cols_idx = grid.cell_indices(lat[finite], lng[finite])
     if rows_idx.size:
-        rgba[rows_idx, cols_idx, :3] = ramp_rgb(values[finite], domain, NDCI_RAMP_HEX)
+        drawn = inside[rows_idx, cols_idx]
+        rows_idx = rows_idx[drawn]
+        cols_idx = cols_idx[drawn]
+        drawn_values = values[finite][drawn]
+        rgba[rows_idx, cols_idx, :3] = ramp_rgb(drawn_values, domain, NDCI_RAMP_HEX)
         rgba[rows_idx, cols_idx, 3] = VALUE_ALPHA
 
     valued = np.zeros((grid.rows, grid.cols), dtype=bool)
@@ -643,7 +519,7 @@ def render_overlay(
         "unreadable_cells": int((~finite).sum()),
         "valued_pixels": int(valued.sum()),
         "no_data_pixels": int((inside & ~valued).sum()),
-        "transparent_pixels": int((~inside & ~valued).sum()),
+        "transparent_pixels": int((~valued).sum()),
         "inside_polygon_pixels": inside_total,
         # The numerator of measured_fraction, carried explicitly so a
         # reader of this metadata (or of the API that serves it) never has
@@ -651,17 +527,85 @@ def render_overlay(
         # out against a total.
         "measured_pixels": measured_inside,
         # Fraction of the study polygon this raster actually has a reading
-        # for. The honest headline number for an overlay: everything else
-        # inside the boundary is hatch. Denominator is the POLYGON, land
+        # for. Everything else is transparent. Denominator is the POLYGON, land
         # included -- the polygon is a boundary, not a water mask, so the
         # land inside it can never be measured and is counted against
         # this figure. It is not a fraction of water.
         "measured_fraction": (measured_inside / inside_total) if inside_total else 0.0,
-        # Readings that fell outside the polygon and were still drawn -- a
-        # measurement is never erased for being marginally out of bounds.
-        "valued_pixels_outside_polygon": int((~inside & valued).sum()),
+        "valued_pixels_outside_polygon": 0,
     }
     return RenderedOverlay(band=band, rgba=rgba, grid=grid, domain=tuple(domain), stats=stats)
+
+
+def render_true_color_overlay(
+    cells: dict,
+    scale_m: int = bridge.DEFAULT_RASTER_SCALE_M,
+    polygon: tuple[tuple[float, float], ...] = STUDY_AREA_POLYGON_LATLNG,
+) -> RenderedOverlay:
+    """Render the RGB bands stored by the same per-pixel mosaic as NDCI.
+
+    The RGB values are not fetched separately. They travelled through the
+    exact cloud/water mask, scene ordering, and date mosaic used for the
+    run's index bands, so each visible true-color pixel has the same
+    acquisition provenance as the NDCI pixel at that location.
+    """
+    lat = np.asarray(cells["lat"], dtype=np.float64)
+    lng = np.asarray(cells["lng"], dtype=np.float64)
+    red, green, blue = (
+        np.asarray(cells[band], dtype=np.float64)
+        for band in bridge.RASTER_TRUE_COLOR_BANDS
+    )
+    ndci = np.asarray(cells["ndci"], dtype=np.float64)
+    dates = np.asarray(cells[bridge.RASTER_DATE_BAND])
+    grid = build_grid(lat, lng, scale_m, polygon)
+    centre_lats, centre_lngs = grid.pixel_centres()
+    inside = points_in_polygon_mask(centre_lats[:, None], centre_lngs[None, :], polygon)
+    rgba = np.zeros((grid.rows, grid.cols, 4), dtype=np.uint8)
+
+    valid = (
+        bridge.valid_cell_mask(dates)
+        & np.isfinite(ndci)
+        & np.isfinite(red)
+        & np.isfinite(green)
+        & np.isfinite(blue)
+    )
+    rows_idx, cols_idx = grid.cell_indices(lat[valid], lng[valid])
+    drawn = inside[rows_idx, cols_idx] if rows_idx.size else np.array([], dtype=bool)
+    rows_idx = rows_idx[drawn]
+    cols_idx = cols_idx[drawn]
+    rgb_values = np.column_stack((red[valid][drawn], green[valid][drawn], blue[valid][drawn]))
+    if rows_idx.size:
+        stretched = np.clip(
+            (rgb_values - bridge.TRUE_COLOR_MIN)
+            / (bridge.TRUE_COLOR_MAX - bridge.TRUE_COLOR_MIN),
+            0.0,
+            1.0,
+        )
+        rgba[rows_idx, cols_idx, :3] = np.rint(stretched * 255).astype(np.uint8)
+        rgba[rows_idx, cols_idx, 3] = VALUE_ALPHA
+
+    valued = np.zeros((grid.rows, grid.cols), dtype=bool)
+    valued[rows_idx, cols_idx] = True
+    inside_total = int(inside.sum())
+    measured_inside = int((inside & valued).sum())
+    stats = {
+        "cell_count": int(lat.size),
+        "unreadable_cells": int((~valid).sum()),
+        "valued_pixels": int(valued.sum()),
+        "no_data_pixels": int((inside & ~valued).sum()),
+        "transparent_pixels": int((~valued).sum()),
+        "inside_polygon_pixels": inside_total,
+        "measured_pixels": measured_inside,
+        "measured_fraction": (measured_inside / inside_total) if inside_total else 0.0,
+        "valued_pixels_outside_polygon": 0,
+    }
+    return RenderedOverlay(
+        band="true_color",
+        rgba=rgba,
+        grid=grid,
+        domain=(float(bridge.TRUE_COLOR_MIN), float(bridge.TRUE_COLOR_MAX)),
+        stats=stats,
+    )
 
 
 # --------------------------------------------------------------------------
@@ -672,10 +616,8 @@ def render_overlay(
 def write_png(rgba: np.ndarray, path: Path) -> int:
     """Write an (rows, cols, 4) uint8 array as an RGBA PNG. Returns bytes.
 
-    PNG, not JPEG: an overlay needs an alpha channel to leave land alone,
-    and it must be lossless -- a JPEG's ringing around the hatch edges
-    would blend no-data grey with a value colour and produce pixels that
-    are neither.
+    PNG, not JPEG: an overlay needs an alpha channel for no-data and must
+    preserve the exact stored-cell colours at their transparent edges.
     """
     if rgba.dtype != np.uint8 or rgba.ndim != 3 or rgba.shape[2] != 4:
         raise ValueError(
@@ -722,6 +664,21 @@ def write_overlay_assets(
             **rendered.stats,
         }
 
+    true_color_keys = set(bridge.RASTER_TRUE_COLOR_BANDS)
+    if true_color_keys.issubset(cells):
+        rendered = render_true_color_overlay(cells, scale_m=scale_m, polygon=polygon)
+        grid = rendered.grid
+        path = directory / OVERLAY_FILENAME_TEMPLATE.format(band="true_color")
+        size = write_png(rendered.rgba, path)
+        assets["true_color"] = {
+            "path": str(path),
+            "bytes": size,
+            "bands": list(bridge.RASTER_TRUE_COLOR_BANDS),
+            "stretch": [bridge.TRUE_COLOR_MIN, bridge.TRUE_COLOR_MAX],
+            "provenance": "same masked per-pixel Sentinel-2 mosaic and date band as this run",
+            **rendered.stats,
+        }
+
     metadata: dict[str, Any] = {
         "status": "ok",
         "rendered_at": datetime.now(timezone.utc).isoformat(),
@@ -750,16 +707,15 @@ def write_overlay_assets(
                 ),
             },
             "no_data": {
-                "base_rgba": list(NO_DATA_BASE_RGBA),
-                "stripe_rgba": list(NO_DATA_STRIPE_RGBA),
+                "rgba": list(OUTSIDE_RGBA),
                 "meaning": (
-                    "inside the study area, no usable reading -- cloud, "
-                    "land-masked, or no scene covered it. Not a low reading."
+                    "transparent: no usable measurement -- cloud, land-masked, "
+                    "or no scene covered it. Not a low or zero reading."
                 ),
             },
             "transparent": {
                 "rgba": list(OUTSIDE_RGBA),
-                "meaning": "outside the study area -- nothing was looked at, nothing drawn",
+                "meaning": "outside the study area or no usable measurement",
             },
         },
         # Flat list of every file written for this run, so retention can
@@ -777,7 +733,7 @@ def write_overlay_assets(
     sidecar.write_text(json.dumps(metadata, indent=2))
     logger.info(
         "raster_scan: run %s rendered %s (%s) -- %.1f%% of the polygon measured, "
-        "the rest drawn as no-data",
+        "the rest transparent",
         run_id,
         ", ".join(assets),
         grid.as_dict()["leaflet_bounds"] if grid else "no bounds",

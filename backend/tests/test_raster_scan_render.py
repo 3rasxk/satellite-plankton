@@ -7,14 +7,14 @@ written by the test, and one test cuts the bridge's Earth Engine entry
 points and `urlopen` out from under the renderer to prove it never
 reaches for either.
 
-What these tests are actually defending. The overlay draws three states,
-and the whole point of the piece is that a viewer can tell them apart:
+What these tests are actually defending. The overlay draws two visual
+states while lookup retains three semantic states:
 
     valued water   -- a reading, on the ramp
-    unmeasured water -- inside the study area, nothing usable: grey hatch
-    outside        -- nothing drawn at all (alpha 0)
+    unmeasured water -- inside the study area, nothing usable: alpha 0
+    outside        -- also alpha 0; geometry distinguishes it on lookup
 
-If unmeasured water were ever drawn transparent, or in any colour the
+If unmeasured water were ever drawn opaque, especially in any colour the
 ramp can produce, the map would say "we looked and saw low chlorophyll"
 about places nobody looked at. That is this project's cardinal overclaim
 in raster form. So the assertions below are on decoded pixel values --
@@ -250,16 +250,11 @@ def state_masks(rendered: render.RenderedOverlay):
     lats, lngs = rendered.grid.pixel_centres()
     inside = render.points_in_polygon_mask(lats[:, None], lngs[None, :], TEST_POLYGON)
     valued = rendered.rgba[..., 3] == render.VALUE_ALPHA
-    # `valued` is read off the alpha channel, which is only meaningful
-    # because neither hatch tone is allowed to reach 255 -- asserted here
-    # rather than assumed, since every other test in this file leans on it.
-    for tone in (render.NO_DATA_BASE_RGBA, render.NO_DATA_STRIPE_RGBA):
-        assert tone[3] not in (0, render.VALUE_ALPHA)
     return inside, valued
 
 
 # --------------------------------------------------------------------------
-# The three states. These are the tests the piece exists for.
+# Measurement visibility and transparent absence.
 # --------------------------------------------------------------------------
 
 
@@ -280,18 +275,7 @@ def test_unmeasured_water_never_takes_a_colour_the_ramp_can_produce():
     assert not (rgb_set(rendered.rgba, no_data) & ramp_colours())
 
 
-def test_the_no_data_hatch_is_achromatic_and_the_ramp_never_is():
-    """WHY the test above cannot regress by accident: the hatch is grey
-    (r == g == b) and no interpolation between the ramp's stops ever is,
-    so the two sets are disjoint by construction and not by luck."""
-    for tone in (render.NO_DATA_BASE_RGBA, render.NO_DATA_STRIPE_RGBA):
-        assert tone[0] == tone[1] == tone[2], f"{tone} is not a neutral grey"
-
-    chromatic = [rgb for rgb in ramp_colours() if rgb[0] == rgb[1] == rgb[2]]
-    assert chromatic == [], f"the ramp can produce grey: {chromatic[:5]}"
-
-
-def test_a_genuine_low_reading_renders_as_the_ramps_low_colour_not_as_the_hatch():
+def test_a_genuine_low_reading_renders_as_the_ramps_low_colour():
     """A real, low reading is a measurement and must look like one."""
     cells = lattice(value=LOW)
     rendered = render.render_overlay(cells, scale_m=200, polygon=TEST_POLYGON)
@@ -300,29 +284,15 @@ def test_a_genuine_low_reading_renders_as_the_ramps_low_colour_not_as_the_hatch(
     drawn = {tuple(int(channel) for channel in pixel) for pixel in rendered.rgba[valued]}
     lowest_stop = bridge.hex_to_rgb(render.NDCI_RAMP_HEX[0])
     assert drawn == {(*lowest_stop, render.VALUE_ALPHA)}
-    assert (*lowest_stop, render.VALUE_ALPHA) not in {
-        render.NO_DATA_BASE_RGBA, render.NO_DATA_STRIPE_RGBA
-    }
 
 
-def test_a_low_reading_and_an_unmeasured_cell_are_far_apart_in_colour():
-    """The confusion that matters, measured. "We saw very little" and "we
-    could not see" sit side by side in the same image here, and must not
-    be a near-match a viewer could mistake for gradient noise."""
+def test_a_low_reading_is_opaque_while_an_unmeasured_cell_is_transparent():
     cells = lattice(value=LOW)
     rendered = render.render_overlay(cells, scale_m=200, polygon=TEST_POLYGON)
     inside, valued = state_masks(rendered)
 
-    low_colour = np.array(bridge.hex_to_rgb(render.NDCI_RAMP_HEX[0]), dtype=float)
-    for tone in (render.NO_DATA_BASE_RGBA, render.NO_DATA_STRIPE_RGBA):
-        distance = np.linalg.norm(np.array(tone[:3], dtype=float) - low_colour)
-        assert distance > 100, f"hatch {tone} is only {distance:.0f} from the low colour"
-
-    # And they genuinely are neighbours in this image, not merely both
-    # present somewhere in it.
-    boundary = inside & valued
-    neighbours = inside & ~valued
-    assert boundary.sum() > 0 and neighbours.sum() > 0
+    assert np.all(rendered.rgba[valued, 3] == render.VALUE_ALPHA)
+    assert np.all(rendered.rgba[inside & ~valued] == render.OUTSIDE_RGBA)
 
 
 def test_everything_outside_the_polygon_is_fully_transparent():
@@ -338,52 +308,38 @@ def test_everything_outside_the_polygon_is_fully_transparent():
     assert np.all(rendered.rgba[outside] == np.array(render.OUTSIDE_RGBA, dtype=np.uint8))
 
 
-def test_unmeasured_water_inside_the_polygon_is_never_transparent():
-    """The other half of the same rule: inside the study area, "no
-    reading" is drawn, loudly. A transparent hole here would read as a
-    measurement of low chlorophyll."""
+def test_unmeasured_pixels_inside_the_polygon_are_fully_transparent():
+    """No-data remains absence, rather than being painted as a value."""
     cells = lattice()
     rendered = render.render_overlay(cells, scale_m=200, polygon=TEST_POLYGON)
     inside, valued = state_masks(rendered)
 
     no_data_alpha = rendered.rgba[inside & ~valued, 3]
     assert no_data_alpha.size > 0
-    assert no_data_alpha.min() >= render.NO_DATA_MIN_ALPHA > 0
+    assert set(np.unique(no_data_alpha).tolist()) == {0}
+    assert np.all(rendered.rgba[inside & ~valued] == render.OUTSIDE_RGBA)
 
 
-def test_every_pixel_is_exactly_one_of_the_three_states():
-    """No fourth state, no in-between: an overlay that blended value into
-    no-data at the edges would put unclassifiable colours on the map."""
+def test_every_pixel_is_either_a_measurement_or_fully_transparent():
     cells = lattice(sweep=(LOW, HIGH))
     rendered = render.render_overlay(cells, scale_m=200, polygon=TEST_POLYGON)
 
     values = ramp_colours()
-    hatch = {render.NO_DATA_BASE_RGBA, render.NO_DATA_STRIPE_RGBA}
     seen = {tuple(int(c) for c in pixel) for pixel in rendered.rgba.reshape(-1, 4)}
     for pixel in seen:
-        is_outside = pixel == render.OUTSIDE_RGBA
-        is_hatch = pixel in hatch
+        is_transparent = pixel == render.OUTSIDE_RGBA
         is_value = pixel[3] == render.VALUE_ALPHA and pixel[:3] in values
-        assert sum((is_outside, is_hatch, is_value)) == 1, f"{pixel} is not one state"
+        assert sum((is_transparent, is_value)) == 1, f"{pixel} is not a valid state"
 
 
-def test_alpha_alone_says_which_state_a_pixel_is_in():
-    """The channel that does the separating. 0 outside, 255 measured,
-    strictly between for unmeasured -- so "was this measured?" never
-    depends on matching an RGB triple against a palette, and a hatch tone
-    can never be read as a reading."""
+def test_alpha_separates_measurements_from_all_transparent_absence():
     cells = lattice(sweep=(LOW, HIGH))
     rendered = render.render_overlay(cells, scale_m=200, polygon=TEST_POLYGON)
     inside, valued = state_masks(rendered)
 
     alpha = rendered.rgba[..., 3]
-    assert set(np.unique(alpha[~inside & ~valued]).tolist()) == {0}
+    assert set(np.unique(alpha[~valued]).tolist()) == {0}
     assert set(np.unique(alpha[valued]).tolist()) == {render.VALUE_ALPHA}
-    no_data_alphas = np.unique(alpha[inside & ~valued]).tolist()
-    assert no_data_alphas
-    assert all(0 < value < render.VALUE_ALPHA for value in no_data_alphas)
-    assert min(no_data_alphas) == render.NO_DATA_MIN_ALPHA
-    assert max(no_data_alphas) == render.NO_DATA_MAX_ALPHA
 
 
 def test_a_non_finite_reading_is_drawn_as_unmeasured_not_as_a_value():
@@ -404,8 +360,58 @@ def test_a_non_finite_reading_is_drawn_as_unmeasured_not_as_a_value():
         row, col = grid.cell_indices(cells["lat"][position:position + 1],
                                      cells["lng"][position:position + 1])
         pixel = tuple(int(channel) for channel in rendered.rgba[row[0], col[0]])
-        assert pixel in {render.NO_DATA_BASE_RGBA, render.NO_DATA_STRIPE_RGBA}
+        assert pixel == render.OUTSIDE_RGBA
         assert pixel[:3] not in ramp_colours()
+
+
+def test_the_unmeasured_guarantee_is_pinned_on_pixels_and_on_the_counts():
+    """The documented design is a transparent PNG, so the guarantee lives in
+    two places that must agree: every inside-polygon pixel with a finite,
+    date-valid cell is on the ramp at VALUE_ALPHA, every other pixel (inside
+    no-data or outside) is alpha 0 and never a ramp colour, and `stats`
+    counts the inside-polygon no-data so a reader of metadata is not told a
+    transparent pixel was a low reading.
+
+    One cell is a masked pixel as GEE exports it: a finite 0.0 index with
+    date 0. Its value is a perfectly ordinary NDCI; only the date says it
+    was never measured."""
+    cells = lattice(value=LOW)
+    masked = 5
+    cells[DATE_BAND] = cells[DATE_BAND].copy()
+    cells["ndci"] = cells["ndci"].copy()
+    cells[DATE_BAND][masked] = 0
+    cells["ndci"][masked] = 0.0
+
+    rendered = render.render_overlay(cells, scale_m=200, polygon=TEST_POLYGON)
+    inside, valued = state_masks(rendered)
+    rgba, stats = rendered.rgba, rendered.stats
+
+    ramp = ramp_colours()
+    ys, xs = np.nonzero(valued)
+    assert ys.size > 0
+    assert np.all(inside[valued]), "a ramp pixel outside the polygon"
+    assert np.all(rgba[valued, 3] == render.VALUE_ALPHA)
+    assert {tuple(int(c) for c in p[:3]) for p in rgba[valued]} <= ramp
+
+    # The masked cell's pixel is no-data: transparent, not a ramp colour.
+    row, col = rendered.grid.cell_indices(cells["lat"][masked:masked + 1],
+                                          cells["lng"][masked:masked + 1])
+    assert tuple(int(c) for c in rgba[row[0], col[0]]) == render.OUTSIDE_RGBA
+    assert inside[row[0], col[0]] and not valued[row[0], col[0]]
+
+    # Everything that is not a measurement is alpha 0, with no ramp colour.
+    not_valued = ~valued
+    assert np.all(rgba[not_valued] == np.array(render.OUTSIDE_RGBA, dtype=np.uint8))
+
+    # And the counts say the same thing.
+    assert stats["no_data_pixels"] == int((inside & not_valued).sum()) > 0
+    assert stats["transparent_pixels"] == int(not_valued.sum())
+    assert stats["valued_pixels"] == int(valued.sum())
+    assert stats["measured_pixels"] == stats["valued_pixels"]
+    assert (
+        stats["measured_pixels"] + stats["no_data_pixels"] == stats["inside_polygon_pixels"]
+    )
+    assert stats["valued_pixels_outside_polygon"] == 0
 
 
 # --------------------------------------------------------------------------
@@ -440,8 +446,7 @@ def test_coverage_is_a_share_of_the_polygon_land_included_not_of_the_cells():
     polygon. The polygon is a boundary, not a water mask, so land inside
     it is counted against coverage and this is NOT a fraction of water.
     Numerator: only the pixels inside that boundary carrying a reading --
-    a cell that landed outside is still drawn (it is a real measurement)
-    but never inflates the figure.
+    a cell outside the polygon is excluded from both the image and numerator.
 
     Reference provenance: EXHAUSTIVE. Both counts are enumerations of the
     rendered array -- its alpha channel and the polygon mask -- not
@@ -451,6 +456,7 @@ def test_coverage_is_a_share_of_the_polygon_land_included_not_of_the_cells():
     cells["lat"] = np.append(cells["lat"], 12.9400)  # just south of the polygon
     cells["lng"] = np.append(cells["lng"], 100.0250)
     cells["ndci"] = np.append(cells["ndci"], np.float32(HIGH))
+    cells[DATE_BAND] = np.append(cells[DATE_BAND], np.int64(NEW_MS))
 
     rendered = render.render_overlay(cells, scale_m=200, polygon=TEST_POLYGON)
     centre_lats, centre_lngs = rendered.grid.pixel_centres()
@@ -464,9 +470,9 @@ def test_coverage_is_a_share_of_the_polygon_land_included_not_of_the_cells():
     assert stats["measured_pixels"] == int((inside & valued).sum())
     assert stats["measured_fraction"] == stats["measured_pixels"] / stats["inside_polygon_pixels"]
 
-    # The out-of-bounds reading is drawn, and is not in the numerator.
-    assert stats["valued_pixels_outside_polygon"] == 1
-    assert stats["measured_pixels"] == stats["valued_pixels"] - 1
+    # The out-of-bounds reading is not drawn and cannot inflate coverage.
+    assert stats["valued_pixels_outside_polygon"] == 0
+    assert stats["measured_pixels"] == stats["valued_pixels"]
 
     # Most of the polygon holds no cell at all and is counted against
     # coverage. That is the entire reason the figure is worth quoting.
@@ -492,21 +498,18 @@ def test_a_cell_lands_in_the_pixel_its_coordinates_name():
     assert abs(pixel_lng - one["lng"][0]) <= grid.pixel_deg_lng / 2
 
 
-def test_a_measured_cell_outside_the_polygon_is_still_drawn():
-    """A real reading is never erased for landing marginally outside the
-    boundary -- the polygon decides where the hatch goes, not which
-    measurements are allowed to exist."""
+def test_a_stored_cell_outside_the_polygon_is_transparent():
     cells = lattice(lat_range=(12.9550, 12.9600), lng_range=(100.0050, 100.0100))
     cells["lat"] = np.append(cells["lat"], 12.9400)  # just south of the polygon
     cells["lng"] = np.append(cells["lng"], 100.0250)
     cells["ndci"] = np.append(cells["ndci"], np.float32(HIGH))
+    cells[DATE_BAND] = np.append(cells[DATE_BAND], np.int64(NEW_MS))
 
     rendered = render.render_overlay(cells, scale_m=200, polygon=TEST_POLYGON)
 
-    assert rendered.stats["valued_pixels_outside_polygon"] == 1
+    assert rendered.stats["valued_pixels_outside_polygon"] == 0
     row, col = rendered.grid.cell_indices(np.array([12.9400]), np.array([100.0250]))
-    assert rendered.rgba[row[0], col[0], 3] == render.VALUE_ALPHA
-    assert tuple(int(c) for c in rendered.rgba[row[0], col[0], :3]) in ramp_colours()
+    assert tuple(rendered.rgba[row[0], col[0]]) == render.OUTSIDE_RGBA
 
 
 def test_scattered_cells_are_never_painted_as_kilometre_wide_blocks():
@@ -518,6 +521,7 @@ def test_scattered_cells_are_never_painted_as_kilometre_wide_blocks():
         "lat": np.array([12.9600, 12.9800, 12.9900]),
         "lng": np.array([100.0100, 100.0300, 100.0400]),
         "ndci": np.array([0.05, 0.06, 0.07], dtype=np.float32),
+        DATE_BAND: np.full(3, NEW_MS, dtype=np.int64),
     }
     rendered = render.render_overlay(sparse, scale_m=200, polygon=TEST_POLYGON)
 
@@ -691,8 +695,7 @@ def test_a_band_with_no_agreed_display_domain_is_refused():
 def test_the_written_png_decodes_to_exactly_the_rendered_pixels(tmp_path):
     """The assertions above are about an array; this is the file a browser
     will actually receive. PNG is lossless and keeps its alpha channel, so
-    the two must be identical -- a JPEG here would blend hatch grey into
-    value colours at every edge and produce pixels that are neither."""
+    the two must be identical -- JPEG cannot preserve transparent no-data."""
     cells = lattice(sweep=(LOW, HIGH))
     rendered = render.render_overlay(cells, scale_m=200, polygon=TEST_POLYGON)
 
@@ -704,11 +707,58 @@ def test_the_written_png_decodes_to_exactly_the_rendered_pixels(tmp_path):
         decoded = np.array(image)
     assert size == path.stat().st_size
     assert np.array_equal(decoded, rendered.rgba)
-    # And the three states survived the round trip through the file.
+    # Transparent absence and opaque readings survive the round trip.
     assert (decoded[..., 3] == 0).any()
-    assert np.isin(decoded[..., 3], [render.NO_DATA_BASE_RGBA[3],
-                                     render.NO_DATA_STRIPE_RGBA[3]]).any()
     assert (decoded[..., 3] == render.VALUE_ALPHA).any()
+
+
+def test_unmeasured_ndci_pixels_are_transparent_while_measurements_remain_visible():
+    cells = lattice(sweep=(LOW, HIGH))
+    rendered = render.render_overlay(cells, scale_m=200, polygon=TEST_POLYGON)
+    inside, valued = state_masks(rendered)
+
+    assert np.all(rendered.rgba[inside & ~valued] == render.OUTSIDE_RGBA)
+    assert np.all(rendered.rgba[valued, 3] == render.VALUE_ALPHA)
+    assert rendered.stats["no_data_pixels"] > 0
+
+
+def test_ndci_measurements_outside_the_study_polygon_are_not_drawn():
+    cells = lattice(lat_range=(12.9410, 12.9490), lng_range=(100.0050, 100.0150))
+    rendered = render.render_overlay(cells, scale_m=200, polygon=TEST_POLYGON)
+
+    assert not render.points_in_polygon_mask(cells["lat"], cells["lng"], TEST_POLYGON).any()
+    assert np.all(rendered.rgba == render.OUTSIDE_RGBA)
+    assert rendered.stats["valued_pixels_outside_polygon"] == 0
+
+
+def test_true_color_is_rendered_from_the_same_stored_raster_cells():
+    cells = lattice()
+    red_band, green_band, blue_band = bridge.RASTER_TRUE_COLOR_BANDS
+    cells[red_band] = np.full(cells["lat"].shape, 900, dtype=np.float32)
+    cells[green_band] = np.full(cells["lat"].shape, 600, dtype=np.float32)
+    cells[blue_band] = np.full(cells["lat"].shape, 300, dtype=np.float32)
+
+    rendered = render.render_true_color_overlay(cells, scale_m=200, polygon=TEST_POLYGON)
+    inside, valued = state_masks(rendered)
+
+    assert np.all(rendered.rgba[inside & ~valued] == render.OUTSIDE_RGBA)
+    assert (rendered.rgba[valued, 3] == render.VALUE_ALPHA).all()
+    assert np.unique(rendered.rgba[valued, :3], axis=0).shape == (1, 3)
+
+
+def test_true_color_does_not_display_a_pixel_without_valid_ndci():
+    cells = lattice()
+    red_band, green_band, blue_band = bridge.RASTER_TRUE_COLOR_BANDS
+    cells[red_band] = np.full(cells["lat"].shape, 900, dtype=np.float32)
+    cells[green_band] = np.full(cells["lat"].shape, 600, dtype=np.float32)
+    cells[blue_band] = np.full(cells["lat"].shape, 300, dtype=np.float32)
+    cells["ndci"] = cells["ndci"].copy()
+    cells["ndci"][0] = np.nan
+
+    rendered = render.render_true_color_overlay(cells, scale_m=200, polygon=TEST_POLYGON)
+    row, col = rendered.grid.cell_indices(cells["lat"][:1], cells["lng"][:1])
+
+    assert tuple(rendered.rgba[row[0], col[0]]) == render.OUTSIDE_RGBA
 
 
 def test_the_assets_and_bounds_are_persisted_on_the_run_row(client, tmp_path):
@@ -731,9 +781,8 @@ def test_the_assets_and_bounds_are_persisted_on_the_run_row(client, tmp_path):
     assert asset["bytes"] == Path(asset["path"]).stat().st_size
     assert overlay["bounds"]["leaflet_bounds"] == stored["bounds"]["leaflet_bounds"]
     assert len(overlay["bounds"]["leaflet_bounds"]) == 2
-    # The legend travels with the paths: whatever draws this must not have
-    # to guess what the grey means.
-    assert "Not a low reading" in overlay["legend"]["no_data"]["meaning"]
+    # The legend travels with the paths and explains transparent no-data.
+    assert "Not a low or zero reading" in overlay["legend"]["no_data"]["meaning"]
     assert overlay["legend"]["transparent"]["rgba"] == list(render.OUTSIDE_RGBA)
     # The sidecar says the same thing next to the image itself, so the
     # PNG stays placeable if the database is ever rebuilt.
@@ -843,18 +892,14 @@ def test_the_frontend_legend_fixture_still_matches_this_renderer():
 
     assert fixture["ramp_hex"] == list(render.NDCI_RAMP_HEX)
     assert fixture["domain"] == list(render.NDCI_RAMP_DOMAIN)
-    assert fixture["no_data_base_rgba"] == list(render.NO_DATA_BASE_RGBA)
-    assert fixture["no_data_stripe_rgba"] == list(render.NO_DATA_STRIPE_RGBA)
     assert fixture["swatches"] == render.legend_swatches(render.NDCI_RAMP_DOMAIN), (
         "the legend fixture no longer matches the renderer's ramp -- regenerate it"
     )
 
 
 # --------------------------------------------------------------------------
-# Resampling: the overlay is scaled by the browser, and a blend of the
-# grey hatch with a ramp colour would paint unmeasured water in something
-# that reads as a reading. `image-rendering: pixelated` selects nearest
-# neighbour to prevent that.
+# Resampling: the overlay is scaled by the browser. Blending can bleed a
+# measured colour into transparent no-data; pixelated rendering prevents it.
 #
 # Reference: EXHAUSTIVE. Nearest neighbour SELECTS source pixels, so its
 # output is necessarily a subset of the source's own distinct colours --
@@ -865,7 +910,7 @@ def test_the_frontend_legend_fixture_still_matches_this_renderer():
 
 
 def _rendered_overlay_rgba():
-    """A real overlay containing all three states."""
+    """A real overlay containing measured and transparent pixels."""
     cells = lattice(sweep=(-0.06, 0.16))
     return render.render_overlay(cells, scale_m=200, polygon=TEST_POLYGON).rgba
 
