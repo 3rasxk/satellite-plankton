@@ -6,7 +6,7 @@ Returns lightweight, cached alert payloads with sub-150ms latency.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
@@ -17,6 +17,7 @@ from ..config import as_aware_utc
 from ..db import get_db
 from ..db_models import DetectionCache, MonitoredSite
 from ..services.cache_service import get_cached, set_cached
+from ..scientific_status import risk_evaluation_active
 
 router = APIRouter(tags=["alerts"])
 
@@ -28,14 +29,16 @@ class AlertStation(BaseModel):
     site_id: str
     name: str
     risk_tier: str
-    confidence: float
+    confidence: Optional[float] = None
     coordinates: List[float] = Field(..., description="[lat, lng]")
     spatial_anomaly_z: Optional[float] = None
     actual_date: Optional[str] = None
 
 
 class AlertsResponse(BaseModel):
-    updated_at: str
+    # None when not_evaluated: no evaluation happened, so there is no time to report.
+    updated_at: Optional[str] = None
+    evaluation_status: Literal["active", "not_evaluated"] = "active"
     total_active_alerts: int
     highest_risk_tier: Optional[str] = None
     stations: List[AlertStation]
@@ -45,9 +48,21 @@ class AlertsResponse(BaseModel):
 @router.get("/api/alerts", response_model=AlertsResponse)
 async def get_alerts_summary(db: Session = Depends(get_db)) -> AlertsResponse:
     """
-    Returns high-performance cached summary of active bloom alerts.
+    Returns the cached risk-alert summary. Empty and `not_evaluated` while
+    calibrated risk evaluation is disabled.
     Response latency < 150ms on cache hit.
     """
+    # Evaluate the scientific gate before cache lookup. A payload cached while
+    # evaluation was enabled must not survive a later disable for five minutes.
+    if not risk_evaluation_active():
+        return AlertsResponse(
+            updated_at=None,
+            evaluation_status="not_evaluated",
+            total_active_alerts=0,
+            highest_risk_tier=None,
+            stations=[],
+        )
+
     cached = get_cached(CACHE_KEY_ALERTS)
     if cached is not None:
         return AlertsResponse(**cached)
@@ -70,22 +85,15 @@ async def get_alerts_summary(db: Session = Depends(get_db)) -> AlertsResponse:
 
         raw_level = cache.level.upper() if cache.level else None
         if raw_level in ["ELEVATED", "WATCH", "WARNING"]:
-            # Derive deterministic confidence
             z = cache.spatial_anomaly_z
-            if raw_level == "WARNING":
-                conf = 0.88 + ((abs(site.lat) * 11) % 0.05)
-            elif raw_level == "WATCH":
-                conf = 0.72 + ((abs(site.lat) * 11) % 0.05)
-            elif raw_level == "ELEVATED":
-                conf = 0.42 + ((abs(site.lat) * 11) % 0.05)
-            else:
-                conf = 0.12
 
             stations.append({
                 "site_id": site.site_id,
                 "name": site.name,
                 "risk_tier": raw_level,
-                "confidence": round(conf, 3),
+                # No numeric confidence model exists. Null is explicit and
+                # avoids manufacturing a percentage from station coordinates.
+                "confidence": None,
                 "coordinates": [round(site.lat, 4), round(site.lng, 4)],
                 "spatial_anomaly_z": round(z, 2) if z is not None else None,
                 "actual_date": cache.actual_date,
