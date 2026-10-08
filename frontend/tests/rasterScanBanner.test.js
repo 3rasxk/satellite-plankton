@@ -35,6 +35,7 @@ before(async () => {
     server: { middlewareMode: true, watch: null, hmr: false, ws: false },
     resolve: { alias: {
       'react-leaflet': fileURLToPath(new URL('./fixtures/leaflet.js', import.meta.url)),
+      leaflet: fileURLToPath(new URL('./fixtures/leaflet_core.js', import.meta.url)),
       '../hooks/useApi.js': fileURLToPath(new URL('./fixtures/useApi.js', import.meta.url)),
     } },
   })

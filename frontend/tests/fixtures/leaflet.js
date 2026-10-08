@@ -4,10 +4,15 @@ import { createElement } from 'react'
 export const CircleMarker = ({ center, children }) => createElement(
   'div', { 'data-scan-marker': `${center[0]},${center[1]}` }, children,
 )
-export const MapContainer = ({ children }) => createElement('main', null, children)
+export const MapContainer = ({ children, className }) => createElement('main', { className }, children)
 export const Tooltip = ({ children }) => createElement('div', null, children)
 export const Popup = ({ children }) => createElement('section', null, children)
-export const TileLayer = () => null
+export const TileLayer = ({ url, attribution, pane }) => createElement('span', {
+  'data-tile-url': url,
+  'data-tile-attribution': attribution,
+  'data-tile-pane': pane,
+})
+export const Pane = ({ children, name }) => createElement('div', { 'data-pane-name': name }, children)
 export const ZoomControl = () => null
 export const useMap = () => ({ fitBounds() {}, setView() {} })
 

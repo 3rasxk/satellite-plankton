@@ -34,6 +34,7 @@ before(async () => {
     server: { middlewareMode: true, watch: null, hmr: false, ws: false },
     resolve: { alias: {
       'react-leaflet': fileURLToPath(new URL('./fixtures/leaflet.js', import.meta.url)),
+      leaflet: fileURLToPath(new URL('./fixtures/leaflet_core.js', import.meta.url)),
     } },
   })
   ;({ default: RasterPixelPanel } = await server.ssrLoadModule(
@@ -142,6 +143,7 @@ test('unmeasured water is never shown as a number, and never as zero', () => {
   assert.match(html, /ไม่ได้วัดค่า/)
   assert.match(html, /ไม่ใช่ค่าดัชนีต่ำ/)
   assert.match(html, /ไม่ใช่ค่าศูนย์/)
+  assert.match(html, /ทั้งสามสาเหตุแยกจากกันไม่ได้จากข้อมูลที่เก็บไว้ จึงรายงานรวมเป็นสถานะเดียว/)
 })
 
 test('unmeasured water and outside the study area are different messages', () => {

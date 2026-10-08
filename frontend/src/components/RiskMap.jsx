@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { MapContainer, TileLayer, ZoomControl, useMap } from 'react-leaflet'
+import { MapContainer, Pane, TileLayer, ZoomControl, useMap } from 'react-leaflet'
 import { MAP_BOUNDS, syncMinimumBoundsZoom } from '../utils/mapBounds.js'
 
 const UPPER_GULF_CENTER = [13.1, 100.6]
@@ -10,6 +10,18 @@ const UPPER_GULF_ZOOM = 9
 const TILE_URL = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
 const TILE_ATTRIBUTION =
   '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+
+// Esri World Light Gray Canvas is the raster page's neutral reference
+// map. Esri publishes the canvas as a base plus a reference-label service;
+// both are one logical Light Map mode in the UI. The label pane stays above
+// the scientific overlay so place names and administrative context remain
+// legible in NDCI mode.
+const LIGHT_MAP_BASE_URL =
+  'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}'
+const LIGHT_MAP_REFERENCE_URL =
+  'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}'
+const LIGHT_MAP_ATTRIBUTION =
+  'Tiles &copy; <a href="https://www.esri.com/">Esri</a> &mdash; Sources: Esri, HERE, Garmin, &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>, and the GIS User Community'
 
 // True-color satellite basemap for the "True Color (RGB)" view mode — this
 // is a general-purpose Esri imagery basemap, NOT the app's own Sentinel-2
@@ -56,6 +68,27 @@ function FitToPoints({ points }) {
   return null
 }
 
+export function LightMapLayers() {
+  return (
+    <>
+      <TileLayer
+        url={LIGHT_MAP_BASE_URL}
+        attribution={LIGHT_MAP_ATTRIBUTION}
+        maxNativeZoom={16}
+        maxZoom={18}
+      />
+      <Pane name="light-map-reference" style={{ zIndex: 450, pointerEvents: 'none' }}>
+        <TileLayer
+          url={LIGHT_MAP_REFERENCE_URL}
+          maxNativeZoom={16}
+          maxZoom={18}
+          pane="light-map-reference"
+        />
+      </Pane>
+    </>
+  )
+}
+
 export default function RiskMap({ fitPoints, mode = 'risk', children }) {
   return (
     <MapContainer
@@ -71,13 +104,17 @@ export default function RiskMap({ fitPoints, mode = 'risk', children }) {
     >
       <BoundsZoomLock />
       <ZoomControl position="topright" />
-      <TileLayer
-        key={mode}
-        url={mode === 'true_color' ? TRUE_COLOR_TILE_URL : TILE_URL}
-        attribution={mode === 'true_color' ? TRUE_COLOR_ATTRIBUTION : TILE_ATTRIBUTION}
-        maxNativeZoom={19}
-        maxZoom={18}
-      />
+      {mode === 'raster' ? (
+        <LightMapLayers />
+      ) : (
+        <TileLayer
+          key={mode}
+          url={mode === 'true_color' ? TRUE_COLOR_TILE_URL : TILE_URL}
+          attribution={mode === 'true_color' ? TRUE_COLOR_ATTRIBUTION : TILE_ATTRIBUTION}
+          maxNativeZoom={19}
+          maxZoom={18}
+        />
+      )}
       <FitToPoints points={fitPoints} />
       {children}
     </MapContainer>

@@ -3,7 +3,7 @@
 // and to human copy, per docs/FRONTEND_PLAN.md §6 (interface words are
 // design material, write from the reader's side).
 
-// risk_level enum -> risk-ramp colour. Four published tiers map onto the
+// risk_level enum -> risk-ramp colour. Four retained, currently inactive tiers map onto the
 // four risk tokens 1:1 — see docs/FRONTEND_PLAN.md §4. Apple-palette
 // redesign: normal is a neutral grey (kept off the accent blue, which is
 // reserved for interactive elements only), elevated/watch/warning are
@@ -64,6 +64,14 @@ export const RISK_MEANING_TH = {
 
 export const ANOMALY_NOT_COMPUTED = 'Not computed — no valid baseline exists'
 
+export const SIGNAL_ANOMALY_LABEL_TH = 'ระดับความผิดปกติของสัญญาณดาวเทียม'
+export const SIGNAL_ANOMALY_NO_ASSESSMENT_TH = 'ไม่มีข้อมูลประเมิน'
+export const SIGNAL_ANOMALY_LEVEL_TH = {
+  normal: 'ปกติ',
+  watch: 'เฝ้าระวัง',
+  high: 'ผิดปกติสูง',
+}
+
 // detect()/cache status values that mean "no reading", never merged with
 // a real risk_level colour. status: "ok" is the only one that gets a
 // ramp colour; everything else gets the neutral no-data treatment.
@@ -111,8 +119,8 @@ export const STATUS_EXPLAINER_TH = {
 
 // Bucketing the dimensionally valid /timeseries chlor_a anomaly_z onto
 // the same ramp used by risk_level, for the
-// AnomalyStrip. This is a display convention (z <= 0 reads as clear,
-// z > 2 as severe) — not a rule from detection/src/config.yaml, and never
+// AnomalyStrip. This is a display convention for the separate MODIS
+// chlor_a anomaly — not a rule from detection/src/config.yaml, and never
 // presented as a calibrated threshold.
 export function zToColorVar(z) {
   if (z === null || z === undefined) return null

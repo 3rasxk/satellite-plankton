@@ -8,6 +8,9 @@ import {
   formatRelativeTime,
   formatZ,
   ANOMALY_NOT_COMPUTED,
+  SIGNAL_ANOMALY_LABEL_TH,
+  SIGNAL_ANOMALY_LEVEL_TH,
+  SIGNAL_ANOMALY_NO_ASSESSMENT_TH,
 } from '../constants.js'
 
 /**
@@ -28,7 +31,7 @@ const INDEX_CARDS = [
     fullName: 'Normalized Difference Chlorophyll Index',
     formula: '(B5 − B4) / (B5 + B4)',
     description:
-      'ดัชนีความแตกต่างคลอโรฟิลล์แบบปกติ — ใช้แบนด์ Red Edge (B5) กับ Red (B4) ของ Sentinel-2 เพื่อประเมินความเข้มข้นคลอโรฟิลล์ในน้ำ',
+      'ดัชนีสเปกตรัมจากแบนด์ Red Edge (B5) และ Red (B4) ของ Sentinel-2 — โครงการยังไม่มีสมการสอบเทียบเป็นความเข้มข้นคลอโรฟิลล์หรือระดับความเสี่ยง',
   },
   {
     id: '2bda',
@@ -36,7 +39,7 @@ const INDEX_CARDS = [
     fullName: 'Two-Band Difference Algorithm',
     formula: 'B5 / B4',
     description:
-      'อัตราส่วนแบนด์สองแบนด์ — อัตราส่วนง่ายระหว่าง Red Edge กับ Red ซึ่งไวต่อคลอโรฟิลล์-a ในน้ำที่มีสารอาหารสูง',
+      'อัตราส่วน Red Edge ต่อ Red — เป็นการแปลงจากอัตราส่วน B5/B4 ชุดเดียวกับ NDCI จึงไม่ใช่หลักฐานยืนยันอิสระ',
   },
   {
     id: '3bda',
@@ -48,11 +51,11 @@ const INDEX_CARDS = [
   },
   {
     id: 'b2b3',
-    name: 'B2−B3',
-    fullName: 'Blue–Green Noctiluca Discrimination',
-    formula: 'B3 − B2',
+    name: 'B2/B3',
+    fullName: 'Exploratory Blue–Green Ratio',
+    formula: 'B2 / B3',
     description:
-      'ผลต่างแบนด์ Green กับ Blue — ใช้แยกสัญญาณ Noctiluca สีเขียว (ไดโนแฟลกเจลเลตเรืองแสง) จากน้ำปกติ',
+      'อัตราส่วนแบนด์ Blue ต่อ Green สำหรับบริบทเชิงสำรวจ — ยังไม่ได้สอบเทียบหรือยืนยันว่าใช้จำแนก Noctiluca ได้',
   },
 ]
 
@@ -111,7 +114,7 @@ export default function NdciPage() {
                   <th>จุดตรวจวัด</th>
                   <th>ดัชนีที่ใช้</th>
                   <th>NDCI</th>
-                  <th>Spatial anomaly z</th>
+                  <th>{SIGNAL_ANOMALY_LABEL_TH}</th>
                   <th>สถานะ</th>
                   <th>อัปเดต</th>
                 </tr>
@@ -134,11 +137,19 @@ export default function NdciPage() {
                       <td className="mono">
                         {isNoData
                           ? '—'
-                          : p.ndci_value != null
-                            ? p.ndci_value.toFixed(4)
+                          : p.index_values?.ndci != null
+                            ? p.index_values.ndci.toFixed(4)
                             : '—'}
                       </td>
-                      <td>{p.spatial_anomaly_z == null ? ANOMALY_NOT_COMPUTED : formatZ(p.spatial_anomaly_z)}</td>
+                      <td>
+                        {SIGNAL_ANOMALY_LEVEL_TH[p.signal_anomaly_level]
+                          || SIGNAL_ANOMALY_NO_ASSESSMENT_TH}
+                        <div className="table-subtext">
+                          {p.spatial_anomaly_z == null
+                            ? ANOMALY_NOT_COMPUTED
+                            : `robust z = ${formatZ(p.spatial_anomaly_z)}`}
+                        </div>
+                      </td>
                       <td>
                         <span className={`status-badge${isNoData ? ' no-data' : ''}`}>
                           <span

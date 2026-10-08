@@ -1,8 +1,8 @@
 /**
  * Raster coverage view — its own page, not a toggle on the pin map.
  *
- * Shows continuous index readings across the whole study polygon, with
- * unmeasured water drawn as an explicit hatch rather than left blank.
+ * Shows valid index readings inside the study polygon; all unmeasured
+ * pixels remain transparent over the Light Map.
  * Clicking anywhere on the raster reads that one cell back out of the
  * stored blob the picture was drawn from — the four index values and
  * that cell's own acquisition date. Not a live satellite call: the map
@@ -21,8 +21,8 @@ import { useCallback, useState } from 'react'
 import { useApi } from '../hooks/useApi.js'
 import { getRasterScan, getRasterPixel } from '../api/client.js'
 import RiskMap from '../components/RiskMap.jsx'
-import RasterOverlay from '../components/RasterOverlay.jsx'
-import RasterLegend from '../components/RasterLegend.jsx'
+import RasterLayerSwitcher, { RasterMapLayers } from '../components/RasterLayerSwitcher.jsx'
+import { RasterLegendDock } from '../components/RasterLegend.jsx'
 import RasterPixelProbe from '../components/RasterPixelProbe.jsx'
 import RasterPixelPanel from '../components/RasterPixelPanel.jsx'
 import RasterScanBanner from '../components/RasterScanBanner.jsx'
@@ -45,6 +45,7 @@ export default function RasterPage() {
 
 function RasterView({ data, loading, error, refetch }) {
   const [picked, setPicked] = useState(null)
+  const [layerMode, setLayerMode] = useState('ndci')
   const runId = data?.run_id
 
   // Only ask once there is a raster to ask about; without a rendered run
@@ -64,12 +65,17 @@ function RasterView({ data, loading, error, refetch }) {
   return (
     <div className="overview-page">
       <div className="overview-map-area">
-        <RiskMap mode="true_color">
-          <RasterOverlay data={data} />
+        <RiskMap mode="raster">
+          <RasterMapLayers mode={layerMode} data={data} />
+          <RasterLayerSwitcher
+            mode={layerMode}
+            onModeChange={setLayerMode}
+            trueColorAvailable={Boolean(data?.true_color_url)}
+          />
           {hasRaster && <RasterPixelProbe onPick={setPicked} />}
         </RiskMap>
 
-        {data?.legend && <RasterLegend legend={data.legend} />}
+        <RasterLegendDock layerMode={layerMode} legend={data?.legend} hasRaster={hasRaster} />
 
         <RasterPixelPanel
           pixel={pixel}

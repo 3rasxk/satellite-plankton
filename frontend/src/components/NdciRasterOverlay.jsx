@@ -10,17 +10,10 @@ const NDCI_OVERLAY_BOUNDS = [
 ]
 
 /**
- * Composite Index Map overlay: NDCI + 2BDA + 3BDA, water-masked.
- *
- * This is still an illustrative texture (no backend raster endpoint
- * exists), but it now:
- *  1. Applies a water mask so only sea pixels are coloured — land is
- *     transparent.
- *  2. Labels the overlay as a multi-index composite (NDCI + 2BDA + 3BDA)
- *     rather than NDCI-only.
- *
- * The water mask is a simplified polygon approximation of the upper Gulf
- * of Thailand coastline, rasterised at overlay resolution.
+ * Deprecated illustrative texture retained for historical source context.
+ * No route imports this component. The raster page uses RasterOverlay with
+ * run-owned backend PNGs; this synthetic texture must never be presented as
+ * satellite data, NDCI, anomaly, or bloom risk.
  */
 export default function NdciRasterOverlay() {
   const dataUrl = useMemo(() => fieldToDataUrl(512, 7, { waterMask: true }), [])

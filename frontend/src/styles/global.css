@@ -1991,17 +1991,59 @@ table.events-table td.mono {
 }
 
 /* Raster overlay ---------------------------------------------------------
-   image-rendering: pixelated is load-bearing. Smooth scaling blends
-   neighbouring pixels, and a blend of the grey no-data hatch with a ramp
-   colour is a colour that means nothing -- it would paint water we could
-   not see in something that reads as a reading. Nearest-neighbour keeps
-   every pixel either a reading or a hatch. Measured: nearest resampling
-   at 1/2..1/16 introduces zero off-palette colours, bilinear introduces
-   7,307. */
+   Nearest-neighbour display preserves measured cell colours and the hard
+   transparent edge around no-data pixels. */
 .raster-overlay-image {
   image-rendering: pixelated;
   image-rendering: crisp-edges; /* older WebKit/Firefox spelling */
 }
+
+.raster-layer-switcher {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 600;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.raster-layer-switcher button {
+  min-height: 36px;
+  padding: 7px 10px;
+  border: 0;
+  border-bottom: 1px solid #ccc;
+  background: #fff;
+  color: #25313c;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.raster-layer-switcher button span,
+.raster-layer-switcher button small {
+  display: block;
+}
+
+.raster-layer-switcher button small {
+  max-width: 190px;
+  margin-top: 2px;
+  font-size: 10px;
+  line-height: 1.25;
+  white-space: normal;
+}
+
+.raster-layer-switcher button:last-child { border-bottom: 0; }
+.raster-layer-switcher button[aria-pressed='true'] {
+  background: #1769aa;
+  color: #fff;
+  font-weight: 600;
+}
+.raster-layer-switcher button:focus-visible {
+  outline: 3px solid #ffbf47;
+  outline-offset: -3px;
+}
+.raster-layer-switcher button:disabled { color: #8a8a8a; cursor: not-allowed; }
 
 .raster-legend {
   position: absolute;
@@ -2019,11 +2061,7 @@ table.events-table td.mono {
 .raster-legend-chip { flex: 1 1 auto; }
 .raster-legend-scale { display: flex; justify-content: space-between; font-size: 11px; margin-top: 2px; }
 .raster-legend-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
-.raster-legend-hatch { height: 14px; border-radius: 3px; display: inline-block; }
-.raster-legend-outside {
-  height: 14px; border-radius: 3px; display: inline-block;
-  border: 1px dashed rgba(0, 0, 0, 0.35);
-}
+.raster-legend-transparent { margin: 8px 0 0; }
 .raster-legend-note { margin: 8px 0 0; font-size: 11px; color: #6e6e73; }
 
 /* The raster scan banner (RasterScanBanner.jsx), which replaced this
@@ -2034,15 +2072,18 @@ table.events-table td.mono {
    over the map. */
 .raster-scan-banner {
   position: absolute;
-  top: 16px;
+  top: 174px;
   left: 16px;
   z-index: 500;
   width: min(400px, calc(100vw - 32px));
   padding: 12px 14px;
   gap: 6px;
-  /* Stops short of the bottom-left legend, which explains the colours
-     this banner describes -- the two are read together. */
-  max-height: min(60%, 560px);
+  /* Bottom edge stays above the bottom-left legend (~190px tall at
+     bottom: 16px, plus a 16px gap), which explains the colours this
+     banner describes -- the two are read together. 396px = 174px top +
+     190px legend + 16px offset + 16px gap. The 96px floor keeps the
+     banner usable on very short maps rather than collapsing it. */
+  max-height: max(96px, min(560px, calc(100% - 396px)));
   overflow-y: auto;
 }
 
@@ -2051,7 +2092,7 @@ table.events-table td.mono {
 @media (max-width: 860px) {
   .raster-scan-banner {
     width: min(300px, calc(100vw - 32px));
-    max-height: 45%;
+    max-height: max(96px, min(45%, calc(100% - 396px)));
   }
 }
 

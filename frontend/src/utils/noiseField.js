@@ -97,8 +97,9 @@ function isWater(px, py) {
 }
 
 /**
- * Generates the composite NDCI + 2BDA + 3BDA field with domain warping.
- * Water pixels get index values in [0, 1]; land pixels get NaN.
+ * Generates an unused illustrative texture with domain warping.
+ * Values are synthetic unitless texture values in [0, 1], not NDCI,
+ * measured satellite data, anomaly levels, or bloom-risk classes.
  */
 export function generateWarpedField(size, seed = 7, waterMask = true) {
   const field = new Float32Array(size * size)
@@ -123,13 +124,11 @@ export function generateWarpedField(size, seed = 7, waterMask = true) {
       const warpX = fbm(nx, ny, seed + 91, 3)
       const warpY = fbm(nx, ny, seed + 193, 3)
 
-      // 1. NDCI (Normalized Difference Chlorophyll Index)
+      // Three independent texture octaves; these are not spectral indices.
       const ndci = fbm(nx + warpX * warpAmount, ny + warpY * warpAmount, seed, 4)
 
-      // 2. 2BDA (Two-Band Difference Algorithm)
       const bda2 = fbm(nx * 1.2 + warpX * warpAmount * 0.9, ny * 1.2 + warpY * warpAmount * 1.1, seed + 37, 3)
 
-      // 3. 3BDA (Three-Band Difference Algorithm)
       const bda3 = fbm(nx * 1.5 + warpX * warpAmount * 1.1, ny * 1.5 + warpY * warpAmount * 0.8, seed + 71, 3)
 
       // Estuary nutrient gradient (higher index in the inner bay near Chao Phraya / Tha Chin / Bang Pakong)
@@ -146,17 +145,14 @@ export function generateWarpedField(size, seed = 7, waterMask = true) {
   return field
 }
 
-/**
- * Rich spectral color ramp matching the NDCI + 2BDA + 3BDA legend:
- * Dark Blue (-0.10) -> Azure Blue -> Turquoise/Cyan (0.10) -> Golden Yellow -> Orange -> Deep Red (>0.35)
- */
+/** Cosmetic ramp for the unused synthetic texture above. */
 const STOPS = [
-  { t: 0.00, rgb: [10, 35, 95] },    // Deep Blue (Clear/low chlorophyll, NDCI < -0.10)
-  { t: 0.22, rgb: [25, 115, 185] },  // Ocean Blue
-  { t: 0.42, rgb: [65, 195, 215] },  // Turquoise / Cyan (Baseline ~0.10)
-  { t: 0.62, rgb: [240, 205, 45] },  // Golden Yellow (Elevated)
-  { t: 0.80, rgb: [255, 130, 15] },  // Amber Orange (Watch)
-  { t: 1.00, rgb: [195, 15, 15] },   // Deep Red (Severe bloom, NDCI > 0.35)
+  { t: 0.00, rgb: [10, 35, 95] },
+  { t: 0.22, rgb: [25, 115, 185] },
+  { t: 0.42, rgb: [65, 195, 215] },
+  { t: 0.62, rgb: [240, 205, 45] },
+  { t: 0.80, rgb: [255, 130, 15] },
+  { t: 1.00, rgb: [195, 15, 15] },
 ]
 
 export function rampColor(t) {
