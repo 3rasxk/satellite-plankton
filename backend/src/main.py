@@ -16,6 +16,8 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 
 from . import _detection as bridge
+from . import shutdown
+from .config import SCHEDULER_ENABLED
 from .db import SessionLocal, get_db, init_db  # noqa: F401  (get_db re-exported for routers/tests)
 from .db_models import DetectionCache, MonitoredSite
 from .routers import (
@@ -42,28 +44,56 @@ async def lifespan(_app: FastAPI):
     router queries the tables they create and seed, so deferring them
     would only trade 30ms for a window where routes hit missing tables.
 
-    The scheduler is started, not awaited: create_scheduler() returns a
-    BackgroundScheduler whose .start() hands its jobs to its own thread
-    pool and returns immediately. Its refresh_grid job fires at boot
-    (scheduler.py's next_run_time=now) and makes real, multi-second GEE
-    calls -- concurrently with serving, never blocking it. refresh_grid
-    commits per site, so /risk-map fills in site by site rather than
-    all at once; sites it has not reached yet report the honest
-    `no_data_yet` status, never a placeholder reading.
+    When scheduling is enabled (the production default), create_scheduler()
+    returns a BackgroundScheduler whose .start() hands its jobs to its own
+    thread pool and returns immediately. Its refresh_grid job fires at boot
+    (scheduler.py's next_run_time=now) and makes real, multi-second GEE calls
+    concurrently with serving. refresh_grid commits per site, so /risk-map
+    fills in site by site; sites it has not reached yet report the honest
+    `no_data_yet` status. Tests set SCHEDULER_ENABLED=false before importing
+    this module. Shutdown first raises the cooperative stop flag
+    (src/shutdown.py), then waits for any active job to reach its next
+    checkpoint and return.
     """
     global _scheduler
     logger.info("startup: init_db")
     init_db()
     logger.info("startup: ensure_monitored_sites")
     ensure_monitored_sites()
-    logger.info("startup: starting scheduler")
-    _scheduler = create_scheduler()
-    _scheduler.start()
+    scheduler = None
+    # A previous lifespan in this process (tests, --reload) may have left it set.
+    shutdown.clear_stop()
+    try:
+        if SCHEDULER_ENABLED:
+            logger.info("startup: starting scheduler")
+            scheduler = create_scheduler()
+            scheduler.start()
+            _scheduler = scheduler
+        else:
+            logger.info("startup: scheduler disabled")
 
-    yield
-
-    if _scheduler is not None:
-        _scheduler.shutdown(wait=False)
+        yield
+    finally:
+        # APScheduler cannot interrupt a job that is already running.
+        # Waiting here is therefore essential: shutdown(wait=False)
+        # leaves its ThreadPoolExecutor workers alive, and Python waits
+        # for those non-daemon threads later during interpreter exit.
+        # The wait is NOT bounded by one network call on its own: an
+        # active job loops over many GEE round trips (7 grid sites, or up
+        # to hundreds of bootstrap archive windows). So the stop flag is
+        # raised first, and every job checks it between sites/windows;
+        # the wait then lasts until the in-flight step returns -- one
+        # site's few GEE calls or one bootstrap window, each request
+        # bounded by data-pipeline auth.py's deadline -- not until the
+        # whole job would have finished.
+        shutdown.request_stop()
+        if scheduler is not None and scheduler.running:
+            logger.info("shutdown: waiting for scheduler jobs")
+            scheduler.shutdown(wait=True)
+        # Every job has returned; a flag left set would stop direct
+        # (non-scheduled) calls later in this process, e.g. in tests.
+        shutdown.clear_stop()
+        _scheduler = None
 
 
 app = FastAPI(

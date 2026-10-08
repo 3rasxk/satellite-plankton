@@ -9,6 +9,7 @@ from sqlalchemy import select
 
 from .. import _detection as bridge
 from .. import _study_area
+from .. import shutdown
 from ..config import (
     RASTER_SCAN_COOLDOWN_HOURS,
     RASTER_SCAN_POLL_LOOKBACK_DAYS,
@@ -46,6 +47,9 @@ def should_trigger_scan(
 
 def poll_and_maybe_scan() -> None:
     """Scheduled poll; failures are logged and never crash the scheduler."""
+    if shutdown.stop_requested():
+        logger.info("raster_scan poll: shutdown requested; not polling")
+        return
     with SessionLocal() as db:
         try:
             latest_attempt = db.execute(

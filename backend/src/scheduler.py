@@ -63,6 +63,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from . import _detection as bridge
+from . import shutdown
 from .config import RASTER_SCAN_POLL_INTERVAL_HOURS, SCHEDULER_INTERVAL_MINUTES, today_str
 from .db import SessionLocal
 from .db_models import DetectionCache, MonitoredSite
@@ -188,6 +189,7 @@ def refresh_one_site(db: Session, site: MonitoredSite, target_date: str) -> None
             status=detection["status"],
             detected=None,
             spatial_anomaly_z=None,
+            signal_anomaly_level=prediction.get("signal_anomaly_level"),
             index_used=detection["index_used"],
             index_values=detection["index_values"],
             reason=detection["reason"],
@@ -251,6 +253,13 @@ def refresh_grid() -> None:
     try:
         sites = db.execute(select(MonitoredSite)).scalars().all()
         for site in sites:
+            # Cooperative stop (src/shutdown.py): lifespan teardown waits
+            # for this job, so check between sites rather than finishing
+            # every remaining site's GEE round trips first. Sites not
+            # reached keep their previous cache row untouched.
+            if shutdown.stop_requested():
+                logger.info("scheduler: refresh_grid stopping early -- shutdown requested")
+                return
             refresh_one_site(db, site, target_date)
     finally:
         db.close()
@@ -268,6 +277,8 @@ def expire_raster_scans() -> None:
 
 
 def create_scheduler() -> BackgroundScheduler:
+    # A previous lifespan (or a test) may have left the stop flag set.
+    shutdown.clear_stop()
     scheduler = BackgroundScheduler()
     scheduler.add_job(
         refresh_grid,

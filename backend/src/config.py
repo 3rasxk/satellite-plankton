@@ -60,6 +60,9 @@ SUPABASE_KEY: str = os.environ.get("SUPABASE_KEY", "").strip()
 # fresher pixels -- default is deliberately conservative. Overridable for
 # local testing (a short interval was used to prove the job fires -- see
 # backend-api's build report).
+SCHEDULER_ENABLED: bool = os.environ.get("SCHEDULER_ENABLED", "true").strip().lower() not in {
+    "0", "false", "no", "off",
+}
 SCHEDULER_INTERVAL_MINUTES: int = int(os.environ.get("SCHEDULER_INTERVAL_MINUTES", "360"))
 
 def as_aware_utc(dt):
@@ -118,4 +121,15 @@ RASTER_SCAN_COOLDOWN_HOURS: int = int(os.environ.get(
 ))
 RASTER_SCAN_POLL_LOOKBACK_DAYS: int = int(os.environ.get(
     "RASTER_SCAN_POLL_LOOKBACK_DAYS", os.environ.get("REGIONAL_SCAN_POLL_LOOKBACK_DAYS", "10")
+))
+# Wall-clock budget for a first-install bootstrap search, which walks
+# 15-day windows back to the Sentinel-2 SR archive start (~240 sequential
+# composite+transfer round trips if no window is usable). Checked between
+# windows; when exceeded the run ends status='error' with the searched span
+# recorded, never as a complete search. Must stay below
+# src/raster_scan/scan.py STALE_RUN_HOURS (1 h), or a second caller would
+# presume the live bootstrap dead and start a concurrent one; scan.py
+# refuses a value that is not.
+RASTER_BOOTSTRAP_BUDGET_MINUTES: int = int(os.environ.get(
+    "RASTER_BOOTSTRAP_BUDGET_MINUTES", "45"
 ))

@@ -29,6 +29,7 @@ as an empty raster that reads like a real one.
 from __future__ import annotations
 
 import logging
+import time
 from datetime import date, datetime, timedelta, timezone
 
 import numpy as np
@@ -37,7 +38,13 @@ from sqlalchemy.orm import Session
 
 from .. import _detection as bridge
 from .. import _study_area
-from ..config import RASTER_RETENTION_DAYS, RASTER_SCAN_SCALE_M, as_aware_utc
+from .. import shutdown
+from ..config import (
+    RASTER_BOOTSTRAP_BUDGET_MINUTES,
+    RASTER_RETENTION_DAYS,
+    RASTER_SCAN_SCALE_M,
+    as_aware_utc,
+)
 from ..db_models import RasterScanRun
 from . import render, storage
 
@@ -45,13 +52,21 @@ logger = logging.getLogger("backend.raster_scan.scan")
 
 # How long a run left in status='running' is believed before a new scan
 # treats it as dead and proceeds. Not an env var, because it is not a
-# policy choice: it is derived from how long the work takes. One raster
-# is one composite plus one transfer -- measured live at ~10 s for the
-# 200 m read (9.2 MB) and correspondingly longer for the 36.8 MB 100 m
-# one -- so an hour is two orders of magnitude past the longest
-# legitimate run, and anything still 'running' after it had its process
-# killed.
+# policy choice: it is derived from how long the work takes. A normal-mode
+# raster is one composite plus one transfer -- measured live at ~10 s for
+# the 200 m read (9.2 MB) and correspondingly longer for the 36.8 MB 100 m
+# one. A first-install bootstrap is different: it can page up to ~240
+# windows back to the archive start, which unbounded could run for hours.
+# It is therefore capped by RASTER_BOOTSTRAP_BUDGET_MINUTES (config.py,
+# default 45), which must stay below this threshold, so no legitimate run
+# of either kind is still 'running' after an hour -- one that is had its
+# process killed.
 STALE_RUN_HOURS = 1
+
+# Injected clock for the bootstrap budget, so tests can advance time
+# without sleeping. Monotonic: a wall-clock adjustment must not end or
+# extend a search.
+_monotonic = time.monotonic
 
 
 class ConcurrentRasterScanError(RuntimeError):
@@ -63,6 +78,20 @@ class ConcurrentRasterScanError(RuntimeError):
     is written or any byte transferred, so a refused call leaves both the
     database and the blob directory untouched.
     """
+
+
+class BootstrapSearchStopped(RuntimeError):
+    """A bootstrap search ended before reaching the archive start: either
+    the wall-clock budget ran out or a shutdown was requested.
+
+    Recorded as status='error' (never 'no_data', which would claim the
+    archive held no usable imagery, and never 'ok'). Its source_metadata
+    states exactly which windows were searched.
+    """
+
+    def __init__(self, reason: str, source_metadata: dict):
+        super().__init__(reason)
+        self.source_metadata = source_metadata
 
 
 class NoUsableRasterError(RuntimeError):
@@ -129,8 +158,45 @@ def _build_and_download(
 ) -> tuple[dict, dict, dict]:
     """Select newest usable bounded window and return its composite/cells."""
     if bootstrap_mode:
+        budget_minutes = RASTER_BOOTSTRAP_BUDGET_MINUTES
+        if not 0 < budget_minutes < STALE_RUN_HOURS * 60:
+            raise ValueError(
+                f"RASTER_BOOTSTRAP_BUDGET_MINUTES={budget_minutes} must be > 0 and below "
+                f"the {STALE_RUN_HOURS * 60}-minute stale-run threshold (STALE_RUN_HOURS), "
+                "or a second caller would presume this bootstrap dead and start another."
+            )
+        started = _monotonic()
         searched: list[dict] = []
         for window in bridge.iter_bootstrap_windows(target_date):
+            # Checkpoints between windows (never mid-request): a shutdown
+            # request (src/shutdown.py) or an exhausted budget ends the
+            # search honestly as incomplete -- the archive before the last
+            # searched window was not looked at.
+            stop = None
+            if shutdown.stop_requested():
+                stop = ("shutdown", "interrupted by shutdown")
+            elif _monotonic() - started >= budget_minutes * 60:
+                stop = (
+                    "budget",
+                    f"stopped at the {budget_minutes}-minute wall-clock budget "
+                    "(RASTER_BOOTSTRAP_BUDGET_MINUTES)",
+                )
+            if stop is not None:
+                metadata = _source_metadata(
+                    bootstrap_mode=True, target_date=target_date, searched_windows=searched
+                )
+                metadata["search_stopped"] = stop[0]
+                span = metadata["search_range"]
+                searched_text = (
+                    f"{span['window_start']}..{span['window_end']}" if span else "nothing"
+                )
+                raise BootstrapSearchStopped(
+                    f"bootstrap search {stop[1]} after {len(searched)} window(s) "
+                    f"(searched {searched_text}) without a usable raster; the archive "
+                    f"back to {bridge.SENTINEL2_SR_ARCHIVE_START_DATE} was not "
+                    "exhausted, so this is not a finding of no usable imagery.",
+                    metadata,
+                )
             try:
                 composite = bridge.build_index_composite(
                     _study_area.STUDY_AREA_POLYGON_LATLNG,
