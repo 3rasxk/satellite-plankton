@@ -56,6 +56,7 @@ of conflating the two.
 from __future__ import annotations
 
 import logging
+import threading
 from datetime import datetime, timezone
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -278,8 +279,25 @@ def refresh_one_site(
             db.commit()
 
 
+# refresh_grid is its own scheduled job (max_instances=1) and is also
+# called by the raster poll right after a scan that used a new scene
+# (raster_scan/trigger.py refresh_sites_after_scan), so sites and raster
+# describe the same acquisition. APScheduler's max_instances guards only
+# the first caller; this lock keeps the two from writing the same
+# DetectionCache rows at once. A caller that arrives mid-refresh waits,
+# then refreshes again -- the running refresh may predate the new scene.
+_REFRESH_GRID_LOCK = threading.Lock()
+
+
 def refresh_grid() -> None:
-    """The scheduled job: refresh every monitored site's cache once."""
+    """The scheduled job: refresh every monitored site's cache once.
+    Also run after a scan that used a new scene; serialised by
+    _REFRESH_GRID_LOCK."""
+    with _REFRESH_GRID_LOCK:
+        _refresh_grid_once()
+
+
+def _refresh_grid_once() -> None:
     target_date = today_str()
     logger.info("scheduler: refresh_grid starting for %s", target_date)
     # One baseline resolution for the whole run, so every site in it is
@@ -337,7 +355,8 @@ def create_scheduler() -> BackgroundScheduler:
         # process startup (spec §8): a job that can run for hours firing
         # on every --reload dev restart would be unworkable. max_instances=1
         # also doubles as overlap protection for the scan phase inside
-        # poll_and_maybe_scan.
+        # poll_and_maybe_scan. Hourly by default (latest-scene policy): a
+        # poll that finds no new passing date costs one assessment query.
     )
     scheduler.add_job(
         expire_raster_scans,

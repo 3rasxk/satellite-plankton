@@ -126,16 +126,25 @@ RASTER_SCAN_SCALE_M: int = int(os.environ.get("RASTER_SCAN_SCALE_M", "200"))
 # The run row, its metadata and its summary are never deleted by
 # retention -- only the blob is.
 RASTER_RETENTION_DAYS: int = int(os.environ.get("RASTER_RETENTION_DAYS", "30"))
-# Poll metadata cheaply and build a new raster only when a new candidate
-# Sentinel-2 acquisition has appeared and the cooldown has elapsed. The
-# legacy REGIONAL_* names are accepted as fallbacks for existing local
-# .env files during this transition; new configuration uses RASTER_*.
+# Latest-scene policy (src/raster_scan/trigger.py, spec 2026-10-09 §7):
+# every poll assesses new Sentinel-2 acquisition dates for cloud over the
+# polygon's water and builds a new raster as soon as the newest PASSING
+# date is newer than the newest date already used. The legacy REGIONAL_*
+# names are accepted as fallbacks for existing local .env files during
+# this transition; new configuration uses RASTER_*.
 RASTER_SCAN_POLL_INTERVAL_HOURS: int = int(os.environ.get(
-    "RASTER_SCAN_POLL_INTERVAL_HOURS", os.environ.get("REGIONAL_SCAN_POLL_INTERVAL_HOURS", "3")
+    "RASTER_SCAN_POLL_INTERVAL_HOURS", os.environ.get("REGIONAL_SCAN_POLL_INTERVAL_HOURS", "1")
 ))
+# Kept readable so existing .env files still parse, but it no longer gates
+# anything: a qualifying new scene starts a scan at once, and retries are
+# spaced by RASTER_SCAN_MIN_INTERVAL_HOURS below instead.
 RASTER_SCAN_COOLDOWN_HOURS: int = int(os.environ.get(
     "RASTER_SCAN_COOLDOWN_HOURS", os.environ.get("REGIONAL_SCAN_COOLDOWN_HOURS", "20")
 ))
+# Minimum time between two raster scan attempts, counted from the latest
+# attempt's started_at whatever its status. Prevents thrash (an errored
+# scan retried on every poll); it never delays a new scene by more.
+RASTER_SCAN_MIN_INTERVAL_HOURS: int = int(os.environ.get("RASTER_SCAN_MIN_INTERVAL_HOURS", "1"))
 RASTER_SCAN_POLL_LOOKBACK_DAYS: int = int(os.environ.get(
     "RASTER_SCAN_POLL_LOOKBACK_DAYS", os.environ.get("REGIONAL_SCAN_POLL_LOOKBACK_DAYS", "10")
 ))

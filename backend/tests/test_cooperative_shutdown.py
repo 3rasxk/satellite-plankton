@@ -90,6 +90,7 @@ def test_poll_does_not_start_a_scan_once_shutdown_is_requested(monkeypatch):
         return None
 
     monkeypatch.setattr(trigger_module.bridge, "get_newest_scene_timestamp", forbidden)
+    monkeypatch.setattr(trigger_module.bridge, "assess_new_scenes", forbidden)
     monkeypatch.setattr(trigger_module, "run_raster_scan", forbidden)
     try:
         trigger_module.poll_and_maybe_scan()

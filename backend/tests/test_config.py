@@ -101,11 +101,38 @@ def test_as_aware_utc_none_returns_none():
     assert as_aware_utc(None) is None
 
 
+def test_scheduler_is_enabled_by_default_and_can_be_disabled_for_tests():
+    probe = (
+        "import sys; sys.path.insert(0, {backend_dir!r})\n"
+        "from src.config import SCHEDULER_ENABLED\n"
+        "print(SCHEDULER_ENABLED)\n"
+    ).format(backend_dir=str(_BACKEND_DIR))
+
+    def run(value):
+        env = dict(os.environ)
+        if value is None:
+            env.pop("SCHEDULER_ENABLED", None)
+        else:
+            env["SCHEDULER_ENABLED"] = value
+        return subprocess.run(
+            [sys.executable, "-c", probe],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=True,
+            cwd=str(_BACKEND_DIR),
+        ).stdout.strip()
+
+    assert run(None) == "True"
+    assert run("false") == "False"
+    assert run("0") == "False"
+
+
 def test_raster_scan_config_defaults():
     from src import config
 
     assert config.RASTER_SCAN_SCALE_M == 200
-    assert config.RASTER_SCAN_POLL_INTERVAL_HOURS == 3
+    assert config.RASTER_SCAN_POLL_INTERVAL_HOURS == 1  # latest-scene policy; was 3
     assert config.RASTER_SCAN_COOLDOWN_HOURS == 20
     assert config.RASTER_SCAN_POLL_LOOKBACK_DAYS == 10
 

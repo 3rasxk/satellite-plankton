@@ -45,7 +45,7 @@ from ..config import (
     RASTER_SCAN_SCALE_M,
     as_aware_utc,
 )
-from ..db_models import RasterScanRun
+from ..db_models import RasterScanRun, SceneAssessmentRow
 from . import render, storage
 
 logger = logging.getLogger("backend.raster_scan.scan")
@@ -470,7 +470,9 @@ def run_raster_scan(
             caller that knows the other run is dead.
         trigger_scene_timestamp: full acquisition timestamp returned by
             the metadata poll that caused this run. Stored even when the
-            candidate yields no retained cells.
+            candidate yields no retained cells. If its "YYYY-MM-DD" prefix
+            names a scene_assessments row, a run ending 'ok' or 'no_data'
+            sets that row's used_in_run_id (SCENE_CONSUMING_STATUSES).
 
     Returns:
         The persisted RasterScanRun row (status='ok', 'no_data' or
@@ -653,6 +655,35 @@ def _render_overlay(db: Session, run: RasterScanRun) -> None:
         db.commit()
 
 
+# Finished statuses that consume the acquisition date that triggered the
+# run (latest-scene policy, src/raster_scan/trigger.py). 'ok' delivered a
+# raster; 'no_data' is a real answer about the world, and re-running it
+# every poll would only repeat it. 'error' (including a budget- or
+# shutdown-stopped bootstrap and a stood-down duplicate) consumes nothing,
+# so its date is retried after the minimum interval -- the same rule the
+# earlier cooldown flow applied to error and partial_error runs. A run
+# that never finishes (a crashed 'running' row) never reaches here, so
+# its date is retried once scan's guard presumes it dead.
+SCENE_CONSUMING_STATUSES = ("ok", "no_data")
+
+
+def _mark_trigger_scene_used(db: Session, run: RasterScanRun) -> None:
+    """Record `run` as the user of its trigger date's scene assessment.
+
+    The date is the "YYYY-MM-DD" prefix of `trigger_scene_timestamp`. Only
+    an existing scene_assessments row is updated -- a manual scan (no
+    trigger) or a date nobody assessed creates nothing. Runs inside
+    `_finish`, before its commit, so the run's final status and the date's
+    consumption are written together.
+    """
+    stamp = run.trigger_scene_timestamp
+    if not stamp:
+        return
+    row = db.get(SceneAssessmentRow, stamp[:10])
+    if row is not None:
+        row.used_in_run_id = run.id
+
+
 def _finish(db: Session, run: RasterScanRun, status: str, reason: str | None) -> RasterScanRun:
     """Close out a run row: status, completion time, reason. One place,
     so every exit path stamps `completed_at` and none can leave a row
@@ -660,6 +691,8 @@ def _finish(db: Session, run: RasterScanRun, status: str, reason: str | None) ->
     run.status = status
     run.reason = reason
     run.completed_at = datetime.now(timezone.utc)
+    if status in SCENE_CONSUMING_STATUSES:
+        _mark_trigger_scene_used(db, run)
     db.commit()
     if status != "ok":
         logger.warning("raster_scan: run %s ended status=%s reason=%s", run.id, status, reason)

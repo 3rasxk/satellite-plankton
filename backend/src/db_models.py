@@ -18,6 +18,11 @@ scans.
                     (`true_color_png`/`ndci_heatmap_png`) refreshed on the
                     same cycle -- see scheduler.py for why this bounded
                     7-site grid is cached rather than rendered on demand.
+- SceneAssessmentRow one row per Sentinel-2 acquisition date over the study
+                    polygon: the latest-scene policy's cloud decision
+                    (src/raster_scan/trigger.py). Named *Row* so it is never
+                    confused with the data-pipeline's frozen
+                    `SceneAssessment` dataclass it stores.
 """
 
 from __future__ import annotations
@@ -226,6 +231,37 @@ class RasterScanRun(Base):
     overlay: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class SceneAssessmentRow(Base):
+    """The cloud decision for one UTC acquisition date over the study
+    polygon (data-pipeline/src/scene_assess.py via the bridge), and whether
+    a raster scan has used it (spec 2026-10-09 §7).
+
+    One row per date, updated in place: a date assessed before all of its
+    granules were ingested is re-assessed on every poll until it is
+    settled (`assessed_at` at least 36 h after the date began, UTC --
+    trigger.py `is_settled`), so `decision` can change, e.g. from
+    rejected_cloud to passed as tiles arrive.
+
+    `used_in_run_id` is the raster_scan_runs.id of the run this date
+    triggered, set by scan.py only when that run finished 'ok' or
+    'no_data'; an errored run leaves it null so the date is retried. A
+    plain integer, not a foreign key, so deleting run history never
+    depends on this table. A rejected date is never used.
+    """
+
+    __tablename__ = "scene_assessments"
+
+    acquisition_date: Mapped[str] = mapped_column(String, primary_key=True)  # "YYYY-MM-DD" UTC
+    # Cloud share of the observed water pixels; null only when no water
+    # pixel was observed (decision rejected_no_water).
+    cloud_fraction: Mapped[float | None] = mapped_column(Float, nullable=True)
+    water_pixels: Mapped[int] = mapped_column(Integer)
+    decision: Mapped[str] = mapped_column(String)  # passed|rejected_cloud|rejected_no_water
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)  # null for passed
+    assessed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    used_in_run_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class RegionalScanPoint(Base):
