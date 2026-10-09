@@ -3,8 +3,9 @@
 Rewritten for the latest-scene policy (spec 2026-10-09 §7). The poll no
 longer asks `get_newest_scene_timestamp` and no longer applies the 20 h
 cooldown to a new scene; a date is consumed when scan.py marks its
-`scene_assessments` row used (runs ending 'ok' or 'no_data'), and retries
-are spaced by RASTER_SCAN_MIN_INTERVAL_HOURS. The consumption cases below
+`scene_assessments` row used (runs ending 'no_data', or 'ok' with kept
+cells reaching the date), and retries are spaced by
+RASTER_SCAN_MIN_INTERVAL_HOURS. The consumption cases below
 are the same ones this file pinned for the cooldown flow (commit 6e8dda5);
 prior runs are closed with the real `scan._finish`, so the marking is real.
 Full policy coverage: tests/test_latest_scene_trigger.py.
@@ -119,12 +120,21 @@ def test_poll_failure_does_not_start_a_scan(client, monkeypatch):
 def _poll_with_prior_run(monkeypatch, status, age=timedelta(days=2), source_metadata=None):
     """A prior attempt `age` ago for today's passing date, closed with the
     real scan._finish (so 'ok'/'no_data' mark the date used), then a poll
-    that assesses the same date as passing again."""
+    that assesses the same date as passing again.
+
+    An older successful raster exists in every case, so this is never a
+    first install and the bootstrap fallback never applies; the prior run
+    kept cells up to its trigger date, as a real scan of it would."""
     _clear()
     date = _today()
     stamp = f"{date}T00:00:00+00:00"
     started = datetime.now(timezone.utc) - age
     with SessionLocal() as db:
+        installed_at = datetime.now(timezone.utc) - timedelta(days=30)
+        db.add(RasterScanRun(
+            started_at=installed_at, completed_at=installed_at, status="ok",
+            date_used=date, scale_m=200, retention_days=30,
+        ))
         db.add(SceneAssessmentRow(
             acquisition_date=date, cloud_fraction=0.1, water_pixels=40_000,
             decision="passed", reason=None, assessed_at=started,
@@ -132,7 +142,7 @@ def _poll_with_prior_run(monkeypatch, status, age=timedelta(days=2), source_meta
         run = RasterScanRun(
             started_at=started, status="running", date_used=date, scale_m=200,
             retention_days=30, trigger_scene_timestamp=stamp,
-            source_metadata=source_metadata,
+            source_metadata=source_metadata, newest_scene_date=date,
         )
         db.add(run)
         db.commit()

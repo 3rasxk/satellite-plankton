@@ -280,9 +280,11 @@ def refresh_one_site(
 
 
 # refresh_grid is its own scheduled job (max_instances=1) and is also
-# called by the raster poll right after a scan that used a new scene
-# (raster_scan/trigger.py refresh_sites_after_scan), so sites and raster
-# describe the same acquisition. APScheduler's max_instances guards only
+# called by the raster poll right after a successful scan
+# (raster_scan/trigger.py refresh_sites_after_scan), so the sites are
+# refreshed after the same new acquisition became available. Each site
+# still resolves its own newest usable scene, which need not be the one
+# the raster used. APScheduler's max_instances guards only
 # the first caller; this lock keeps the two from writing the same
 # DetectionCache rows at once. A caller that arrives mid-refresh waits,
 # then refreshes again -- the running refresh may predate the new scene.
@@ -291,8 +293,8 @@ _REFRESH_GRID_LOCK = threading.Lock()
 
 def refresh_grid() -> None:
     """The scheduled job: refresh every monitored site's cache once.
-    Also run after a scan that used a new scene; serialised by
-    _REFRESH_GRID_LOCK."""
+    Also run after a successful raster scan started by the poll;
+    serialised by _REFRESH_GRID_LOCK."""
     with _REFRESH_GRID_LOCK:
         _refresh_grid_once()
 

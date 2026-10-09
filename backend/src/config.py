@@ -135,15 +135,17 @@ RASTER_RETENTION_DAYS: int = int(os.environ.get("RASTER_RETENTION_DAYS", "30"))
 RASTER_SCAN_POLL_INTERVAL_HOURS: int = int(os.environ.get(
     "RASTER_SCAN_POLL_INTERVAL_HOURS", os.environ.get("REGIONAL_SCAN_POLL_INTERVAL_HOURS", "1")
 ))
-# Kept readable so existing .env files still parse, but it no longer gates
-# anything: a qualifying new scene starts a scan at once, and retries are
-# spaced by RASTER_SCAN_MIN_INTERVAL_HOURS below instead.
+# Gates only the first-install bootstrap while no date has passed: with no
+# 'ok' raster yet and no passing date, the poll starts the bootstrap at
+# most once per this many hours. A qualifying new scene never waits for it;
+# its scans and retries are spaced by RASTER_SCAN_MIN_INTERVAL_HOURS.
 RASTER_SCAN_COOLDOWN_HOURS: int = int(os.environ.get(
     "RASTER_SCAN_COOLDOWN_HOURS", os.environ.get("REGIONAL_SCAN_COOLDOWN_HOURS", "20")
 ))
 # Minimum time between two raster scan attempts, counted from the latest
-# attempt's started_at whatever its status. Prevents thrash (an errored
-# scan retried on every poll); it never delays a new scene by more.
+# attempt's started_at whatever its status (a shutdown-stopped bootstrap
+# excepted). Prevents thrash (an errored scan retried on every poll); a new
+# passing scene can wait up to this long after the previous attempt.
 RASTER_SCAN_MIN_INTERVAL_HOURS: int = int(os.environ.get("RASTER_SCAN_MIN_INTERVAL_HOURS", "1"))
 RASTER_SCAN_POLL_LOOKBACK_DAYS: int = int(os.environ.get(
     "RASTER_SCAN_POLL_LOOKBACK_DAYS", os.environ.get("REGIONAL_SCAN_POLL_LOOKBACK_DAYS", "10")

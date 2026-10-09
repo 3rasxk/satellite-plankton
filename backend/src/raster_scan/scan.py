@@ -33,7 +33,7 @@ import time
 from datetime import date, datetime, timedelta, timezone
 
 import numpy as np
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .. import _detection as bridge
@@ -62,6 +62,15 @@ logger = logging.getLogger("backend.raster_scan.scan")
 # of either kind is still 'running' after an hour -- one that is had its
 # process killed.
 STALE_RUN_HOURS = 1
+
+# How many 'ok' scans triggered by one passing date (same
+# trigger_scene_timestamp) may keep no cell from that date before the date
+# is marked used anyway (_mark_trigger_scene_used). Without a bound, a date
+# whose pixels never reach the composite would be rescanned once per
+# RASTER_SCAN_MIN_INTERVAL_HOURS for as long as it stays in the poll's
+# lookback (~240 scans at the defaults). Not an env var: it is a guard
+# against a loop, not a policy setting.
+RASTER_SCENE_MAX_UNREACHED_SCANS = 2
 
 # Injected clock for the bootstrap budget, so tests can advance time
 # without sleeping. Monotonic: a wall-clock adjustment must not end or
@@ -444,6 +453,17 @@ def _scene_date_shares(dates_ms) -> list[dict]:
     return shares
 
 
+def has_successful_run(db: Session) -> bool:
+    """Whether any raster scan ever finished 'ok' -- the installation
+    marker. run_raster_scan runs a bootstrap when this is False, and the
+    poll (trigger.py) uses the same function to decide whether its
+    first-install fallback applies, so the two can never disagree. Blob
+    retention does not affect it (run rows are never deleted)."""
+    return db.scalar(
+        select(RasterScanRun.id).where(RasterScanRun.status == "ok").limit(1)
+    ) is not None
+
+
 def run_raster_scan(
     db: Session,
     target_date: str,
@@ -468,11 +488,13 @@ def run_raster_scan(
             later.
         allow_concurrent: skip the one-scan-at-a-time guard. Only for a
             caller that knows the other run is dead.
-        trigger_scene_timestamp: full acquisition timestamp returned by
-            the metadata poll that caused this run. Stored even when the
-            candidate yields no retained cells. If its "YYYY-MM-DD" prefix
-            names a scene_assessments row, a run ending 'ok' or 'no_data'
-            sets that row's used_in_run_id (SCENE_CONSUMING_STATUSES).
+        trigger_scene_timestamp: the acquisition that caused this run --
+            from the latest-scene poll a date-only marker
+            "<YYYY-MM-DD>T00:00:00+00:00" for the passing date (the time
+            part is synthetic); None for a manual scan or the first-install
+            bootstrap fallback. Stored even when the run retains no cells.
+            If its date prefix names a scene_assessments row, the run marks
+            that row used (see _mark_trigger_scene_used).
 
     Returns:
         The persisted RasterScanRun row (status='ok', 'no_data' or
@@ -495,9 +517,7 @@ def run_raster_scan(
 
     # A retained success row is the installation marker. Blob retention
     # deliberately does not affect it; failed and incomplete attempts do.
-    bootstrap_mode = db.scalar(
-        select(RasterScanRun.id).where(RasterScanRun.status == "ok").limit(1)
-    ) is None
+    bootstrap_mode = not has_successful_run(db)
 
     # A bootstrap stopped by its budget or by shutdown is continued, not
     # restarted from target_date (see _resume_point for the exact rule).
@@ -657,13 +677,14 @@ def _render_overlay(db: Session, run: RasterScanRun) -> None:
 
 # Finished statuses that consume the acquisition date that triggered the
 # run (latest-scene policy, src/raster_scan/trigger.py). 'ok' delivered a
-# raster; 'no_data' is a real answer about the world, and re-running it
-# every poll would only repeat it. 'error' (including a budget- or
-# shutdown-stopped bootstrap and a stood-down duplicate) consumes nothing,
-# so its date is retried after the minimum interval -- the same rule the
-# earlier cooldown flow applied to error and partial_error runs. A run
-# that never finishes (a crashed 'running' row) never reaches here, so
-# its date is retried once scan's guard presumes it dead.
+# raster, and consumes the date only if its kept cells reach it (see
+# _mark_trigger_scene_used); 'no_data' is a real answer about the world,
+# and re-running it every poll would only repeat it. 'error' (including a
+# budget- or shutdown-stopped bootstrap and a stood-down duplicate) consumes
+# nothing, so its date is retried after the minimum interval -- the same
+# rule the earlier cooldown flow applied to error and partial_error runs.
+# A run that never finishes (a crashed 'running' row) never reaches here,
+# so its date is retried once scan's guard presumes it dead.
 SCENE_CONSUMING_STATUSES = ("ok", "no_data")
 
 
@@ -672,14 +693,47 @@ def _mark_trigger_scene_used(db: Session, run: RasterScanRun) -> None:
 
     The date is the "YYYY-MM-DD" prefix of `trigger_scene_timestamp`. Only
     an existing scene_assessments row is updated -- a manual scan (no
-    trigger) or a date nobody assessed creates nothing. Runs inside
-    `_finish`, before its commit, so the run's final status and the date's
+    trigger) or a date nobody assessed creates nothing. An 'ok' run whose
+    kept cells all predate that date (`newest_scene_date` before it, e.g.
+    the date fell outside the scan window or none of its pixels survived
+    the composite) does not describe that acquisition and leaves it unused,
+    so it is retried -- but only until RASTER_SCENE_MAX_UNREACHED_SCANS
+    'ok' runs with this same trigger stamp (this one included) have missed
+    it; then it is marked used anyway with a warning, so the retry stops.
+    Its stored `decision` stays 'passed'; nothing is rewritten. A
+    'no_data' run consumes the date regardless. Runs inside `_finish`,
+    before its commit, so the run's final status and the date's
     consumption are written together.
     """
     stamp = run.trigger_scene_timestamp
     if not stamp:
         return
-    row = db.get(SceneAssessmentRow, stamp[:10])
+    acquisition_date = stamp[:10]
+    if run.status == "ok" and (run.newest_scene_date or "") < acquisition_date:
+        # This run's own status is not flushed yet (autoflush is off), so
+        # it is counted by hand rather than by the query.
+        earlier_ok = db.scalar(
+            select(func.count(RasterScanRun.id)).where(
+                RasterScanRun.status == "ok",
+                RasterScanRun.trigger_scene_timestamp == stamp,
+                RasterScanRun.id != run.id,
+            )
+        )
+        unreached = earlier_ok + 1
+        if unreached < RASTER_SCENE_MAX_UNREACHED_SCANS:
+            logger.warning(
+                "raster_scan: run %s kept no cell from trigger date %s (newest %s); "
+                "the date stays unused and will be retried",
+                run.id, acquisition_date, run.newest_scene_date,
+            )
+            return
+        logger.warning(
+            "raster_scan: passing date %s never reached the composite after %d ok "
+            "scans (latest run %s, newest kept cell %s); marking it used so the "
+            "retry stops -- its assessment stays 'passed'",
+            acquisition_date, unreached, run.id, run.newest_scene_date,
+        )
+    row = db.get(SceneAssessmentRow, acquisition_date)
     if row is not None:
         row.used_in_run_id = run.id
 

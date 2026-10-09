@@ -23,6 +23,8 @@ scans.
                     (src/raster_scan/trigger.py). Named *Row* so it is never
                     confused with the data-pipeline's frozen
                     `SceneAssessment` dataclass it stores.
+- ScenePollStatus   single row: when the latest-scene poll last ran, last
+                    completed its assessment, and last failed (and how).
 """
 
 from __future__ import annotations
@@ -187,10 +189,15 @@ class RasterScanRun(Base):
     scene_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     oldest_scene_date: Mapped[str | None] = mapped_column(String, nullable=True)
     newest_scene_date: Mapped[str | None] = mapped_column(String, nullable=True)
-    # Full timestamp returned by the cheap metadata poll that caused this
-    # run. Separate from newest_scene_date, which is only a YYYY-MM-DD over
-    # retained cells. A wholly cloudy candidate can produce no cells but
-    # must still be remembered so it is not retried every polling cycle.
+    # The acquisition that caused this run, or null for a manual scan or the
+    # first-install bootstrap fallback. Since the latest-scene policy
+    # (raster_scan/trigger.py) it is a DATE-ONLY marker for the assessed
+    # acquisition date that passed: "<YYYY-MM-DD>T00:00:00+00:00" -- the
+    # time part is synthetic, not an acquisition time; scan.py reads the
+    # date prefix to mark that date's scene_assessments row used. Rows
+    # written by the earlier cooldown flow hold a real full timestamp from
+    # the metadata poll. Separate from newest_scene_date, which is a
+    # YYYY-MM-DD over retained cells.
     trigger_scene_timestamp: Mapped[str | None] = mapped_column(String, nullable=True)
 
     # How the kept cells are distributed across those acquisition days:
@@ -245,10 +252,13 @@ class SceneAssessmentRow(Base):
     rejected_cloud to passed as tiles arrive.
 
     `used_in_run_id` is the raster_scan_runs.id of the run this date
-    triggered, set by scan.py only when that run finished 'ok' or
-    'no_data'; an errored run leaves it null so the date is retried. A
-    plain integer, not a foreign key, so deleting run history never
-    depends on this table. A rejected date is never used.
+    triggered, set by scan.py only when that run finished 'no_data', or
+    'ok' with kept cells reaching this date (newest_scene_date >= it); an
+    errored run leaves it null so the date is retried. A plain integer,
+    not a foreign key, so deleting run history never depends on this
+    table. Only a `passed` date can become used; once set, it is kept even
+    if a later re-assessment of the (still unsettled) date rewrites
+    `decision` to a rejection -- the scan did happen.
     """
 
     __tablename__ = "scene_assessments"
@@ -262,6 +272,30 @@ class SceneAssessmentRow(Base):
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)  # null for passed
     assessed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     used_in_run_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class ScenePollStatus(Base):
+    """Outcome of the latest-scene poll (src/raster_scan/trigger.py), one
+    row with id=1, so a reader can tell "no newer usable scene" from "the
+    poll could not reach GEE".
+
+    - last_poll_started_at: the last poll that began polling (a poll
+      skipped for shutdown records nothing).
+    - last_poll_ok_at: the last poll whose assessment call completed without
+      error, whether or not it found anything new.
+    - last_error / last_error_at / last_error_kind: the most recent failure
+      ("gee_auth", "gee_config", "assessment_failed", "unexpected"). Kept
+      after later successes; compare last_error_at with last_poll_ok_at.
+    """
+
+    __tablename__ = "scene_poll_status"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    last_poll_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_poll_ok_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_error_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error_kind: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class RegionalScanPoint(Base):

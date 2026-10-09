@@ -22,7 +22,7 @@ from src import config as config_module
 from src import scheduler as scheduler_module
 from src import shutdown
 from src.db import SessionLocal, engine
-from src.db_models import RasterScanRun, SceneAssessmentRow
+from src.db_models import RasterScanRun, SceneAssessmentRow, ScenePollStatus
 from src.raster_scan import scan as scan_module
 from src.raster_scan import trigger as trigger_module
 
@@ -58,6 +58,8 @@ def world(client, monkeypatch, caplog):
         scan_calls: list = []
         refresh_calls: list = []
         scan_status = "ok"
+        # newest_scene_date the fake raster reports; None = its trigger date
+        scan_newest_date: str | None = None
         assess_error: Exception | None = None
         refresh_error: Exception | None = None
         clock = NOW
@@ -78,6 +80,9 @@ def world(client, monkeypatch, caplog):
             started_at=w.clock, status="running", date_used=target_date,
             scale_m=200, retention_days=30,
             trigger_scene_timestamp=trigger_scene_timestamp,
+            newest_scene_date=w.scan_newest_date or (
+                trigger_scene_timestamp[:10] if trigger_scene_timestamp else None
+            ),
         )
         db.add(run)
         db.commit()
@@ -95,6 +100,7 @@ def world(client, monkeypatch, caplog):
     monkeypatch.setattr(scheduler_module, "refresh_grid", fake_refresh)
     # Pin the policy so the outcome does not depend on the environment.
     monkeypatch.setattr(trigger_module, "RASTER_SCAN_MIN_INTERVAL_HOURS", 1)
+    monkeypatch.setattr(trigger_module, "RASTER_SCAN_COOLDOWN_HOURS", 20)
     monkeypatch.setattr(trigger_module, "RASTER_SCAN_POLL_LOOKBACK_DAYS", 10)
     monkeypatch.setattr(trigger_module, "RASTER_SCAN_SCALE_M", 200)
 
@@ -114,7 +120,22 @@ def _clear():
     with SessionLocal() as db:
         db.execute(delete(SceneAssessmentRow))
         db.execute(delete(RasterScanRun))
+        db.execute(delete(ScenePollStatus))
         db.commit()
+
+
+def _installed():
+    """A successful raster long ago: not a first install, so a poll with
+    no passing date starts nothing (no bootstrap fallback)."""
+    return _add_run("ok", started_at=NOW - timedelta(days=30))
+
+
+def _poll_status() -> ScenePollStatus | None:
+    with SessionLocal() as db:
+        row = db.get(ScenePollStatus, 1)
+        if row is not None:
+            db.expunge(row)
+        return row
 
 
 def _poll(world, *, at=None):
@@ -258,6 +279,7 @@ def test_a_failing_sites_refresh_never_raises_out_of_the_poll(world):
 
 
 def test_settled_dates_are_skipped_on_the_next_poll(world):
+    _installed()
     world.assessments = [_assessment(OLDER, "rejected_cloud", cloud=0.7)]
     _poll(world)
     assert world.assess_calls[0]["skip_dates"] == frozenset()
@@ -315,6 +337,7 @@ def test_used_date_equal_to_newest_passing_means_nothing_to_do(world):
 
 
 def test_unsettled_date_is_reassessed_in_place_and_triggers_once_it_passes(world):
+    _installed()
     # Early ingestion: only a cloudy granule of TODAY is in GEE yet.
     world.assessments = [_assessment(TODAY, "rejected_cloud", cloud=0.8)]
     _poll(world)
@@ -338,13 +361,20 @@ def test_used_unsettled_date_that_still_passes_is_not_scanned_again(world):
     world.assessments = [_assessment(TODAY)]
     _poll(world)
     assert len(world.scan_calls) == 1
+    first_run_id = _rows()[TODAY].used_in_run_id
+    assert first_run_id is not None
 
     world.assessments = [_assessment(TODAY, cloud=0.05)]
     _poll(world, at=NOW + timedelta(hours=5))
 
     assert TODAY not in world.assess_calls[1]["skip_dates"]  # re-assessed...
     assert _rows()[TODAY].cloud_fraction == pytest.approx(0.05)
-    assert len(world.scan_calls) == 1  # ...but never re-triggered
+    assert _rows()[TODAY].used_in_run_id == first_run_id  # ...use kept...
+    assert len(world.scan_calls) == 1  # ...and never re-triggered
+
+    _poll(world, at=NOW + timedelta(hours=7))  # well past the min interval
+    assert _rows()[TODAY].used_in_run_id == first_run_id
+    assert len(world.scan_calls) == 1  # exactly one scan overall
     assert world.refresh_calls == [1]
 
 
@@ -359,6 +389,7 @@ def test_settled_means_assessed_at_least_36_hours_after_the_date_began():
 
 
 def test_a_date_assessed_too_early_stays_out_of_skip_dates(world):
+    _installed()
     _add_row(YESTERDAY, "rejected_cloud", assessed_at=NOW - timedelta(seconds=1))
     _add_row(OLDER, "rejected_cloud", assessed_at=NOW - timedelta(days=2))
 
@@ -381,6 +412,7 @@ def test_assessment_uses_the_raster_scan_scale_and_the_study_polygon(world, monk
 
 
 def test_window_starts_at_the_lookback_or_the_newest_used_date_if_later(world):
+    _installed()
     _poll(world)
     assert world.assess_calls[-1]["since"] == "2026-09-29"  # NOW - 10 days
 
@@ -396,6 +428,7 @@ def test_window_starts_at_the_lookback_or_the_newest_used_date_if_later(world):
 
 
 def test_no_data_scan_consumes_its_date_and_is_not_retried(world):
+    _installed()
     world.assessments = [_assessment(TODAY)]
     world.scan_status = "no_data"
     _poll(world)
@@ -407,6 +440,7 @@ def test_no_data_scan_consumes_its_date_and_is_not_retried(world):
 
 
 def test_rejected_scene_never_consumes_a_trigger(world):
+    _installed()
     world.assessments = [_assessment(TODAY, "rejected_no_water", cloud=None, water=12,
                                      reason="12 unmasked water pixels < 1000")]
     _poll(world)
@@ -527,13 +561,53 @@ def real_scan(world, tmp_path, monkeypatch):
     return scan_module.run_raster_scan
 
 
+# fake_arrays() keeps cells from 2026-08-25 and 2026-09-04 (NEW_MS).
+KEPT_NEWEST = "2026-09-04"
+
+
 def test_real_ok_scan_sets_used_in_run_id_for_its_trigger_date(real_scan):
+    _add_row(KEPT_NEWEST)
+    with SessionLocal() as db:
+        run = real_scan(db, TODAY, trigger_scene_timestamp=f"{KEPT_NEWEST}T00:00:00+00:00")
+        assert run.status == "ok"
+        assert run.newest_scene_date == KEPT_NEWEST
+        run_id = run.id
+    assert _rows()[KEPT_NEWEST].used_in_run_id == run_id
+
+
+def test_real_ok_scan_whose_cells_predate_the_trigger_date_leaves_it_unused(real_scan):
+    # The raster kept no cell from TODAY (its newest is 2026-09-04), so it
+    # does not describe that acquisition and must not consume it.
     _add_row(TODAY)
     with SessionLocal() as db:
         run = real_scan(db, TODAY, trigger_scene_timestamp=f"{TODAY}T00:00:00+00:00")
         assert run.status == "ok"
+        assert run.newest_scene_date == KEPT_NEWEST
+    assert _rows()[TODAY].used_in_run_id is None
+
+
+def test_real_no_data_scan_still_consumes_its_trigger_date(real_scan, monkeypatch):
+    _add_row(TODAY)
+
+    def nothing_there(*_args, **_kwargs):
+        raise scan_module.bridge.NoCloudFreeImageryError("no scenes in the window")
+
+    monkeypatch.setattr(scan_module.bridge, "build_index_composite", nothing_there)
+    with SessionLocal() as db:
+        run = real_scan(db, TODAY, trigger_scene_timestamp=f"{TODAY}T00:00:00+00:00")
+        assert run.status == "no_data"
         run_id = run.id
     assert _rows()[TODAY].used_in_run_id == run_id
+
+
+def test_bootstrap_mode_and_the_trigger_agree_on_a_successful_run(client, world):
+    with SessionLocal() as db:
+        assert scan_module.has_successful_run(db) is False
+        _add_run("no_data", started_at=NOW - timedelta(days=1))
+        _add_run("error", started_at=NOW - timedelta(days=1))
+        assert scan_module.has_successful_run(db) is False
+        _add_run("ok", started_at=NOW - timedelta(days=1))
+        assert scan_module.has_successful_run(db) is True
 
 
 def test_real_auth_failed_scan_leaves_its_date_unused(real_scan, monkeypatch):
@@ -600,3 +674,274 @@ def test_poll_no_longer_calls_the_old_cooldown_gate(world, monkeypatch):
     _poll(world)
     assert len(world.scan_calls) == 1
     assert calls == []
+
+
+# --------------------------------------------------------------------------
+# First-install bootstrap fallback (no ok run yet, no passing date)
+# --------------------------------------------------------------------------
+
+
+def test_fresh_install_with_only_rejected_dates_starts_the_bootstrap_once(world):
+    world.assessments = [_assessment(TODAY, "rejected_cloud", cloud=0.9)]
+
+    _poll(world)
+
+    assert world.scan_calls == [(config_module.today_str(), None)]
+    assert _rows()[TODAY].used_in_run_id is None  # nothing is consumed
+
+    # The bootstrap succeeded (fake 'ok'): no longer a first install, and
+    # with no passing date nothing more starts.
+    _poll(world, at=NOW + timedelta(hours=21))
+    assert len(world.scan_calls) == 1
+
+
+def test_installed_with_only_rejected_dates_starts_nothing(world):
+    _installed()
+    world.assessments = [_assessment(TODAY, "rejected_cloud", cloud=0.9)]
+    _poll(world)
+    assert world.scan_calls == []
+
+
+def test_bootstrap_fallback_waits_for_the_cooldown_after_a_counted_attempt(world):
+    world.assessments = [_assessment(TODAY, "rejected_cloud", cloud=0.9)]
+    _add_run("error", started_at=NOW - timedelta(hours=2),
+             source_metadata={"bootstrap_mode": True, "search_stopped": "budget"})
+    _poll(world)
+    assert world.scan_calls == []
+
+    _poll(world, at=NOW + timedelta(hours=19))  # 21 h after the attempt
+    assert world.scan_calls == [(config_module.today_str(), None)]
+
+
+def test_bootstrap_fallback_ignores_a_shutdown_stopped_bootstrap(world):
+    world.assessments = [_assessment(TODAY, "rejected_cloud", cloud=0.9)]
+    _add_run("error", started_at=NOW - timedelta(minutes=10),
+             source_metadata={"bootstrap_mode": True, "search_stopped": "shutdown"})
+    _poll(world)
+    assert world.scan_calls == [(config_module.today_str(), None)]
+
+
+def test_a_passing_date_on_a_fresh_install_uses_the_min_interval_not_the_cooldown(world):
+    world.assessments = [_assessment(TODAY)]
+    _add_run("error", started_at=NOW - timedelta(hours=2))  # no ok run anywhere
+    _poll(world)
+    assert world.scan_calls == [(config_module.today_str(), f"{TODAY}T00:00:00+00:00")]
+
+
+def test_bootstrap_fallback_needs_a_successful_assessment(world):
+    world.assess_error = RuntimeError("synthetic EEException")
+    _poll(world)
+    world.assess_error = trigger_module.bridge.GEEAuthError("synthetic auth failure")
+    _poll(world)
+    world.assess_error = trigger_module.bridge.GEEConfigError("synthetic bad threshold")
+    _poll(world)
+    assert world.scan_calls == []
+
+
+# --------------------------------------------------------------------------
+# Window trimming (only rows in [since, ...) are read or skipped)
+# --------------------------------------------------------------------------
+
+
+def test_skip_dates_hold_only_settled_dates_inside_the_window(world):
+    _installed()
+    _add_row("2026-09-01", "rejected_cloud", assessed_at=NOW - timedelta(days=30))
+    _add_row(OLDER, "rejected_cloud", assessed_at=NOW - timedelta(days=2))
+    _poll(world)
+    assert world.assess_calls[0]["since"] == "2026-09-29"
+    assert world.assess_calls[0]["skip_dates"] == frozenset({OLDER})
+
+
+def test_unused_passing_date_before_the_window_is_not_a_candidate(world):
+    _installed()
+    _add_row("2026-09-20", assessed_at=NOW - timedelta(days=18))  # passed, unused
+    _poll(world)
+    assert world.scan_calls == []
+
+
+def test_used_date_older_than_the_lookback_leaves_the_window_at_the_lookback(world):
+    # The newest used date comes from its own MAX query (rows outside the
+    # window are not loaded); one older than the lookback start neither
+    # moves `since` nor blocks a newer passing date.
+    used_run = _add_run("ok", started_at=NOW - timedelta(days=12))
+    _add_row("2026-09-27", used_in_run_id=used_run, assessed_at=NOW - timedelta(days=11))
+    world.assessments = [_assessment("2026-09-30")]
+    _poll(world)
+    assert world.assess_calls[0]["since"] == "2026-09-29"
+    assert [call[1] for call in world.scan_calls] == ["2026-09-30T00:00:00+00:00"]
+
+
+# --------------------------------------------------------------------------
+# Poll status (failure honesty)
+# --------------------------------------------------------------------------
+
+
+def test_ok_poll_with_nothing_new_records_its_success(world):
+    _installed()
+    _poll(world)
+    status = _poll_status()
+    assert config_module.as_aware_utc(status.last_poll_started_at) == NOW
+    assert config_module.as_aware_utc(status.last_poll_ok_at) == NOW
+    assert status.last_error is None
+    assert status.last_error_kind is None
+
+
+def test_failed_assessment_records_the_error_and_keeps_the_last_ok(world):
+    _installed()
+    _poll(world)
+    world.assess_error = RuntimeError("synthetic EEException")
+    later = NOW + timedelta(hours=1)
+    _poll(world, at=later)
+
+    status = _poll_status()
+    assert config_module.as_aware_utc(status.last_poll_started_at) == later
+    assert config_module.as_aware_utc(status.last_poll_ok_at) == NOW
+    assert status.last_error_kind == "assessment_failed"
+    assert "synthetic EEException" in status.last_error
+    assert config_module.as_aware_utc(status.last_error_at) == later
+
+
+def test_auth_error_is_recorded_as_gee_auth(world):
+    world.assess_error = trigger_module.bridge.GEEAuthError("synthetic auth failure")
+    _poll(world)
+    status = _poll_status()
+    assert status.last_error_kind == "gee_auth"
+    assert "synthetic auth failure" in status.last_error
+    assert status.last_poll_ok_at is None
+
+
+def test_config_error_is_recorded_as_gee_config_and_logged_as_an_error(world, caplog):
+    world.assess_error = trigger_module.bridge.GEEConfigError(
+        "RASTER_SCENE_MAX_CLOUD_FRACTION must be a number in (0, 1], got 'x'"
+    )
+    _poll(world)
+    assert _poll_status().last_error_kind == "gee_config"
+    errors = [
+        r.getMessage() for r in caplog.get_records("call")
+        if r.levelname == "ERROR" and "configuration" in r.getMessage()
+    ]
+    assert errors and "RASTER_SCENE_MAX_CLOUD_FRACTION" in errors[0]
+
+
+def test_shutdown_poll_records_nothing(world):
+    shutdown.request_stop()
+    _poll(world)
+    assert _poll_status() is None
+
+
+def test_scene_poll_status_table_has_the_columns(client):
+    columns = {c["name"] for c in inspect(engine).get_columns("scene_poll_status")}
+    assert columns == {
+        "id", "last_poll_started_at", "last_poll_ok_at", "last_error",
+        "last_error_at", "last_error_kind",
+    }
+
+
+# --------------------------------------------------------------------------
+# refresh_grid is serialised (the poll calls it outside APScheduler)
+# --------------------------------------------------------------------------
+
+
+def test_a_second_refresh_grid_waits_for_the_running_one(monkeypatch):
+    import threading
+
+    events = []
+    first_entered = threading.Event()
+    release_first = threading.Event()
+    calls = {"n": 0}
+
+    def once():
+        calls["n"] += 1
+        me = calls["n"]
+        events.append(("enter", me))
+        if me == 1:
+            first_entered.set()
+            assert release_first.wait(timeout=5)
+        events.append(("exit", me))
+
+    monkeypatch.setattr(scheduler_module, "_refresh_grid_once", once)
+    first = threading.Thread(target=scheduler_module.refresh_grid)
+    second = threading.Thread(target=scheduler_module.refresh_grid)
+    first.start()
+    assert first_entered.wait(timeout=5)
+    second.start()
+    second.join(timeout=0.2)
+    assert second.is_alive()  # blocked on the lock, not running
+    assert events == [("enter", 1)]
+    release_first.set()
+    first.join(timeout=5)
+    second.join(timeout=5)
+    assert events == [("enter", 1), ("exit", 1), ("enter", 2), ("exit", 2)]
+
+
+def test_poll_status_write_failure_is_logged_never_raised(monkeypatch, caplog):
+    def broken_session():
+        raise RuntimeError("synthetic database down")
+
+    monkeypatch.setattr(trigger_module, "SessionLocal", broken_session)
+    trigger_module._record_poll_status(last_poll_ok_at=NOW)  # must not raise
+    assert any(
+        "could not record poll status" in r.getMessage() for r in caplog.records
+    )
+
+
+# --------------------------------------------------------------------------
+# A passing date that never reaches the composite stops being retried
+# --------------------------------------------------------------------------
+
+
+def test_unreached_date_is_marked_used_after_the_second_ok_scan(world):
+    _installed()
+    world.assessments = [_assessment(TODAY)]
+    world.scan_newest_date = "2026-10-01"  # the raster never reaches TODAY
+
+    _poll(world)
+    assert len(world.scan_calls) == 1
+    assert _rows()[TODAY].used_in_run_id is None  # first miss: retried
+
+    _poll(world, at=NOW + timedelta(minutes=61))
+    assert len(world.scan_calls) == 2
+    with SessionLocal() as db:
+        second = db.execute(
+            select(RasterScanRun).order_by(RasterScanRun.id.desc())
+        ).scalars().first()
+    row = _rows()[TODAY]
+    assert row.used_in_run_id == second.id  # second miss: retry stops
+    assert row.decision == "passed"  # nothing rewritten or hidden
+
+    _poll(world, at=NOW + timedelta(hours=3))
+    assert len(world.scan_calls) == 2
+
+
+def test_unreached_scan_limit_is_a_scan_constant_of_two():
+    assert scan_module.RASTER_SCENE_MAX_UNREACHED_SCANS == 2
+
+
+def test_real_second_unreached_ok_scan_marks_the_date_and_warns(real_scan, caplog):
+    _add_row(TODAY)
+    stamp = f"{TODAY}T00:00:00+00:00"
+    with SessionLocal() as db:
+        assert real_scan(db, TODAY, trigger_scene_timestamp=stamp).status == "ok"
+    assert _rows()[TODAY].used_in_run_id is None
+    with SessionLocal() as db:
+        run = real_scan(db, TODAY, trigger_scene_timestamp=stamp)
+        run_id = run.id
+    assert _rows()[TODAY].used_in_run_id == run_id
+    assert any(
+        "never reached the composite" in r.getMessage() and r.levelname == "WARNING"
+        for r in caplog.records
+    )
+
+
+def test_unreached_ok_runs_of_another_stamp_do_not_count(real_scan):
+    _add_row(TODAY)
+    # An ok run that missed a different trigger date, and a non-ok run with
+    # this very stamp: neither counts toward TODAY's limit.
+    _add_run("ok", started_at=NOW - timedelta(days=2),
+             trigger=f"{YESTERDAY}T00:00:00+00:00")
+    _add_run("error", started_at=NOW - timedelta(days=2),
+             trigger=f"{TODAY}T00:00:00+00:00")
+    with SessionLocal() as db:
+        run = real_scan(db, TODAY, trigger_scene_timestamp=f"{TODAY}T00:00:00+00:00")
+        assert run.status == "ok"
+    assert _rows()[TODAY].used_in_run_id is None

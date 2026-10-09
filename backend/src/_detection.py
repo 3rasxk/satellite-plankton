@@ -167,8 +167,9 @@ ndci_value_to_color = _data_pipeline_bridge.ndci_value_to_color
 # to flag (never silently accept) a query outside the upper Gulf polygon.
 check_point_in_study_area = _data_pipeline_bridge.check_point_in_study_area
 
-# Sentinel-2 scene-freshness poll -- used by
-# backend/src/raster_scan/trigger.py's poll_and_maybe_scan().
+# Sentinel-2 scene-freshness poll (newest acquisition timestamp). Was the
+# raster-scan trigger's candidate source; poll_and_maybe_scan() now uses
+# assess_new_scenes below instead. Kept exported, no active caller here.
 get_newest_scene_timestamp = _data_pipeline_bridge.get_newest_scene_timestamp
 
 # Per-date scene assessment for the latest-scene policy
