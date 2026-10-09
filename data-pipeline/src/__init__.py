@@ -33,6 +33,10 @@ and other downstream consumers:
                                                the TEST baseline, see
                                                history.py
     preprocessing_params()                        (pure, no GEE call)
+    assess_new_scenes(polygon_latlng, since_date) -- per-date cloud/water
+                                               decision for the latest-scene
+                                               policy, see scene_assess.py
+    SceneAssessment, decide(...), scene_thresholds()  (pure, no GEE call)
 """
 
 from .auth import GEEAuthError, GEEConfigError, initialize_ee
@@ -56,6 +60,12 @@ from .raster import (
     iter_bootstrap_windows,
     summarize_raster_cells,
     valid_cell_mask,
+)
+from .scene_assess import (
+    SceneAssessment,
+    assess_new_scenes,
+    decide,
+    scene_thresholds,
 )
 from .scene_poll import get_newest_scene_timestamp
 from .sentinel2 import (
@@ -91,6 +101,10 @@ __all__ = [
     "valid_cell_mask",
     "get_ndci_history",
     "preprocessing_params",
+    "assess_new_scenes",
+    "SceneAssessment",
+    "scene_thresholds",
+    "decide",
     "RASTER_BAND_REDUCERS",
     "RASTER_BAND_ORDER",
     "RASTER_INDEX_BANDS",

@@ -184,6 +184,17 @@ DateBandPrecisionError = _dp.DateBandPrecisionError
 get_ndci_history = _dp.get_ndci_history
 preprocessing_params = _dp.preprocessing_params
 
+# Per-date scene assessment for the latest-scene policy
+# (data-pipeline/src/scene_assess.py). Re-exported as a pass-through, same
+# reasoning as the raster names above: backend's raster-scan trigger decides
+# whether a new acquisition passed the cloud criterion with these, and the
+# thresholds come from the one `scene_thresholds()` rather than a backend
+# copy. `decide` and `scene_thresholds` are pure (no GEE call).
+assess_new_scenes = _dp.assess_new_scenes
+SceneAssessment = _dp.SceneAssessment
+scene_thresholds = _dp.scene_thresholds
+decide = _dp.decide
+
 # `day_of_year_climatology` is a pure function in data-pipeline/src/modis.py
 # whose own docstring says bloom-detection is "expected to build on this
 # rather than reimplement it" — re-exported here for src/climatology.py so
@@ -227,6 +238,10 @@ __all__ = [
     "valid_cell_mask",
     "get_ndci_history",
     "preprocessing_params",
+    "assess_new_scenes",
+    "SceneAssessment",
+    "scene_thresholds",
+    "decide",
     "RASTER_BAND_REDUCERS",
     "RASTER_BAND_ORDER",
     "RASTER_INDEX_BANDS",

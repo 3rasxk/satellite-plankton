@@ -171,6 +171,17 @@ check_point_in_study_area = _data_pipeline_bridge.check_point_in_study_area
 # backend/src/raster_scan/trigger.py's poll_and_maybe_scan().
 get_newest_scene_timestamp = _data_pipeline_bridge.get_newest_scene_timestamp
 
+# Per-date scene assessment for the latest-scene policy
+# (data-pipeline/src/scene_assess.py): whether each new acquisition date
+# passed the cloud criterion over the polygon's water, and the effective
+# thresholds. For the raster-scan trigger and /raster-scan's latest-scene
+# fields. Not the db_models table of the same idea -- this SceneAssessment
+# is the frozen dataclass the assessment returns.
+assess_new_scenes = _data_pipeline_bridge.assess_new_scenes
+SceneAssessment = _data_pipeline_bridge.SceneAssessment
+scene_thresholds = _data_pipeline_bridge.scene_thresholds
+decide = _data_pipeline_bridge.decide
+
 # Whole-polygon raster composite (data-pipeline/src/raster.py, re-exported
 # through detection/src/_data_pipeline.py) -- used by
 # backend/src/raster_scan/scan.py. The named-station path (grid.py's 7
@@ -235,6 +246,10 @@ __all__ = [
     "ndci_value_to_color",
     "check_point_in_study_area",
     "get_newest_scene_timestamp",
+    "assess_new_scenes",
+    "SceneAssessment",
+    "scene_thresholds",
+    "decide",
     "build_index_composite",
     "download_composite_arrays",
     "iter_bootstrap_windows",
