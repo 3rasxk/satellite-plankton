@@ -8,16 +8,19 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import _detection as bridge
+from .. import site_anomaly
 from ..config import as_aware_utc
 from ..db import get_db
 from ..db_models import DetectionCache, MonitoredSite
 from ..schemas import MostRecentDetection, RiskLevelCounts, SummaryResponse
+from ..scientific_status import baseline_status, risk_evaluation_active
 
 router = APIRouter()
 
 
 @router.get("/summary", response_model=SummaryResponse, tags=["summary"])
 def get_summary(db: Session = Depends(get_db)) -> SummaryResponse:
+    risk_active = risk_evaluation_active()
     rows = db.execute(
         select(MonitoredSite, DetectionCache)
         .outerjoin(DetectionCache, DetectionCache.site_id == MonitoredSite.site_id)
@@ -59,7 +62,7 @@ def get_summary(db: Session = Depends(get_db)) -> SummaryResponse:
                 fetched_ats.append(fetched_at)
             continue
 
-        level = cache.level
+        level = cache.level if risk_active else None
         if level in ("normal", "elevated", "watch", "warning"):
             setattr(counts, level, getattr(counts, level) + 1)
         else:
@@ -72,7 +75,7 @@ def get_summary(db: Session = Depends(get_db)) -> SummaryResponse:
         if fetched_at is not None:
             fetched_ats.append(fetched_at)
 
-        if cache.detected and fetched_at is not None:
+        if risk_active and cache.detected and fetched_at is not None:
             if most_recent_dt is None or fetched_at > most_recent_dt:
                 most_recent_dt = fetched_at
                 most_recent = MostRecentDetection(
@@ -94,4 +97,7 @@ def get_summary(db: Session = Depends(get_db)) -> SummaryResponse:
         oldest_fetched_at=min(fetched_ats).isoformat() if fetched_ats else None,
         newest_fetched_at=max(fetched_ats).isoformat() if fetched_ats else None,
         prediction_confidence_label=config["prediction_confidence_label"],
+        # One resolution; this handler is sync, so FastAPI already runs it
+        # in a threadpool.
+        baseline=site_anomaly.baseline_block(baseline_status()),
     )

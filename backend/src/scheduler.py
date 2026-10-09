@@ -63,7 +63,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from . import _detection as bridge
-from . import shutdown
+from . import scientific_status, shutdown, site_anomaly
 from .config import RASTER_SCAN_POLL_INTERVAL_HOURS, SCHEDULER_INTERVAL_MINUTES, today_str
 from .db import SessionLocal
 from .db_models import DetectionCache, MonitoredSite
@@ -168,14 +168,45 @@ def _refresh_images(lat: float, lng: float, target_date: str, detection_status: 
         )
 
 
-def refresh_one_site(db: Session, site: MonitoredSite, target_date: str) -> None:
+def _anomaly_fields(snapshot: tuple, site: MonitoredSite, detection: dict, target_date: str) -> dict:
+    """TEST-baseline anomaly columns for this reading (src/site_anomaly.py).
+
+    All None with BASELINE_MODE off. In test mode, the assessment against
+    ``snapshot``'s baseline -- or no level and the reason it could not be
+    given -- tagged with that baseline's version (None when it is invalid).
+    """
+    status, active = snapshot
+    assessment = site_anomaly.assess_reading(
+        status, active,
+        location_id=site.site_id, lat=site.lat, lng=site.lng,
+        detection=detection, target_date=target_date,
+    )
+    if assessment is None:
+        return dict(signal_anomaly_level=None, signal_robust_z=None,
+                    signal_anomaly_reason=None, baseline_version=None)
+    return dict(
+        signal_anomaly_level=assessment["level"],
+        signal_robust_z=assessment["robust_z"],
+        signal_anomaly_reason=assessment["reason"],
+        baseline_version=active.version if active is not None else None,
+    )
+
+
+def refresh_one_site(
+    db: Session, site: MonitoredSite, target_date: str, snapshot: tuple | None = None,
+) -> None:
     """Refresh (or mark-stale-on-failure) one site's DetectionCache row.
     Never raises -- every exception is caught here, logged, and turned
     into a stale marker so the scheduler loop continues for the
-    remaining sites."""
+    remaining sites.
+
+    ``snapshot`` is one ``scientific_status.baseline_snapshot()``;
+    refresh_grid passes the same one to every site. Taken here when None."""
     existing = db.execute(
         select(DetectionCache).where(DetectionCache.site_id == site.site_id)
     ).scalar_one_or_none()
+    if snapshot is None:
+        snapshot = scientific_status.baseline_snapshot()
 
     try:
         prediction = bridge.risk_level(site.lat, site.lng, target_date)
@@ -186,8 +217,10 @@ def refresh_one_site(db: Session, site: MonitoredSite, target_date: str) -> None
             target_date=target_date,
             status=detection["status"],
             detected=None,
+            # Withdrawn statistic: no validated source exists, and the TEST
+            # baseline does not validate it either.
             spatial_anomaly_z=None,
-            signal_anomaly_level=prediction.get("signal_anomaly_level"),
+            **_anomaly_fields(snapshot, site, detection, target_date),
             index_used=detection["index_used"],
             index_values=detection["index_values"],
             reason=detection["reason"],
@@ -249,6 +282,10 @@ def refresh_grid() -> None:
     """The scheduled job: refresh every monitored site's cache once."""
     target_date = today_str()
     logger.info("scheduler: refresh_grid starting for %s", target_date)
+    # One baseline resolution for the whole run, so every site in it is
+    # assessed against the same version even if the artefact is rebuilt
+    # mid-run. Never raises; ({"mode": "off"}, None) with the mode off.
+    snapshot = scientific_status.baseline_snapshot()
     db = SessionLocal()
     try:
         sites = db.execute(select(MonitoredSite)).scalars().all()
@@ -260,7 +297,7 @@ def refresh_grid() -> None:
             if shutdown.stop_requested():
                 logger.info("scheduler: refresh_grid stopping early -- shutdown requested")
                 return
-            refresh_one_site(db, site, target_date)
+            refresh_one_site(db, site, target_date, snapshot=snapshot)
     finally:
         db.close()
     logger.info("scheduler: refresh_grid done")

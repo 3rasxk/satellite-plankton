@@ -20,11 +20,14 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
+from .. import site_anomaly
 from ..config import as_aware_utc
 from ..db import get_db
 from ..db_models import DetectionCache, MonitoredSite
 from ..schemas import RiskMapFeature, RiskMapProperties, RiskMapResponse
+from ..scientific_status import baseline_status, risk_evaluation_active
 from ..services.cache_service import get_cached, set_cached
 
 router = APIRouter()
@@ -48,6 +51,13 @@ def _cached_image_url(site_id: str, cache: DetectionCache | None, image_type: st
 
 @router.get("/risk-map", response_model=RiskMapResponse, tags=["risk-map"])
 async def get_risk_map(db: Session = Depends(get_db)) -> RiskMapResponse:
+    risk_active = risk_evaluation_active()
+    # ONE resolution of the TEST baseline for the whole response: the
+    # `baseline` block and every feature's signal fields come from this same
+    # status (baseline_status() is baseline_snapshot() without copying the
+    # history rows, which this route does not need). It stats and may parse
+    # files, so it runs off the event loop.
+    status = await run_in_threadpool(baseline_status)
     rows = db.execute(
         select(MonitoredSite, DetectionCache)
         .outerjoin(DetectionCache, DetectionCache.site_id == MonitoredSite.site_id)
@@ -67,19 +77,29 @@ async def get_risk_map(db: Session = Depends(get_db)) -> RiskMapResponse:
                 status="no_data_yet",
                 detected=None,
                 spatial_anomaly_z=None,
+                signal_anomaly_level=None,
                 index_used=None,
                 stale=True,
             )
         else:
+            # Shown only when the row was assessed against exactly the
+            # baseline version in `status`; null with the mode off.
+            signal = site_anomaly.cached_fields(status, cache)
             props = RiskMapProperties(
                 site_id=site.site_id,
                 name=site.name,
-                risk_level=cache.level,
-                triggered_rules=cache.triggered_rules or [],
+                risk_level=cache.level if risk_active else None,
+                triggered_rules=(cache.triggered_rules or []) if risk_active else [],
                 confidence_label=cache.confidence_label or "no cached reading yet",
                 status=cache.status,
-                detected=cache.detected,
-                spatial_anomaly_z=cache.spatial_anomaly_z,
+                detected=cache.detected if risk_active else None,
+                # No validated source exists for this statistic -- the TEST
+                # baseline does not validate it -- so a stored number never
+                # leaves the cache.
+                spatial_anomaly_z=None,
+                signal_anomaly_level=signal["level"],
+                signal_robust_z=signal["robust_z"],
+                signal_anomaly_reason=signal["reason"],
                 index_used=cache.index_used,
                 index_values=cache.index_values,
                 cloud_fraction=cache.cloud_fraction,
@@ -100,14 +120,14 @@ async def get_risk_map(db: Session = Depends(get_db)) -> RiskMapResponse:
             )
         )
 
-    return RiskMapResponse(features=features)
+    return RiskMapResponse(features=features, baseline=site_anomaly.baseline_block(status))
 
 
 @router.get("/risk-map/{site_id}/image", tags=["risk-map"])
 def get_risk_map_site_image(
     site_id: str,
     image_type: Literal["true_color", "ndci_heatmap"] = Query(
-        ..., description="'true_color' (RGB) or 'ndci_heatmap' (5-stop risk-ramp NDCI)."
+        ..., description="'true_color' (RGB) or 'ndci_heatmap' (5-stop NDCI visualization ramp)."
     ),
     db: Session = Depends(get_db),
 ) -> Response:

@@ -9,11 +9,30 @@ from datetime import date as date_cls
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, HTTPException, Query
+from starlette.concurrency import run_in_threadpool
 
 from .. import _detection as bridge
+from .. import scientific_status, site_anomaly
 from ..schemas import DetectResponse
 
 router = APIRouter()
+
+
+def _signal_anomaly(lat: float, lng: float, date: str, result: dict) -> tuple[dict | None, dict | None]:
+    """``(signal_anomaly, baseline block)`` for this live reading; both None with the mode off.
+
+    One baseline snapshot. The reading is assessed only against the history
+    of the baseline site recorded at exactly this lat/lng (anywhere else:
+    ``site_not_in_baseline``). Blocking (file reads, the assessment), so the
+    caller runs it in a threadpool.
+    """
+    status, active = scientific_status.baseline_snapshot()
+    assessment = site_anomaly.assess_reading(
+        status, active,
+        location_id=site_anomaly.location_at(active, lat, lng),
+        lat=lat, lng=lng, detection=result, target_date=date,
+    )
+    return assessment, site_anomaly.baseline_block(status)
 
 
 def _satellite_image_url(lat: float, lng: float, date: str, image_type: str) -> str:
@@ -73,6 +92,8 @@ async def get_detect(
     true_color_url = _satellite_image_url(lat, lng, actual_date, "true_color") if has_scene else None
     ndci_heatmap_url = _satellite_image_url(lat, lng, actual_date, "ndci_heatmap") if has_scene else None
 
+    signal_anomaly, baseline = await run_in_threadpool(_signal_anomaly, lat, lng, date, result)
+
     return DetectResponse(
         lat=lat,
         lng=lng,
@@ -80,7 +101,9 @@ async def get_detect(
         status=result["status"],
         detected=None,
         spatial_anomaly_z=None,
-        signal_anomaly_level=None,
+        signal_anomaly_level=signal_anomaly["level"] if signal_anomaly is not None else None,
+        signal_anomaly=signal_anomaly,
+        baseline=baseline,
         index_used=result["index_used"],
         index_values=result["index_values"],
         reason=result["reason"],

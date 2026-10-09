@@ -18,6 +18,7 @@ from src.db_models import DetectionCache, MonitoredSite
 from src.routers import risk_map as risk_map_module
 
 _SITE_ID = "pytest_risk_map_site"
+_ROW_BASELINE_VERSION = "TEST-20240315-pytest00"
 
 
 @pytest.fixture()
@@ -35,6 +36,8 @@ def cached_site():
                 detected=True,
                 spatial_anomaly_z=2.5,
                 signal_anomaly_level="high",
+                signal_robust_z=3.4,
+                baseline_version=_ROW_BASELINE_VERSION,
                 index_used="ndci",
                 index_values={"ndci": 0.12},
                 level="warning",
@@ -63,7 +66,13 @@ def _feature(client, site_id=_SITE_ID):
 
 def _set_gates(monkeypatch, *, risk: bool, signal: bool):
     monkeypatch.setattr(risk_map_module, "risk_evaluation_active", lambda: risk)
-    monkeypatch.setattr(risk_map_module, "signal_anomaly_active", lambda: signal)
+    # The signal fields open only for a TEST baseline in force whose version
+    # is the row's own (src/site_anomaly.py cached_fields).
+    status = (
+        {"mode": "test", "valid": True, "kind": "test", "version": _ROW_BASELINE_VERSION}
+        if signal else {"mode": "off"}
+    )
+    monkeypatch.setattr(risk_map_module, "baseline_status", lambda: dict(status))
 
 
 def test_uncached_site_reports_no_data_yet(client):
@@ -115,8 +124,10 @@ def test_gates_on_expose_risk_and_anomaly_fields(client, cached_site, monkeypatc
     assert p["risk_level"] == "warning"
     assert p["triggered_rules"] == ["rule_a"]
     assert p["detected"] is True
-    assert p["spatial_anomaly_z"] == 2.5
+    # No validated source exists for spatial_anomaly_z; no gate opens it.
+    assert p["spatial_anomaly_z"] is None
     assert p["signal_anomaly_level"] == "high"
+    assert p["signal_robust_z"] == 3.4
 
 
 def test_gates_are_independent(client, cached_site, monkeypatch):
@@ -126,8 +137,9 @@ def test_gates_are_independent(client, cached_site, monkeypatch):
 
     assert p["risk_level"] is None
     assert p["detected"] is None
-    assert p["spatial_anomaly_z"] == 2.5
+    assert p["spatial_anomaly_z"] is None
     assert p["signal_anomaly_level"] == "high"
+    assert p["signal_robust_z"] == 3.4
 
 
 def test_fetched_at_is_aware_utc_iso(client, cached_site):

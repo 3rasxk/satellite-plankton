@@ -62,6 +62,17 @@ class DetectionCache(Base):
     status: Mapped[str] = mapped_column(String)  # ok|no_imagery|no_water_pixels|no_climatology|error
     detected: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     spatial_anomaly_z: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Separate statistical satellite-signal field. Historical and current
+    # rows remain null until a compatible Sentinel-2 baseline exists.
+    signal_anomaly_level: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Filled by the scheduler only with BASELINE_MODE=test (src/site_anomaly.py):
+    # the robust z behind signal_anomaly_level, why no level could be given,
+    # and the TEST baseline version both were computed against. /risk-map
+    # shows the level and z only when baseline_version is the version in
+    # force at request time, so a row from an older baseline never surfaces.
+    signal_robust_z: Mapped[float | None] = mapped_column(Float, nullable=True)
+    signal_anomaly_reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    baseline_version: Mapped[str | None] = mapped_column(String, nullable=True)
     index_used: Mapped[str | None] = mapped_column(String, nullable=True)
     index_values: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -185,6 +196,8 @@ class RasterScanRun(Base):
     # day, not per scene: several tiles can share a day, so this list is
     # never longer than `scene_count`.
     scene_dates: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # Exact search and acquisition provenance for this run.
+    source_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     # -- the raster itself --
     cell_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -200,11 +213,8 @@ class RasterScanRun(Base):
 
     # Where the rendered map overlay for this run lives, and the
     # geographic bounds it must be placed at (src/raster_scan/render.py).
-    # Carries the legend with it: an overlay's grey hatch means "inside
-    # the study area, nothing usable was read here" and must never be
-    # captioned as a low reading, so the meaning of each of the three
-    # drawn states travels with the paths rather than being re-guessed by
-    # whatever displays them.
+    # Carries the legend with it, including the meaning of transparent
+    # no-data pixels, so clients do not have to guess from the PNG.
     #
     # Null means no overlay: never rendered, or rendered and then removed
     # with the cells by retention (the PNGs are derived from the blob and

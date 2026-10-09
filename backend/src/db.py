@@ -39,6 +39,14 @@ def get_db():
 # tool. Anything that needs data moved or a column dropped is not this
 # list's job and should not be added to it.
 _ADDED_NULLABLE_COLUMNS: tuple[tuple[str, str, str], ...] = (
+    # Separate from biological risk. Existing rows cannot be backfilled from
+    # the NDCI colour ramp or the incompatible MODIS climatology.
+    ("detection_cache", "signal_anomaly_level", "VARCHAR"),
+    # TEST-baseline site anomaly (src/site_anomaly.py). Rows cached before it
+    # stay null: they were never assessed, and no version can be claimed for them.
+    ("detection_cache", "signal_robust_z", "FLOAT"),
+    ("detection_cache", "signal_anomaly_reason", "VARCHAR"),
+    ("detection_cache", "baseline_version", "VARCHAR"),
     # RasterScanRun.overlay -- rendered map assets and their bounds; the
     # raster_scan_runs table shipped one commit before the renderer did.
     ("raster_scan_runs", "overlay", "JSON"),
@@ -53,6 +61,9 @@ _ADDED_NULLABLE_COLUMNS: tuple[tuple[str, str, str], ...] = (
     # a cloudy candidate can retain no cells and still must not be polled
     # into another attempt every three hours.
     ("raster_scan_runs", "trigger_scene_timestamp", "VARCHAR"),
+    # Bootstrap/search provenance. Historical rows stay null because
+    # their exact windows and scene IDs cannot be reconstructed.
+    ("raster_scan_runs", "source_metadata", "JSON"),
 )
 
 

@@ -30,7 +30,7 @@ def test_refresh_grid_stops_between_sites_when_shutdown_is_requested(client, mon
     shutdown.clear_stop()
     visited = []
 
-    def fake_refresh_one_site(_db, site, _target_date):
+    def fake_refresh_one_site(_db, site, _target_date, snapshot=None):
         visited.append(site.site_id)
         shutdown.request_stop()
 

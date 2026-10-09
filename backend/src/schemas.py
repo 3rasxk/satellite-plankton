@@ -33,6 +33,61 @@ class DisclaimerMixin(BaseModel):
 
 
 # --------------------------------------------------------------------------
+# TEST baseline description (shared by /risk-map, /summary, /detect)
+# --------------------------------------------------------------------------
+
+
+class BaselineInfo(BaseModel):
+    """The TEST seasonal baseline in force -- src/scientific_status.py's
+    ``baseline_status()``, one key per field. Present on a response only while
+    BASELINE_MODE is ``test``; null otherwise.
+
+    A TEST baseline is provisional and uncalibrated: any anomaly it supports is
+    a statistical statement about one site's NDCI against that site's own
+    earlier record in the same seasonal window. It is not a bloom detection,
+    not a species identification and not a forecast.
+    """
+
+    mode: str = Field(description="Always 'test' when this block is present.")
+    valid: bool = Field(
+        description="False when test mode is on but no artefact may be used; then "
+        "`reason` says why and every anomaly field stays null."
+    )
+    kind: str = Field(description="'test': provisional, never checked against recorded bloom events.")
+    version: str | None = Field(
+        default=None, description="Baseline version. A cached site anomaly is shown only "
+        "when it was computed against exactly this version."
+    )
+    built_at: str | None = None
+    history_start: str | None = Field(default=None, description="First acquisition date in the history.")
+    history_end: str | None = Field(default=None, description="Last acquisition date in the history.")
+    season_rule: str | None = Field(
+        default=None, description="Which history months an observation is compared with."
+    )
+    min_independent_dates: int | None = Field(
+        default=None, description="Dates behind one robust z in the weakest seasonal window "
+        "of the weakest site (the declared minimum)."
+    )
+    median_independent_dates: int | float | None = Field(
+        default=None, description="Median over sites of the dates in each site's weakest "
+        "seasonal window -- not the length of the whole record."
+    )
+    min_season_dates_by_location: dict[str, int] | None = Field(
+        default=None, description="Per site: dates in its weakest seasonal window."
+    )
+    preprocessing_signature: str | None = Field(
+        default=None, description="Hash of the preprocessing the history was made with; "
+        "a live pipeline with another signature makes the baseline unusable."
+    )
+    base_rates: dict | None = Field(
+        default=None, description="How often the statistic flagged the baseline's own past "
+        "(each date replayed against strictly earlier dates only). Not a measure of "
+        "detection accuracy."
+    )
+    reason: str | None = Field(default=None, description="Why the baseline is not valid, when it is not.")
+
+
+# --------------------------------------------------------------------------
 # /detect
 # --------------------------------------------------------------------------
 
@@ -44,6 +99,7 @@ class DetectResponse(DisclaimerMixin):
     model_config = ConfigDict(json_schema_extra={"example": {
         "lat": 13.45, "lng": 100.65, "date": "2024-03-15",
         "status": "ok", "detected": None, "spatial_anomaly_z": None,
+        "signal_anomaly_level": None,
         "index_used": "ndci",
         "index_values": {"ndci": 0.01, "2bda": 0.02, "3bda": 0.03, "b2_b3_ratio": 0.9},
         "cloud_fraction": 0.05, "actual_date": "2024-03-14",
@@ -64,6 +120,26 @@ class DetectResponse(DisclaimerMixin):
     spatial_anomaly_z: float | None = Field(
         default=None, description="Reserved for a future valid statistic. "
         "Not computed — no valid baseline exists; always null currently."
+    )
+    signal_anomaly_level: Literal["normal", "watch", "high"] | None = Field(
+        default=None,
+        description="Preliminary robust statistical level for a future compatible "
+        "Sentinel-2 baseline. Null unless BASELINE_MODE=test, because no calibrated "
+        "baseline is persisted; in test mode it repeats `signal_anomaly.level` "
+        "(provisional, uncalibrated TEST baseline). Separate from biological risk_level.",
+    )
+    signal_anomaly: dict | None = Field(
+        default=None,
+        description="Null unless BASELINE_MODE=test. Then this reading against the TEST "
+        "baseline's history for the monitoring site at exactly this lat/lng: `level` "
+        "(normal|watch|high or null), `robust_z`, `median_ndci`, `mad`, "
+        "`independent_date_count`, `reason` (why no level, e.g. site_not_in_baseline, "
+        "no_imagery, insufficient_independent_dates, baseline_invalid:<reason>) and "
+        "`location_id`. A statistical anomaly against that site's own seasonal record, "
+        "not a bloom detection.",
+    )
+    baseline: BaselineInfo | None = Field(
+        default=None, description="The TEST baseline in force; null unless BASELINE_MODE=test."
     )
     index_used: str
     index_values: dict[str, float] | None
@@ -91,7 +167,7 @@ class DetectResponse(DisclaimerMixin):
     )
     ndci_heatmap_image_url: str | None = Field(
         default=None, description="GET /satellite-image URL (NDCI heatmap PNG, "
-        "5-stop risk ramp) for this exact lat/lng/date. Same null rule as "
+        "5-stop visualization colour ramp) for this exact lat/lng/date. Same null rule as "
         "`true_color_image_url`."
     )
 
@@ -149,6 +225,23 @@ class RiskMapProperties(DisclaimerMixin):
     status: Literal["ok", "no_imagery", "no_water_pixels", "no_climatology", "error", "no_data_yet"]
     detected: bool | None
     spatial_anomaly_z: float | None
+    signal_anomaly_level: Literal["normal", "watch", "high"] | None = Field(
+        default=None,
+        description="Preliminary statistical satellite-signal level. Null until a "
+        "compatible Sentinel-2 baseline exists; not a bloom-risk classification. "
+        "With BASELINE_MODE=test: shown only when this cached reading was assessed "
+        "against exactly the response's `baseline.version`.",
+    )
+    signal_robust_z: float | None = Field(
+        default=None, description="Robust z of NDCI against this site's own seasonal "
+        "history in the TEST baseline. Same null rule as `signal_anomaly_level`."
+    )
+    signal_anomaly_reason: str | None = Field(
+        default=None, description="Why `signal_anomaly_level` is null in test mode "
+        "(e.g. no_imagery, insufficient_independent_dates, site_not_in_baseline, "
+        "not_assessed_against_active_baseline, baseline_invalid:<reason>). Null "
+        "when a level is shown, and always null with BASELINE_MODE off."
+    )
     index_used: str | None
     index_values: dict[str, float] | None = None
 
@@ -191,6 +284,10 @@ class RiskMapFeature(BaseModel):
 class RiskMapResponse(DisclaimerMixin):
     type: Literal["FeatureCollection"] = "FeatureCollection"
     features: list[RiskMapFeature]
+    baseline: BaselineInfo | None = Field(
+        default=None, description="The TEST baseline every feature's signal fields were "
+        "checked against; null unless BASELINE_MODE=test."
+    )
 
 
 # --------------------------------------------------------------------------
@@ -281,6 +378,9 @@ class SummaryResponse(DisclaimerMixin):
     oldest_fetched_at: str | None
     newest_fetched_at: str | None
     prediction_confidence_label: str
+    baseline: BaselineInfo | None = Field(
+        default=None, description="The TEST baseline in force; null unless BASELINE_MODE=test."
+    )
 
 
 # --------------------------------------------------------------------------
@@ -364,6 +464,9 @@ class RasterScanResponse(DisclaimerMixin):
         "share first -- the distribution the oldest/newest span hides. Counted per calendar "
         "day, so it is never longer than `scene_count` (several tiles can share a day). Null "
         "for a run taken before this was recorded: unknown, not evenly spread.")
+    source_metadata: dict | None = Field(
+        default=None, description="Bootstrap/search windows and the exact selected scene IDs "
+        "and acquisition dates for this run.")
     completed_at: str | None = Field(default=None, description="When that run finished (UTC).")
     coverage: RasterCoverage | None = Field(
         default=None, description="How much of the study polygon carries a reading, and how "
@@ -375,9 +478,10 @@ class RasterScanResponse(DisclaimerMixin):
     legend: dict | None = Field(
         default=None, description="What each colour means, carried with the picture: the value "
         "swatches are sampled from the same ramp that painted the image, so a legend cannot "
-        "drift from it. Includes the no-data hatch, which marks water that was NOT measured -- "
-        "never a low reading.")
+        "drift from it. Explains that transparent no-data is never a low or zero reading.")
     overlay_url: str | None = Field(default=None, description="Where to fetch the PNG.")
+    true_color_url: str | None = Field(
+        default=None, description="Run-aligned true-color PNG, when this run stored RGB bands.")
     stale_run_id: int | None = Field(
         default=None, description="Set when a newer run exists whose overlay is not on disk "
         "(running, failed, or expired). The served picture is older than the newest attempt.")
