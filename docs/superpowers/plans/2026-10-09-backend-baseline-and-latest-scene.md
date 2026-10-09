@@ -365,13 +365,55 @@ def test_version_for():
 
 ---
 
-## Task 11: Level B feasibility spike (decision gate, controller-run)
+## Task 11: Level B feasibility spike — DONE (controller-run, 2026-10-09)
 
-**Files:** none committed; report only (`scratchpad/levelB_spike.md`).
+Result: season window Sep–Nov (calendar months 9–11, 140 distinct acquisition dates, 2017-12 → 2026-10) at 200 m over the study polygon: per-day mosaic (`raster._index_bands`) → median / MAD of daily NDCI / count, one `getDownloadURL` NPY (618×620 grid, 7.7 MB) in **27 s**. 289,921 cells have ≥ 1 observation (the polygon has ≈ 300,614 water cells); **99.4 %** of those have n ≥ 30, 84.8 % n ≥ 40; n median 45, max 62; **no cell has MAD = 0**; MAD pctl 5/50/95 = 0.020/0.037/0.056; median NDCI pctl 5/50/95 = −0.006/0.043/0.066. Gate (≤ 15 min and ≥ 70 % of cells with n ≥ 30) **passed** → Tasks 12–13 proceed. Script: scratchpad `levelB_spike.py`.
 
-- [ ] **Step 1:** Write a throwaway script (scratchpad) that, for one season window (e.g. months 9–11) at the raster scale (200 m, the same sampling as `data-pipeline/src/raster.py`), builds the per-cell NDCI median, MAD and count over 2017-12 → today for the study polygon using `raster._index_bands`, and downloads the three arrays the way `download_composite_arrays` does. Measure wall time, GEE errors (memory/timeouts), and the share of water cells with `n >= 30`.
-- [ ] **Step 2: Decide:** proceed to Level B only if one season completes in ≤ 15 min without tiling hacks and ≥ 70 % of measured raster cells have `n >= 30`; otherwise record the numbers and **stop at Level A** (anomaly pins then exist only at the 7 sites). Ledger the decision as a ruling.
-- Level B tasks (per-cell baseline build, anomaly `rank_cells` mode, `mode=anomaly` endpoint) are **written into this plan as Tasks 12–13 only if the spike passes**, after reading the spike's real numbers.
+---
+
+## Task 12: Level B per-cell baseline (builder, artefact, loader)
+
+**Files:**
+- Create: `data-pipeline/src/baseline_raster.py`
+- Modify: `data-pipeline/src/__init__.py`, `detection/src/_data_pipeline.py`, `backend/src/_detection.py` (additive re-exports: `build_cell_baseline`, `cell_baseline_params`)
+- Modify: `detection/src/baseline.py` (pure helpers listed below), `backend/src/baseline_store.py` (cells IO + loader), `scripts/build_test_baseline.py` (`--level B`, default `--level A`; `--level AB` builds both)
+- Test: `data-pipeline/tests/test_baseline_raster.py`, `detection/tests/test_baseline_cells.py`, `backend/tests/test_baseline_store_cells.py`, `backend/tests/test_build_test_baseline.py` (add cases)
+
+**Interfaces:**
+- `baseline_raster.cell_baseline_params() -> dict` — canonical preprocessing description of the CELL baseline from live constants: `{"collection", "bands", "cloud_classes", "min_water_occurrence_pct", "scale_m": RASTER scale (200), "sampling": "raster-nearest-native-pixel-per-day-mosaic", "index": "ndci=(B5-B4)/(B5+B4)", "per_day_reduction": "mosaic of same-UTC-date tiles", "statistic": "median / MAD(median of |x-median|) over daily values", "polygon_id": <hash of study polygon vertices>}`; its signature = `preprocessing_signature(params)` (different from the site signature).
+- `baseline_raster.build_cell_baseline(polygon_latlng, months: tuple[int, int, int], start: str, end: str, scale_m: int = 200, *, _fetch=None) -> dict` — returns `{"lat": float64[N], "lng": float64[N], "median": float32[N], "mad": float32[N], "n": uint16[N], "scale_m", "months", "start", "end", "n_dates": int}` with ONE entry per cell having n ≥ 1 and finite median (flat arrays like `download_composite_arrays`). GEE seam `_fetch(polygon, months, start, end, scale_m) -> structured numpy array with fields median, mad, n, longitude, latitude` (default implementation = the spike script's logic: calendarRange month filter, distinct UTC dates, per-day mosaic of `_index_bands` ndci with the production water mask / cloud classes, median, MAD = median of |daily − median|, count, `ee.Image.pixelLonLat()`, NPY at `scale_m`). `end` is exclusive.
+- Season windows: `baseline.season_months(M)` (existing) gives the 3 calendar months for target month `M`; the builder loops M = 1..12.
+- `detection/src/baseline.py` additions (pure): `cell_key(lat, lng, scale_m) -> tuple[int, int]` = integer grid index `(round((lat - LAT0)/dlat), round((lng - LNG0)/dlng))` — design it so that the SAME key is produced for a production raster cell and the baseline cell at the same location even with float noise (document tolerance: half a cell); `assess_cell(ndci, median, mad, n, *, min_dates, mad_scale, watch_at_z, high_at_z) -> dict {level, robust_z, reason}` implementing exactly `signal_anomaly`'s formula and thresholds (import the constants; reasons: `insufficient_independent_dates`, `zero_mad`, `invalid_ndci`; reuse `signal_anomaly.classify_robust_z`). Vectorised variant `assess_cells(ndci: ndarray, median, mad, n, ...) -> (z: float32[N] with NaN where not assessable, level_code: uint8[N] (0 not assessable, 1 normal, 2 watch, 3 high), reason_code: uint8[N])` with a documented code table; tested elementwise against `assess_cell`.
+- Artefact: Level B files `cells_m{MM}.npz` (arrays above) written into the SAME `backend/data/baselines/<version>/` directory (`write_artifact` / builder: build A and B into one version). Manifest gains `level_b`: `{"scale_m", "cell_preprocessing_signature", "history_start", "history_end", "seasons": {season_key: {"file", "months", "cells", "cells_n_ge_floor", "n_median", "n_min", "n_max", "mad_p05","mad_p50","mad_p95"}}}`. **History end rule (leakage):** the builder's default `--end` for Level B is `today − 15 days` (exclusive) and the manifest records `history_end`; assessment only scores cells whose own acquisition date is strictly later than `level_b.history_end` (enforced in Task 13). A Level B build is REFUSED (`BuilderRefused`) if any season has < 90 % of its cells with n ≥ 30 (`signal_anomaly.MIN_INDEPENDENT_DATES`) — report the share; nothing is written.
+- `validate_manifest` additions: when `level_b` is present validate keys, `cell_preprocessing_signature == live`, `history_end` ≤ today, 12 season files named in the manifest exist (checked by the loader, not the pure function).
+- Loader: `baseline_store.load_cell_baseline(season_key) -> CellBaseline | None` (`@dataclass(frozen=True)`: lat, lng, median, mad, n, scale_m, season_key, version, history_end, key index `dict[tuple[int,int], int]` built lazily/cached with the same mtime/size/inode discipline as `load_active_baseline`); NEVER raises (None + logged reason); mode off → None.
+
+- [ ] **Step 1: Failing tests** — `cell_key` stability under 1e-7° noise and distinct neighbouring cells; `assess_cells` equals `assess_cell` elementwise over a grid of cases (n=29/30, mad=0, z exactly 2.0 and 3.0 (boundary: z ≥ 2 watch, ≥ 3 high as in `classify_robust_z`), ndci out of [-1, 1], NaN); builder with a fake `_fetch` returns flat arrays with correct dtypes and drops cells with n = 0/NaN; refusal when a season has < 90 % cells n ≥ 30 and nothing is written; manifest `level_b` block shape; round-trip write/read of cells files; loader returns None in mode off and on a missing file, valid otherwise; signature changes when `scale_m` changes; live-signature mismatch → invalid.
+- [ ] **Step 2–4: Fail, implement, green; run data-pipeline, detection and backend suites.**
+- [ ] **Step 5 (controller, live):** `cd backend && EE_PROJECT_ID=… ./venv/bin/python ../scripts/build_test_baseline.py --level AB --replace` (≈ 6 min). Then check alignment: for the served raster run's stored cells, the share of cells whose `cell_key` exists in the matching season baseline (expect ≥ 99 %).
+- [ ] **Step 6: Report.**
+
+---
+
+## Task 13: Anomaly pins and cell inspector (mode=anomaly)
+
+**Files:**
+- Modify: `backend/src/raster_scan/highlights.py`, `backend/src/routers/raster_scan.py`, `backend/src/schemas.py`, `backend/src/site_anomaly.py` (if helpers fit there)
+- Test: `backend/tests/test_raster_highlights.py` (add), `backend/tests/test_raster_scan_endpoint.py` (add), `backend/tests/test_raster_pixel_anomaly.py` (new)
+
+**Behaviour (spec test-baseline §6):**
+- `GET /raster-scan/highlights?mode=anomaly|ndci` — default `anomaly` when `baseline_snapshot()` is valid AND Level B is loadable for the run's season, else `ndci`; explicit `mode=anomaly` without a valid Level B baseline → **409** with detail naming the reason (`mode_off`, `no_cell_baseline`, `invalid: <reason>`), no longer 501. Season = `season_key(month of run.date_used)` (same rule as sites: target-date month).
+- Per measured cell (same cohort as the NDCI ranking: cells the map paints): `assess_cells` with the season's median/MAD/n matched by `cell_key`. A cell is **assessable** only if: key present in the baseline; `n ≥ min_independent_dates` (the manifest's declared floor); `mad > 0`; its own acquisition date is strictly after `level_b.history_end`; ndci within [-1, 1]; AND its acquisition date is ≤ 14 days before `date_used` (`signal_anomaly.MAX_OBSERVATION_AGE_DAYS`). Otherwise it carries a reason code, never a default.
+- Pin condition: robust z ≥ `WATCH_AT_Z` (2.0) → level `watch`, ≥ `HIGH_AT_Z` (3.0) → `high` (positive anomalies only — higher-than-usual chlorophyll signal; negative z is not a pin). Rank by z desc (tie: ndci desc, lower row, lower column), same NMS / `n` / `min_separation_m` as the NDCI mode, `edge_of_no_data` as before. Pin fields add `robust_z`, `median_ndci`, `mad`, `n_dates`, `anomaly_level`; `risk_tier` stays null with no code path setting it.
+- Response (`mode == "anomaly"`) adds `counts`: `{measured, assessable, no_baseline, insufficient_dates, zero_mad, not_after_history, too_old, invalid, watch, high}` (they partition `measured`: `assessable + the five reason counts == measured`; `watch`/`high` count assessable cells over thresholds), a `baseline` block (`baseline_status()` incl. `level_b` summary and `history_end`), and `ranking: "descending robust z against this location's own TEST seasonal baseline; not a risk level"`. `reason` states "no cells meet the condition (k assessable of m measured)" when pins are empty — distinguishable from "nothing assessable".
+- `GET /raster-scan/pixel` (single cell) gains `anomaly: {…} | null`: in test mode with a valid Level B baseline, for a `reading` cell: `robust_z`, `median_ndci`, `mad`, `n_dates`, `level`, `reason` (null when computed), `baseline_version`, `season_key`; otherwise null. Mode off: field null and every existing field unchanged.
+- Disclaimer: responses carrying anomaly values use `disclaimer_for(status)` (TEST variant) exactly as sites do; `mode=ndci` responses keep the standard disclaimer.
+- Blocking work stays off the event loop (sync handlers), one snapshot per request, never raises 500 for baseline problems (409/null with reasons).
+
+- [ ] **Step 1: Failing tests** with synthetic grids and a fixture Level B artefact built through the real builder helpers (tmp_path): z computed exactly `(ndci − median)/(1.4826·mad)` for a hand-checked cell; boundary cells z = 2.0 → watch, 1.999 → none, 3.0 → high; negative z never pins; cells with n < floor / mad = 0 / date ≤ history_end / older than 14 days / missing key each counted in the right reason bucket and `assessable + reasons == measured`; NMS and ordering by z; empty-pins reason distinguishes "none assessable" from "none met"; default mode switches with baseline validity; `mode=anomaly` with mode off / no cell baseline → 409 with reason; pixel `anomaly` block values equal the highlights pin for the same cell; mode off leaves all existing JSON keys/values unchanged; TEST disclaimer on anomaly responses; no source assigns a non-None `risk_tier`; leak guard: a cell dated on `history_end` is not assessable.
+- [ ] **Step 2–4: Fail, implement, green; full backend suite.**
+- [ ] **Step 5 (controller, live):** with the real artefact and `BASELINE_MODE=test`, call the endpoints on the served run through the running backend and record counts and the top pins.
+- [ ] **Step 6: Report.**
 
 ---
 
