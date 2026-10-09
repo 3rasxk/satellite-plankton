@@ -23,12 +23,30 @@ DISCLAIMER_TEXT = (
     "alone establish neither bloom presence nor absence."
 )
 
+# The variant /risk-map, /summary and /detect carry instead of DISCLAIMER_TEXT
+# while BASELINE_MODE=test AND a TEST baseline is valid (src/site_anomaly.py
+# disclaimer_for). DISCLAIMER_TEXT's "anomaly detection is not computed" is
+# false then; this says what is computed and what it is not.
+DISCLAIMER_TEXT_TEST_BASELINE = (
+    "Satellite index values describe water colour at pixel resolution. "
+    "Small or scattered blooms may not be visible. TEST baseline mode: a "
+    "monitoring site's Sentinel-2 NDCI may be compared with that site's own "
+    "earlier record for the same season. Any resulting anomaly is provisional "
+    "and uncalibrated, has never been checked against recorded bloom events, "
+    "and is a statistical statement only — not a bloom detection, a species "
+    "identification, a risk level or a forecast. Index values alone establish "
+    "neither bloom presence nor absence."
+)
+
 class DisclaimerMixin(BaseModel):
     disclaimer: str = Field(
         default=DISCLAIMER_TEXT,
         description="Truth-boundary caveat. Present on every response — satellite-pixel "
         "resolution, small/scattered blooms may be missed, and Sentinel-2 "
-        "index values alone cannot establish bloom presence or absence.",
+        "index values alone cannot establish bloom presence or absence. /risk-map, "
+        "/summary and /detect carry a TEST-baseline variant instead while "
+        "BASELINE_MODE=test and a TEST baseline is valid: it states that any site "
+        "anomaly is provisional, uncalibrated and statistical only.",
     )
 
 
@@ -93,8 +111,11 @@ class BaselineInfo(BaseModel):
 
 
 class DetectResponse(DisclaimerMixin):
-    """Real Sentinel-2 index values and scene metadata. No valid anomaly
-    baseline exists; detection and prediction conclusions are unavailable."""
+    """Real Sentinel-2 index values and scene metadata. No calibrated anomaly
+    baseline exists, so detection and prediction conclusions are unavailable.
+    With BASELINE_MODE off no anomaly is computed; with BASELINE_MODE=test,
+    `signal_anomaly` and `baseline` add a provisional, uncalibrated comparison
+    with a monitoring site's own seasonal history (statistical only)."""
 
     model_config = ConfigDict(json_schema_extra={"example": {
         "lat": 13.45, "lng": 100.65, "date": "2024-03-15",
@@ -239,8 +260,9 @@ class RiskMapProperties(DisclaimerMixin):
     signal_anomaly_reason: str | None = Field(
         default=None, description="Why `signal_anomaly_level` is null in test mode "
         "(e.g. no_imagery, insufficient_independent_dates, site_not_in_baseline, "
-        "not_assessed_against_active_baseline, baseline_invalid:<reason>). Null "
-        "when a level is shown, and always null with BASELINE_MODE off."
+        "not_assessed_against_active_baseline, no_cached_reading_yet, "
+        "baseline_invalid:<reason>). Null when a level is shown, and always null "
+        "with BASELINE_MODE off."
     )
     index_used: str | None
     index_values: dict[str, float] | None = None

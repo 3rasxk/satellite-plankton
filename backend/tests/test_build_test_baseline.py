@@ -379,6 +379,86 @@ def test_main_refusal_exits_nonzero_and_writes_nothing(tmp_path, capsys):
     assert "alpha" in captured.err
 
 
+# --------------------------------------------------------------------------
+# An existing version is never silently rewritten
+# --------------------------------------------------------------------------
+
+
+def _main(root, fetch, *extra):
+    return builder.main(["--root", str(root), *extra], fetch_history=fetch, sites=SITES, today=BUILT_ON)
+
+
+def test_build_refuses_an_existing_version_before_fetching(tmp_path):
+    path = _build(tmp_path, built_at="2026-10-09T01:00:00+00:00")
+    before = (path / "manifest.json").read_text(encoding="utf-8")
+    fetch = _rich_fetch()
+
+    with pytest.raises(builder.ArtifactExists) as excinfo:
+        _build(tmp_path, fetch=fetch, built_at="2026-10-09T02:00:00+00:00")
+
+    assert excinfo.value.path == path
+    assert fetch.calls == []  # refused before any history was fetched
+    assert (path / "manifest.json").read_text(encoding="utf-8") == before
+
+
+def test_build_with_replace_rewrites_the_version(tmp_path):
+    path = _build(tmp_path, built_at="2026-10-09T01:00:00+00:00")
+    again = _build(tmp_path, built_at="2026-10-09T02:00:00+00:00", replace=True)
+    assert again == path
+    assert read_artifact(path)[0]["built_at"] == "2026-10-09T02:00:00+00:00"
+    assert [p.name for p in tmp_path.iterdir()] == [path.name]
+
+
+def test_main_refuses_an_existing_version_and_names_replace(tmp_path, capsys):
+    root = tmp_path / "baselines"
+    assert _main(root, _rich_fetch()) == 0
+    [artefact] = list(root.iterdir())
+    before = {name: (artefact / name).read_text(encoding="utf-8") for name in ("manifest.json", "sites.json")}
+    capsys.readouterr()
+
+    fetch = _rich_fetch()
+    code = _main(root, fetch)
+    err = capsys.readouterr().err
+
+    assert code == 2
+    assert fetch.calls == []
+    assert artefact.name in err
+    assert "--replace" in err
+    assert "refused" in err.lower()
+    assert {name: (artefact / name).read_text(encoding="utf-8") for name in before} == before
+
+
+def test_main_replace_overwrites_the_existing_version(tmp_path, capsys):
+    root = tmp_path / "baselines"
+    assert _main(root, _rich_fetch()) == 0
+    [artefact] = list(root.iterdir())
+
+    # Different history this time, so the rewrite is visible.
+    fetch = FakeHistory({13.0: _rich_rows()[:-20], 12.0: _rich_rows()[:-40]})
+    code = _main(root, fetch, "--replace")
+
+    assert code == 0
+    assert fetch.calls  # it did fetch and build
+    assert [p.name for p in root.iterdir()] == [artefact.name]
+    assert len(read_artifact(artefact)[1]["alpha"]) == len(_rich_rows()) - 20
+
+
+def test_dry_run_is_unaffected_by_an_existing_version(tmp_path, capsys):
+    root = tmp_path / "baselines"
+    assert _main(root, _rich_fetch()) == 0
+    [artefact] = list(root.iterdir())
+    before = (artefact / "sites.json").read_text(encoding="utf-8")
+    capsys.readouterr()
+
+    fetch = _rich_fetch()
+    code = _main(root, fetch, "--dry-run")
+
+    assert code == 0
+    assert fetch.calls  # counts were fetched and printed as usual
+    assert "dry run" in capsys.readouterr().out.lower()
+    assert (artefact / "sites.json").read_text(encoding="utf-8") == before
+
+
 def test_git_sha_is_none_when_git_fails(monkeypatch):
     def boom(*args, **kwargs):
         raise OSError("no git")

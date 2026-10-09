@@ -58,6 +58,10 @@ async def get_risk_map(db: Session = Depends(get_db)) -> RiskMapResponse:
     # history rows, which this route does not need). It stats and may parse
     # files, so it runs off the event loop.
     status = await run_in_threadpool(baseline_status)
+    # Pydantic's default is the mode-off text; the TEST-baseline variant must
+    # be passed explicitly, from the same status, to the response and to
+    # every feature.
+    disclaimer = site_anomaly.disclaimer_for(status)
     rows = db.execute(
         select(MonitoredSite, DetectionCache)
         .outerjoin(DetectionCache, DetectionCache.site_id == MonitoredSite.site_id)
@@ -65,10 +69,15 @@ async def get_risk_map(db: Session = Depends(get_db)) -> RiskMapResponse:
 
     features: list[RiskMapFeature] = []
     for site, cache in rows:
+        # Shown only when the row was assessed against exactly the baseline
+        # version in `status`; null with the mode off. In test mode a site
+        # with no row yet says so (no_cached_reading_yet).
+        signal = site_anomaly.cached_fields(status, cache)
         if cache is None:
             # Scheduler hasn't refreshed this site yet (fresh DB / not
             # reached in the first cycle). Reported honestly, not hidden.
             props = RiskMapProperties(
+                disclaimer=disclaimer,
                 site_id=site.site_id,
                 name=site.name,
                 risk_level=None,
@@ -78,14 +87,13 @@ async def get_risk_map(db: Session = Depends(get_db)) -> RiskMapResponse:
                 detected=None,
                 spatial_anomaly_z=None,
                 signal_anomaly_level=None,
+                signal_anomaly_reason=signal["reason"],
                 index_used=None,
                 stale=True,
             )
         else:
-            # Shown only when the row was assessed against exactly the
-            # baseline version in `status`; null with the mode off.
-            signal = site_anomaly.cached_fields(status, cache)
             props = RiskMapProperties(
+                disclaimer=disclaimer,
                 site_id=site.site_id,
                 name=site.name,
                 risk_level=cache.level if risk_active else None,
@@ -120,7 +128,9 @@ async def get_risk_map(db: Session = Depends(get_db)) -> RiskMapResponse:
             )
         )
 
-    return RiskMapResponse(features=features, baseline=site_anomaly.baseline_block(status))
+    return RiskMapResponse(
+        features=features, baseline=site_anomaly.baseline_block(status), disclaimer=disclaimer,
+    )
 
 
 @router.get("/risk-map/{site_id}/image", tags=["risk-map"])

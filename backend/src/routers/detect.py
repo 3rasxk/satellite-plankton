@@ -1,5 +1,9 @@
 """GET /detect -- thin wrapper over detect() (detection/src/prediction.py).
-Returns measured spectral indices; no valid anomaly baseline exists yet.
+Returns measured spectral indices. No calibrated anomaly baseline exists:
+with BASELINE_MODE off no anomaly is computed; with BASELINE_MODE=test and a
+valid TEST baseline, a reading taken at a baseline site's recorded
+coordinates is also compared with that site's own seasonal history
+(src/site_anomaly.py) -- provisional, uncalibrated, statistical only.
 Never merged with risk_level()'s rule-based prediction layer."""
 
 from __future__ import annotations
@@ -95,6 +99,9 @@ async def get_detect(
     signal_anomaly, baseline = await run_in_threadpool(_signal_anomaly, lat, lng, date, result)
 
     return DetectResponse(
+        # From the same snapshot as `baseline`: the TEST-baseline variant only
+        # while that baseline is valid (pydantic's default is the mode-off text).
+        disclaimer=site_anomaly.disclaimer_for(baseline or {"mode": "off"}),
         lat=lat,
         lng=lng,
         date=date,

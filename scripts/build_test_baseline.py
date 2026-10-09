@@ -15,7 +15,10 @@ fewer than ``signal_anomaly.MIN_INDEPENDENT_DATES`` dates, otherwise replays
 each site's history against itself (``baseline.self_check``) and writes
 ``backend/data/baselines/<version>/{manifest.json,sites.json}``
 (``backend/src/baseline_store.py``). ``--dry-run`` fetches and prints counts,
-and writes nothing.
+and writes nothing. A version that already exists under ``--root`` (the same
+build date and preprocessing signature) is REFUSED before anything is fetched
+(``ArtifactExists``, exit code 2) unless ``--replace`` is given: a version
+name must never silently identify different content.
 
 Limitations (the output of this script is not a bloom claim):
   * TEST baseline: not calibrated against recorded bloom events. The
@@ -47,7 +50,7 @@ if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
 from src import _detection  # noqa: E402
-from src.baseline_store import BASELINE_ROOT, read_artifact, write_artifact  # noqa: E402
+from src.baseline_store import BASELINE_ROOT, ArtifactExists, read_artifact, write_artifact  # noqa: E402
 from src.grid import MONITORED_GRID  # noqa: E402
 
 DEFAULT_SITES = MONITORED_GRID
@@ -181,18 +184,29 @@ def build(
     git_sha: str | None,
     root: Path,
     built_at: str | None = None,
+    replace: bool = False,
 ) -> Path:
     """Fetch, check the floor, self-check, and write the artefact.
 
     Raises ``BuilderRefused`` before anything is written (the output root is
     not even created) if there are no sites or any site/season holds fewer
-    than ``MIN_INDEPENDENT_DATES`` distinct dates. Returns the artefact
-    directory.
+    than ``MIN_INDEPENDENT_DATES`` distinct dates. Raises ``ArtifactExists``
+    -- before any history is fetched -- when this version already exists
+    under ``root`` and ``replace`` is False. Returns the artefact directory.
     """
     if not sites:
         raise BuilderRefused("no sites to build a baseline for")
 
     logic = _detection.baseline_logic
+    # The version depends only on the build date and the live preprocessing,
+    # so an existing one is refused here, not after a long GEE fetch.
+    # write_artifact re-checks at write time.
+    existing = Path(root) / logic.version_for(
+        built_on, logic.preprocessing_signature(_detection.preprocessing_params())
+    )
+    if existing.exists() and not replace:
+        raise ArtifactExists(existing)
+
     rows_by_location = collect_history(sites, start=start, end=end, fetch_history=fetch_history)
     stats = {site_id: site_stats(rows) for site_id, rows in rows_by_location.items()}
 
@@ -229,7 +243,7 @@ def build(
         self_check=aggregate_self_check(per_location_check),
         builder_git_sha=git_sha,
     )
-    return write_artifact(root, manifest, rows_by_location)
+    return write_artifact(root, manifest, rows_by_location, replace=replace)
 
 
 # --------------------------------------------------------------------------
@@ -306,7 +320,8 @@ def main(
     sites: list[dict] | None = None,
     today: date | None = None,
 ) -> int:
-    """CLI entry point; returns the process exit code (0 built, 2 refused).
+    """CLI entry point; returns the process exit code (0 built, 2 refused --
+    too little history, or the version already exists without ``--replace``).
 
     ``fetch_history``, ``sites`` and ``today`` are test seams; the defaults
     are live Earth Engine, ``MONITORED_GRID`` and the current UTC date.
@@ -334,6 +349,12 @@ def main(
         "--dry-run",
         action="store_true",
         help="fetch and print counts, write nothing",
+    )
+    parser.add_argument(
+        "--replace",
+        action="store_true",
+        help="overwrite an existing artefact of the same version (same build date and "
+        "preprocessing signature); without it such a build is refused",
     )
     args = parser.parse_args(argv)
 
@@ -370,9 +391,18 @@ def main(
             fetch_history=announced,
             git_sha=current_git_sha(),
             root=args.root,
+            replace=args.replace,
         )
     except BuilderRefused as exc:
         print(f"REFUSED, nothing written: {exc}", file=sys.stderr)
+        return 2
+    except ArtifactExists as exc:
+        print(
+            f"REFUSED, nothing written: baseline version {exc.path.name} already exists "
+            f"at {exc.path}. A version must identify one content; re-run with --replace "
+            "to overwrite it.",
+            file=sys.stderr,
+        )
         return 2
 
     manifest, rows_by_location = read_artifact(path)

@@ -58,7 +58,9 @@ class DetectionCache(Base):
 
     target_date: Mapped[str] = mapped_column(String)  # "YYYY-MM-DD" the cache was computed for
 
-    # -- Sentinel-2 index reading; anomaly detection is not computed --
+    # -- Sentinel-2 index reading. No calibrated anomaly is computed; only
+    # with BASELINE_MODE=test is a provisional TEST-baseline site anomaly
+    # stored (signal_* / baseline_version below) --
     status: Mapped[str] = mapped_column(String)  # ok|no_imagery|no_water_pixels|no_climatology|error
     detected: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     spatial_anomaly_z: Mapped[float | None] = mapped_column(Float, nullable=True)

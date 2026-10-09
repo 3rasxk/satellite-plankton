@@ -14,6 +14,8 @@ Layout, one directory per baseline version::
 ``write_artifact`` / ``read_artifact`` / ``latest_artifact_path`` do not
 validate the manifest or judge whether the baseline is fit to use; they hand
 back whatever was written, including a manifest that would be refused.
+``write_artifact`` does refuse to overwrite an existing version unless asked
+(``ArtifactExists``), so one version name never silently changes content.
 
 ``load_active_baseline`` (and ``active_manifest``) is the one gated reader:
 it returns nothing unless ``config.BASELINE_MODE`` is exactly ``"test"``, and
@@ -72,14 +74,36 @@ def _dump(payload: object, path: Path, *, indent: int | None) -> None:
     path.write_text(text + "\n", encoding="utf-8")
 
 
-def write_artifact(root: Path, manifest: dict, rows_by_location: dict[str, list[dict]]) -> Path:
+class ArtifactExists(FileExistsError):
+    """``<root>/<baseline_version>`` already exists and replacing it was not asked for.
+
+    A baseline version is what a cached site anomaly is paired with
+    (``DetectionCache.baseline_version``); silently rewriting a version's
+    content would make old pairings describe history they were never
+    computed from. ``path`` is the existing directory.
+    """
+
+    def __init__(self, path: Path):
+        self.path = Path(path)
+        super().__init__(
+            f"baseline version {self.path.name} already exists at {self.path}; "
+            "a version must identify one content -- replace it explicitly"
+        )
+
+
+def write_artifact(
+    root: Path, manifest: dict, rows_by_location: dict[str, list[dict]], *, replace: bool = False,
+) -> Path:
     """Write ``manifest`` and ``rows_by_location``; return the version directory.
 
     The directory is ``<root>/<manifest["baseline_version"]>``. Both files are
     written into a hidden scratch directory first and moved into place only
     when both succeeded, so a failed or interrupted write never leaves a
-    directory that ``latest_artifact_path`` would take for a complete one. An
-    existing directory for the same version is replaced.
+    directory that ``latest_artifact_path`` would take for a complete one.
+
+    An existing directory for the same version is refused with
+    ``ArtifactExists`` (nothing written) unless ``replace=True``, which
+    replaces it.
 
     Raises ``ValueError`` for an unusable version name or a value JSON cannot
     carry (NaN, inf). Nothing is left behind in that case.
@@ -87,6 +111,8 @@ def write_artifact(root: Path, manifest: dict, rows_by_location: dict[str, list[
     version = _check_version(manifest.get("baseline_version"))
     root = Path(root)
     final = root / version
+    if final.exists() and not replace:
+        raise ArtifactExists(final)
 
     root.mkdir(parents=True, exist_ok=True)
     scratch = Path(tempfile.mkdtemp(prefix=f".tmp-{version}-", dir=root))
@@ -94,6 +120,8 @@ def write_artifact(root: Path, manifest: dict, rows_by_location: dict[str, list[
         _dump(manifest, scratch / MANIFEST_NAME, indent=2)
         _dump({"rows": rows_by_location}, scratch / SITES_NAME, indent=None)
         if final.exists():
+            if not replace:  # appeared while the files were being written
+                raise ArtifactExists(final)
             retired = Path(tempfile.mkdtemp(prefix=f".old-{version}-", dir=root))
             os.replace(final, retired / "previous")
             shutil.rmtree(retired, ignore_errors=True)

@@ -88,6 +88,9 @@ def get_summary(db: Session = Depends(get_db)) -> SummaryResponse:
                 )
 
     config = bridge.load_prediction_config()
+    # One resolution for both the baseline block and the disclaimer; this
+    # handler is sync, so FastAPI already runs it in a threadpool.
+    status = baseline_status()
 
     return SummaryResponse(
         total_sites=len(rows),
@@ -97,7 +100,6 @@ def get_summary(db: Session = Depends(get_db)) -> SummaryResponse:
         oldest_fetched_at=min(fetched_ats).isoformat() if fetched_ats else None,
         newest_fetched_at=max(fetched_ats).isoformat() if fetched_ats else None,
         prediction_confidence_label=config["prediction_confidence_label"],
-        # One resolution; this handler is sync, so FastAPI already runs it
-        # in a threadpool.
-        baseline=site_anomaly.baseline_block(baseline_status()),
+        baseline=site_anomaly.baseline_block(status),
+        disclaimer=site_anomaly.disclaimer_for(status),
     )

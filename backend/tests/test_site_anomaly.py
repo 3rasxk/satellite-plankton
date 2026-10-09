@@ -35,7 +35,7 @@ from src import scheduler as scheduler_module
 from src.db import SessionLocal
 from src.db_models import DetectionCache, MonitoredSite
 from src.routers import detect as detect_router
-from src.schemas import BaselineInfo
+from src.schemas import DISCLAIMER_TEXT, DISCLAIMER_TEXT_TEST_BASELINE, BaselineInfo
 from src.services.cache_service import clear_cache
 
 logic = bridge.baseline_logic
@@ -106,7 +106,7 @@ def _self_check_total(signature: str) -> str:
     return json.dumps(total)
 
 
-def _artefact() -> tuple[dict, dict[str, list[dict]]]:
+def _artefact(without_coordinates: tuple[str, ...] = ()) -> tuple[dict, dict[str, list[dict]]]:
     signature = _signature()
     recorded_at = {_SITE_A["site_id"]: _SITE_A, _SITE_MOVED["site_id"]: _MOVED_RECORDED_AT}
     rows = {site_id: _history(site_id) for site_id in recorded_at}
@@ -122,6 +122,8 @@ def _artefact() -> tuple[dict, dict[str, list[dict]]]:
         }
         for site_id, site_rows in rows.items()
     }
+    for site_id in without_coordinates:
+        del locations[site_id]["lat"], locations[site_id]["lng"]
     manifest = logic.build_manifest(
         baseline_version=logic.version_for(_BUILT_ON, signature),
         built_at="2026-01-15T03:00:00+00:00",
@@ -382,6 +384,20 @@ def test_a_site_whose_coordinates_moved_since_the_build_is_not_assessed(client, 
     assert _stored(row) == (None, None, "site_coordinates_differ_from_baseline", manifest["baseline_version"])
 
 
+def test_a_baseline_site_without_recorded_coordinates_fails_closed(client, session, test_mode, monkeypatch, _isolated):
+    """Scheduler and /detect agree: no recorded place, no assessment."""
+    built, rows = _artefact(without_coordinates=(_SITE_A["site_id"],))
+    baseline_store.write_artifact(_isolated, built, rows)
+
+    row = _refresh(session, monkeypatch, _SITE_A, _prediction())
+    assert _stored(row) == (None, None, "baseline_site_coordinates_missing", built["baseline_version"])
+
+    body = _detect(client, monkeypatch, _prediction()["detection"], _SITE_A["lat"], _SITE_A["lng"])
+    assert body["baseline"]["valid"] is True
+    assert body["signal_anomaly"]["level"] is None
+    assert body["signal_anomaly"]["reason"] == "site_not_in_baseline"
+
+
 def test_an_assessment_error_keeps_the_fresh_reading(client, session, manifest, test_mode, monkeypatch):
     def boom(*_a, **_k):
         raise ValueError("signal_anomaly configuration is incomplete or invalid")
@@ -459,6 +475,87 @@ def test_spatial_anomaly_z_stays_null_in_test_mode_whatever_the_row_holds(client
     assert props["risk_level"] is None
     assert props["detected"] is None
     assert props["triggered_rules"] == []
+
+
+@pytest.mark.parametrize(
+    "mode,with_artefact,expected",
+    [
+        ("test", True, "no_cached_reading_yet"),
+        ("test", False, "baseline_invalid:no_artifact"),
+        ("off", True, None),
+    ],
+)
+def test_a_site_with_no_cached_reading_says_why_in_test_mode(
+    client, session, monkeypatch, _isolated, mode, with_artefact, expected,
+):
+    if with_artefact:
+        built, rows = _artefact()
+        baseline_store.write_artifact(_isolated, built, rows)
+    monkeypatch.setattr(config, "BASELINE_MODE", mode)
+    props = _props(_risk_map(client), _SITE_ABSENT)  # no DetectionCache row
+    assert props["status"] == "no_data_yet"
+    assert props["signal_anomaly_level"] is None
+    assert props["signal_robust_z"] is None
+    assert props["signal_anomaly_reason"] == expected
+
+
+# --------------------------------------------------------------------------
+# Disclaimer: the TEST-baseline variant exactly while an anomaly can be computed
+# --------------------------------------------------------------------------
+
+_EXPECTED_TEST_DISCLAIMER = (
+    "Satellite index values describe water colour at pixel resolution. Small or scattered "
+    "blooms may not be visible. TEST baseline mode: a monitoring site's Sentinel-2 NDCI may "
+    "be compared with that site's own earlier record for the same season. Any resulting "
+    "anomaly is provisional and uncalibrated, has never been checked against recorded bloom "
+    "events, and is a statistical statement only — not a bloom detection, a species "
+    "identification, a risk level or a forecast. Index values alone establish neither bloom "
+    "presence nor absence."
+)
+
+
+def test_test_baseline_disclaimer_text_is_the_agreed_wording():
+    assert DISCLAIMER_TEXT_TEST_BASELINE == _EXPECTED_TEST_DISCLAIMER
+    assert DISCLAIMER_TEXT_TEST_BASELINE != DISCLAIMER_TEXT
+    assert "not computed" in DISCLAIMER_TEXT  # the mode-off text is unchanged
+
+
+def _all_disclaimers(client, monkeypatch) -> dict[str, list[str]]:
+    risk_map = _risk_map(client)
+    monkeypatch.setattr(detect_router.bridge, "detect", lambda *_a, **_k: _prediction()["detection"])
+    detect = client.get("/detect", params={"lat": _SITE_A["lat"], "lng": _SITE_A["lng"], "date": _TARGET})
+    assert detect.status_code == 200
+    return {
+        "/risk-map": [risk_map["disclaimer"]],
+        "/risk-map features": [f["properties"]["disclaimer"] for f in risk_map["features"]],
+        "/summary": [client.get("/summary").json()["disclaimer"]],
+        "/detect": [detect.json()["disclaimer"]],
+    }
+
+
+@pytest.mark.parametrize(
+    "mode,with_artefact,expected",
+    [
+        ("test", True, DISCLAIMER_TEXT_TEST_BASELINE),
+        ("test", False, DISCLAIMER_TEXT),  # test mode, refused baseline: nothing computed
+        ("off", True, DISCLAIMER_TEXT),
+    ],
+)
+def test_every_site_response_carries_the_disclaimer_for_the_baseline_in_force(
+    client, session, monkeypatch, _isolated, mode, with_artefact, expected,
+):
+    if with_artefact:
+        built, rows = _artefact()
+        baseline_store.write_artifact(_isolated, built, rows)
+    monkeypatch.setattr(config, "BASELINE_MODE", mode)
+    # One site with a cached row, the others (incl. _SITE_ABSENT) without one.
+    _seed(session, _SITE_A)
+
+    found = _all_disclaimers(client, monkeypatch)
+
+    assert len(found["/risk-map features"]) >= 2
+    for where, texts in found.items():
+        assert texts and all(text == expected for text in texts), where
 
 
 # --------------------------------------------------------------------------
@@ -611,13 +708,13 @@ def test_new_columns_reach_an_existing_detection_cache(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "engine", engine)
     db.init_db()
 
-    # The detection_cache shape that shipped before this task, with a row in it.
+    # An older detection_cache shape, from before signal_anomaly_level and the
+    # three columns of this task, with a row in it.
     with engine.begin() as connection:
         connection.execute(text("DROP TABLE detection_cache"))
         connection.execute(text(
             "CREATE TABLE detection_cache (id INTEGER PRIMARY KEY, site_id VARCHAR, "
-            "target_date VARCHAR, status VARCHAR, spatial_anomaly_z FLOAT, "
-            "signal_anomaly_level VARCHAR, index_values JSON)"
+            "target_date VARCHAR, status VARCHAR, spatial_anomaly_z FLOAT, index_values JSON)"
         ))
         connection.execute(text(
             "INSERT INTO detection_cache (id, site_id, target_date, status, index_values) "
@@ -626,15 +723,15 @@ def test_new_columns_reach_an_existing_detection_cache(tmp_path, monkeypatch):
 
     db.init_db()
 
-    added = {"signal_robust_z", "signal_anomaly_reason", "baseline_version"}
+    added = {"signal_anomaly_level", "signal_robust_z", "signal_anomaly_reason", "baseline_version"}
     columns = {column["name"] for column in inspect(engine).get_columns("detection_cache")}
     assert added <= columns
     with engine.connect() as connection:
         # An addition, not a reset: the row survives with the new columns null.
         assert connection.execute(text(
-            "SELECT site_id, index_values, signal_robust_z, signal_anomaly_reason, baseline_version "
-            "FROM detection_cache"
-        )).all() == [("kept-site", '{"ndci": 0.2}', None, None, None)]
+            "SELECT site_id, index_values, signal_anomaly_level, signal_robust_z, "
+            "signal_anomaly_reason, baseline_version FROM detection_cache"
+        )).all() == [("kept-site", '{"ndci": 0.2}', None, None, None, None)]
 
     db.init_db()  # idempotent
     assert {column["name"] for column in inspect(engine).get_columns("detection_cache")} == columns

@@ -13,6 +13,7 @@ import pytest
 from src import baseline_store
 from src.baseline_store import (
     BASELINE_ROOT,
+    ArtifactExists,
     latest_artifact_path,
     read_artifact,
     write_artifact,
@@ -63,15 +64,37 @@ def test_write_creates_missing_root(tmp_path):
     assert path.parent == root
 
 
-def test_rewriting_the_same_version_replaces_it_and_leaves_no_debris(tmp_path):
+def test_rewriting_the_same_version_is_refused_by_default(tmp_path):
+    """A version is what cached anomalies are paired with; its content must not change silently."""
+    version = "TEST-20261009-aaaaaaaa"
+    path = write_artifact(tmp_path, _manifest(version), _rows())
+    replacement = {"bangsaen": [{"acquisition_date": "2025-02-01", "ndci": 0.2}]}
+
+    with pytest.raises(ArtifactExists) as excinfo:
+        write_artifact(tmp_path, _manifest(version), replacement)
+
+    assert isinstance(excinfo.value, FileExistsError)
+    assert excinfo.value.path == path
+    assert version in str(excinfo.value)
+    _, rows = read_artifact(path)
+    assert rows == _rows()  # untouched
+    assert sorted(p.name for p in tmp_path.iterdir()) == [version]  # no scratch left
+
+
+def test_rewriting_the_same_version_with_replace_replaces_it_and_leaves_no_debris(tmp_path):
     version = "TEST-20261009-aaaaaaaa"
     write_artifact(tmp_path, _manifest(version), _rows())
     replacement = {"bangsaen": [{"acquisition_date": "2025-02-01", "ndci": 0.2}]}
-    path = write_artifact(tmp_path, _manifest(version), replacement)
+    path = write_artifact(tmp_path, _manifest(version), replacement, replace=True)
 
     _, rows = read_artifact(path)
     assert rows == replacement
     assert sorted(p.name for p in tmp_path.iterdir()) == [version]
+
+
+def test_replace_on_a_new_version_simply_writes_it(tmp_path):
+    path = write_artifact(tmp_path, _manifest("TEST-20261009-aaaaaaaa"), _rows(), replace=True)
+    assert read_artifact(path)[1] == _rows()
 
 
 def test_non_finite_values_are_refused_rather_than_written_as_invalid_json(tmp_path):
