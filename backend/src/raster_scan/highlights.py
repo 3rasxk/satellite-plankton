@@ -61,16 +61,25 @@ The rules, in order
 6. **Fewer than n separable cells** -> fewer pins and
    `reason = "only k separable measured cells"`; an empty cohort ->
    `pins == []` and `reason = "no measured cells"`.
-7. **Degenerate readings never pin.** A cell whose NDCI is exactly +/-1
-   (|ndci| >= 1 - 1e-6, `cell_anomaly.DEGENERATE_NDCI_ABS`) has a zero
-   band (B4 = 0 gives +1, B5 = 0 gives -1), which is not a physical
-   water-colour value; in the stored rasters such cells sit mostly at
-   mask edges and would otherwise top every ranking (run 5: 90 cells at
-   exactly 1.0). They stay in the cohort -- the map paints them, a click
-   reports them -- so `cohort_size` and percentiles are unchanged, but
-   they are skipped as pins (and so cannot suppress a neighbour) and
-   counted in `excluded_degenerate`. Applies in both modes; in anomaly
-   mode they are also never assessed (`invalid`).
+7. **Data-quality screens: screened cells never pin** (rules and their
+   rationale in `cell_anomaly`'s docstring, "Data-quality screens").
+   * Degenerate NDCI: exactly +/-1 (|ndci| >= 1 - 1e-6) means a zero band,
+     not a water-colour value (run 5: 90 cells at 1.0 topped every list)
+     -> counted in `excluded_degenerate`.
+   * Low visible signal: any stored visible band (B4, B3, B2) below
+     `cell_anomaly.MIN_VISIBLE_DN` = 50 DN -- a DEVELOPER-CHOSEN screening
+     threshold, not validated against field data; near-black pixels make
+     NDCI explode (run 6: the top anomaly pins had red 1-13 DN) -> counted
+     in `excluded_low_signal` (cells that are not also degenerate).
+   Screened cells stay in the cohort -- the map paints them, a click
+   reports them -- so `cohort_size` and percentiles are unchanged; they are
+   skipped as pins and so cannot suppress a neighbour. A blob without the
+   visible bands cannot be screened: NDCI mode ranks as before with
+   `excluded_low_signal = None` and a `quality_note`; anomaly mode refuses
+   (`cell_anomaly.VisibleBandsMissing`). Every pin carries the stored
+   `visible_bands_dn` (None without the bands) so a reader can see the
+   signal behind its value. Applies in both modes; in anomaly mode the
+   screened cells are the `invalid` / `low_signal` buckets.
 
 Limitations -- read before quoting a pin
 -----------------------------------------
@@ -131,7 +140,13 @@ EARTH_RADIUS_M = 6_371_008.8
 NO_MEASURED_CELLS = "no measured cells"
 FEWER_SEPARABLE_TEMPLATE = "only {k} separable measured cells"
 NONE_ELIGIBLE_TEMPLATE = (
-    "no measured cells eligible for pins ({x} excluded: NDCI exactly +/-1, a zero band)"
+    "no measured cells eligible for pins (all {x} excluded by the data-quality screens: "
+    "NDCI exactly +/-1, or a visible band below the minimum signal)"
+)
+NO_VISIBLE_BANDS_NOTE = (
+    "this run's stored cells carry no visible bands (true_red/true_green/true_blue), so "
+    "the low-signal screen could not run: pins are not screened for near-black pixels, "
+    "whose NDCI is unreliable"
 )
 
 # The 8 neighbours, as (row, col) offsets.
@@ -241,12 +256,14 @@ def rank_cells(
 
     Returns:
         {"cohort_size": int, "pins": [pin, ...], "reason": str | None,
-        "excluded_degenerate": int}. Each pin: rank, cell_lat, cell_lng,
+        "excluded_degenerate": int, "excluded_low_signal": int | None,
+        "quality_note": str | None}. Each pin: rank, cell_lat, cell_lng,
         pixel_centre_lat, pixel_centre_lng, index_values, percentile,
         date_ms, acquired_date, acquired_at, edge_of_no_data, metric_value,
-        risk_tier (always None). Degenerate cells (rule 7) are counted in
-        `cohort_size` and in every percentile but never pinned;
-        `excluded_degenerate` says how many there were.
+        visible_bands_dn, risk_tier (always None). Screened cells (rule 7)
+        are counted in `cohort_size` and in every percentile but never
+        pinned; `excluded_low_signal` is None (and `quality_note` says why)
+        when the blob stores no visible bands.
 
     Raises:
         ValueError: unknown metric, n < 1, or a negative separation.
@@ -260,10 +277,14 @@ def rank_cells(
     finite = np.isfinite(values)
     index, rows, cols, values = index[finite], rows[finite], cols[finite], values[finite]
 
+    visible = cell_anomaly.visible_dn(cells)
+    quality_note = None if visible is not None else NO_VISIBLE_BANDS_NOTE
     cohort_size = int(index.size)
     if cohort_size == 0:
         return {"cohort_size": 0, "pins": [], "reason": NO_MEASURED_CELLS,
-                "excluded_degenerate": 0}
+                "excluded_degenerate": 0,
+                "excluded_low_signal": 0 if visible is not None else None,
+                "quality_note": quality_note}
 
     # lexsort: the LAST key is primary. Metric descending, then row, then col.
     order = np.lexsort((cols, rows, -values))
@@ -271,11 +292,18 @@ def rank_cells(
     lat = np.asarray(cells["lat"], dtype=np.float64)[index]
     lng = np.asarray(cells["lng"], dtype=np.float64)[index]
 
-    # Rule 7: a degenerate NDCI (a zero band) stays in the cohort -- the map
-    # paints it -- but can never be a pin, and never suppresses one.
-    eligible = np.flatnonzero(
-        ~cell_anomaly.is_degenerate_ndci(np.asarray(cells["ndci"], dtype=np.float64)[index]))
-    excluded = cohort_size - int(eligible.size)
+    # Rule 7: a degenerate NDCI (a zero band) or a low visible signal stays
+    # in the cohort -- the map paints it -- but can never be a pin, and never
+    # suppresses one. The two counts are disjoint: degenerate first.
+    degenerate = cell_anomaly.is_degenerate_ndci(np.asarray(cells["ndci"], dtype=np.float64)[index])
+    if visible is not None:
+        low_signal = cell_anomaly.is_low_signal(*(band[index] for band in visible)) & ~degenerate
+        excluded_low_signal: int | None = int(np.count_nonzero(low_signal))
+    else:  # the screen cannot run: rank as before and say so (quality_note)
+        low_signal = np.zeros(cohort_size, dtype=bool)
+        excluded_low_signal = None
+    eligible = np.flatnonzero(~degenerate & ~low_signal)
+    excluded = int(np.count_nonzero(degenerate))
     chosen = [int(eligible[p]) for p in _greedy_nms(lat[eligible], lng[eligible],
                                                     n, min_separation_m)]
 
@@ -302,17 +330,26 @@ def rank_cells(
             "metric_value": value,
             "edge_of_no_data": _edge_of_no_data(row, col, painted, grid, polygon),
             "risk_tier": None,
+            "visible_bands_dn": _visible_bands_dn(visible, stored),
             **_cell_date_fields(int(dates[stored])),
         })
 
     if len(pins) >= n:
         reason = None
     elif eligible.size == 0:
-        reason = NONE_ELIGIBLE_TEMPLATE.format(x=excluded)
+        reason = NONE_ELIGIBLE_TEMPLATE.format(x=cohort_size)
     else:
         reason = FEWER_SEPARABLE_TEMPLATE.format(k=len(pins))
     return {"cohort_size": cohort_size, "pins": pins, "reason": reason,
-            "excluded_degenerate": excluded}
+            "excluded_degenerate": excluded, "excluded_low_signal": excluded_low_signal,
+            "quality_note": quality_note}
+
+
+def _visible_bands_dn(visible, stored: int) -> dict[str, float | None] | None:
+    """One cell's stored visible DN for a pin; None when the blob has none."""
+    if visible is None:
+        return None
+    return cell_anomaly.visible_bands_dict(*(band[stored] for band in visible))
 
 
 def _greedy_nms(lat: np.ndarray, lng: np.ndarray, n: int, min_separation_m: float) -> list[int]:
@@ -386,16 +423,24 @@ def rank_anomaly_cells(
     z, x 100; `metric_value` is the pin's robust z.
 
     Returns:
-        {"cohort_size", "pins", "reason", "counts", "excluded_degenerate"}
-        (degenerate cells are in `counts["invalid"]`). Each pin: the ndci-mode
+        {"cohort_size", "pins", "reason", "counts", "excluded_degenerate",
+        "excluded_low_signal", "quality_note" (None)} (degenerate cells are in
+        `counts["invalid"]`, low-signal ones in `counts["low_signal"]`).
+        Each pin: the ndci-mode
         fields plus robust_z, median_ndci, mad, n_dates, anomaly_level
         ("watch" | "high"); risk_tier always None. `counts` is
         `cell_anomaly.counts` (it partitions the cohort).
 
     Raises:
         ValueError: n < 1 or a negative separation.
+        cell_anomaly.VisibleBandsMissing: the blob stores no visible bands,
+            so the low-signal screen cannot run -- nothing is scored.
     """
     _validate_arguments(n, min_separation_m)
+    visible = cell_anomaly.visible_dn(cells)
+    if visible is None:
+        raise cell_anomaly.VisibleBandsMissing(
+            "the run's stored cells carry no visible bands; the low-signal screen cannot run")
     index, rows, cols = _painted_cells(cells, grid, polygon)
     dates = np.asarray(cells[bridge.RASTER_DATE_BAND])
     ndci = np.asarray(cells["ndci"], dtype=np.float64)[index]
@@ -404,15 +449,25 @@ def rank_anomaly_cells(
 
     assessed = cell_anomaly.assess(
         ndci, lat_all[index], lng_all[index], dates[index].astype(np.int64), context,
+        visible=tuple(band[index] for band in visible),
     )
     counts = cell_anomaly.counts(assessed)
     measured, assessable = counts["measured"], counts["assessable"]
     # Degenerate cells are `invalid` (never assessed, never pins); counted
     # here as well so both modes report the same exclusion.
-    excluded = int(np.count_nonzero(cell_anomaly.is_degenerate_ndci(ndci)))
+    degenerate = cell_anomaly.is_degenerate_ndci(ndci)
+    excluded = int(np.count_nonzero(degenerate))
+    # Same definition as NDCI mode (low signal and not degenerate); the
+    # `counts.low_signal` bucket can be smaller (an `invalid` cell for
+    # another reason is counted there first).
+    excluded_low = int(np.count_nonzero(
+        cell_anomaly.is_low_signal(assessed["red"], assessed["green"], assessed["blue"])
+        & ~degenerate))
+    extra = {"excluded_degenerate": excluded, "excluded_low_signal": excluded_low,
+             "quality_note": None}
     if measured == 0:
         return {"cohort_size": 0, "pins": [], "reason": NO_MEASURED_CELLS, "counts": counts,
-                "excluded_degenerate": 0}
+                **extra}
 
     z = assessed["robust_z"]
     is_assessable = assessed["reason"] == 0
@@ -451,6 +506,7 @@ def rank_anomaly_cells(
             "mad": described["mad"],
             "n_dates": described["n_dates"],
             "anomaly_level": described["level"],
+            "visible_bands_dn": described["visible_bands_dn"],
             **_cell_date_fields(int(dates[stored])),
         })
 
@@ -463,10 +519,10 @@ def rank_anomaly_cells(
     else:
         reason = FEWER_MET_TEMPLATE.format(k=len(pins), a=assessable, m=measured)
     return {"cohort_size": measured, "pins": pins, "reason": reason, "counts": counts,
-            "excluded_degenerate": excluded}
+            **extra}
 
 
-def _read_run_cells(run: RasterScanRun) -> dict:
+def read_run_cells(run: RasterScanRun) -> dict:
     """The run's stored cells, failing exactly as `pixel.inspect_run` does."""
     if not run.blob_path:
         raise RasterCellsUnavailableError(
@@ -500,7 +556,7 @@ def rank_run(
             null -- the overlay may still be on screen, but no number
             behind it can be ranked.
     """
-    cells = _read_run_cells(run)
+    cells = read_run_cells(run)
     return rank_cells(
         cells,
         grid=grid_for_run(run, cells),
@@ -521,7 +577,7 @@ def rank_anomaly_run(
 ) -> dict[str, Any]:
     """`rank_anomaly_cells` for a run the caller selected; `rank_run`'s blob
     read and errors (`RasterCellsUnavailableError`)."""
-    cells = _read_run_cells(run)
+    cells = read_run_cells(run)
     return rank_anomaly_cells(
         cells,
         grid=grid_for_run(run, cells),

@@ -608,6 +608,18 @@ class RasterScanResponse(DisclaimerMixin):
         "this system has not checked -- never 'no newer scene'.")
 
 
+class VisibleBandsDN(BaseModel):
+    """The cell's stored visible bands, raw COPERNICUS/S2_SR_HARMONIZED digital
+    numbers (reflectance x 10000): red = B4, green = B3, blue = B2. Shown so a
+    reader can see the signal behind an index value; the low-signal screen
+    excludes a cell when any of them is below 50 DN (developer-chosen, not
+    validated). Null where the stored value is not finite."""
+
+    red: float | None
+    green: float | None
+    blue: float | None
+
+
 class RasterPixelAnomaly(BaseModel):
     """One raster cell against its own TEST seasonal cell baseline.
 
@@ -616,8 +628,11 @@ class RasterPixelAnomaly(BaseModel):
     z >= 2, high at z >= 3 (provisional engineering boundaries). Assessed
     only when the cell is acquired strictly after the baseline's
     history_end, at most 14 days before the run's date_used, with a
-    baseline cell of n >= the declared floor and MAD > 0; otherwise
-    `reason` says which rule failed first and z/level are null.
+    baseline cell of n >= the declared floor and MAD > 0, and only when the
+    reading passes both data-quality screens (NDCI not exactly ±1; every
+    visible band >= 50 DN); otherwise `reason` says which rule failed first
+    and z/level are null. Null altogether when the run's blob stores no
+    visible bands (an unscreened cell is never scored).
     """
 
     robust_z: float | None = Field(description="Robust z; null unless assessed.")
@@ -630,9 +645,13 @@ class RasterPixelAnomaly(BaseModel):
     level: Literal["normal", "watch", "high"] | None = Field(
         description="Anomaly level against the cell's own history (TEST); null unless "
         "assessed. 'normal' does not mean safe water.")
-    reason: Literal["invalid", "too_old", "not_after_history", "no_baseline",
+    reason: Literal["invalid", "low_signal", "too_old", "not_after_history", "no_baseline",
                     "insufficient_dates", "zero_mad"] | None = Field(
-        description="Why the cell was not assessed (first failing rule); null when it was.")
+        description="Why the cell was not assessed (first failing rule of seven); null when "
+        "it was. 'invalid' includes a degenerate NDCI of exactly ±1; 'low_signal' a visible "
+        "band below 50 DN (developer-chosen data-quality screen, not validated).")
+    visible_bands_dn: VisibleBandsDN = Field(
+        description="The stored visible bands the low-signal screen judged.")
     baseline_version: str = Field(description="The TEST baseline version used.")
     season_key: str = Field(description="Season window of the run's date_used, e.g. 'm09+-1'.")
 
@@ -773,6 +792,10 @@ class RasterHighlightPin(BaseModel):
         default=None, description="Always null: no tier is computed for a pin -- no valid "
         "spectral-index baseline or validated threshold exists. Reserved so a future, "
         "separately approved gate can fill it without a contract change.")
+    visible_bands_dn: VisibleBandsDN | None = Field(
+        default=None, description="The cell's stored visible bands (raw DN: red B4, green "
+        "B3, blue B2), so a reader can see the signal behind the value. Null when the run's "
+        "blob stores no visible bands.")
 
 
 class RasterHighlightsResponse(DisclaimerMixin):
@@ -794,8 +817,10 @@ class RasterHighlightsResponse(DisclaimerMixin):
             "percentile": 99.99, "metric_value": 0.112, "date_ms": 1788492600000,
             "acquired_date": "2026-09-04", "acquired_at": "2026-09-04T03:30:00Z",
             "edge_of_no_data": False, "risk_tier": None,
+            "visible_bands_dn": {"red": 412.0, "green": 655.0, "blue": 803.0},
         }],
         "reason": None, "baseline": None, "excluded_degenerate": 0,
+        "excluded_low_signal": 12, "quality_note": None,
         "disclaimer": DISCLAIMER_TEXT,
     }})
 
@@ -827,6 +852,16 @@ class RasterHighlightsResponse(DisclaimerMixin):
         "(mostly mask-edge artefacts). They stay in `cohort_size` and in every percentile "
         "-- the map paints them -- but are never pinned. In 'anomaly' mode they are also "
         "counted in `counts.invalid`.")
+    excluded_low_signal: int | None = Field(
+        description="Measured cells (not already degenerate) excluded from pins because a "
+        "visible band (B4, B3 or B2) is below 50 DN: near-black pixels, where NDCI is a "
+        "ratio of noise. A developer-chosen data-quality screen, not validated against "
+        "field data. They stay in `cohort_size` and every percentile. Null -- not 0 -- when "
+        "the run's blob stores no visible bands and the screen could not run (see "
+        "`quality_note`).")
+    quality_note: str | None = Field(
+        default=None, description="Set when a data-quality screen could not run for this "
+        "run (no visible bands stored); null otherwise.")
 
 
 # --------------------------------------------------------------------------
@@ -859,10 +894,11 @@ class RasterAnomalyPin(RasterHighlightPin):
 
 
 class RasterAnomalyCounts(BaseModel):
-    """How the measured cells of the run were assessed. `assessable` plus the SIX
+    """How the measured cells of the run were assessed. `assessable` plus the SEVEN
     reason counts equals `measured`; each unassessable cell is counted once, in
-    the first rule it fails (invalid, too_old, not_after_history, no_baseline,
-    insufficient_dates, zero_mad). `watch` and `high` count assessable cells."""
+    the first rule it fails (invalid, low_signal, too_old, not_after_history,
+    no_baseline, insufficient_dates, zero_mad). `watch` and `high` count
+    assessable cells."""
 
     measured: int = Field(description="Cells the overlay paints (the cohort).")
     assessable: int = Field(description="Cells with a robust z.")
@@ -875,6 +911,10 @@ class RasterAnomalyCounts(BaseModel):
     invalid: int = Field(
         description="NDCI non-finite, outside [-1, 1] or degenerate (exactly ±1: a zero "
         "band), or acquired after date_used.")
+    low_signal: int = Field(
+        description="A visible band (B4, B3 or B2) below 50 DN, or not finite: near-black "
+        "pixels where NDCI is unreliable. A developer-chosen data-quality screen, not "
+        "validated against field data.")
     watch: int = Field(description="Assessable cells with 2 <= z < 3.")
     high: int = Field(description="Assessable cells with z >= 3.")
     flagged_share: float | None = Field(
@@ -942,13 +982,14 @@ class RasterAnomalyHighlightsResponse(RasterHighlightsResponse):
             "acquired_date": "2026-10-04", "acquired_at": "2026-10-04T03:30:00Z",
             "edge_of_no_data": False, "risk_tier": None, "robust_z": 3.4,
             "median_ndci": 0.043, "mad": 0.0137, "n_dates": 44, "anomaly_level": "high",
+            "visible_bands_dn": {"red": 412.0, "green": 655.0, "blue": 803.0},
         }],
         "counts": {"measured": 187560, "assessable": 180001, "no_baseline": 512,
                    "insufficient_dates": 1047, "zero_mad": 0, "not_after_history": 0,
-                   "too_old": 6000, "invalid": 0, "watch": 2210, "high": 640,
-                   "flagged_share": 0.01583},
+                   "too_old": 6000, "invalid": 0, "low_signal": 640, "watch": 2210,
+                   "high": 640, "flagged_share": 0.01583},
         "reason": None, "baseline": {"mode": "test", "valid": True, "...": "..."},
-        "excluded_degenerate": 0,
+        "excluded_degenerate": 0, "excluded_low_signal": 640, "quality_note": None,
         "disclaimer": DISCLAIMER_TEXT_TEST_BASELINE,
     }})
 
@@ -1124,6 +1165,37 @@ class MethodsBaselineStatus(BaselineInfo):
     kind: str | None = Field(default=None, description="'test' in test mode, else null.")
 
 
+class DegenerateNdciScreen(BaseModel):
+    """src/raster_scan/cell_anomaly.py's degenerate-NDCI screen, as the code applies it."""
+
+    rule: str = Field(description="When a reading is degenerate.")
+    threshold_abs: float = Field(description="|ndci| at or above this is degenerate.")
+    meaning: str
+    effect: str
+    status: str
+
+
+class LowSignalScreen(BaseModel):
+    """src/raster_scan/cell_anomaly.py's low-visible-signal screen, as the code applies it."""
+
+    rule: str = Field(description="When a cell is low_signal.")
+    min_visible_dn: int = Field(description="Minimum stored DN on each visible band.")
+    approx_reflectance: float = Field(description="min_visible_dn / 10000 (S2 SR scale).")
+    bands: list[str] = Field(description="Sentinel-2 bands screened (stored as true_blue, "
+                             "true_green, true_red).")
+    rationale: str
+    effect: str
+    status: str = Field(description="'developer-chosen, not validated'.")
+
+
+class QualityScreens(BaseModel):
+    """Data-quality screens: they change which raster cells are scored and pinned,
+    never the statistic."""
+
+    degenerate_ndci: DegenerateNdciScreen
+    low_signal: LowSignalScreen
+
+
 class MethodsResponse(DisclaimerMixin):
     """What the Methods page shows, read from the code that computes it.
 
@@ -1143,4 +1215,7 @@ class MethodsResponse(DisclaimerMixin):
     season_rule: str = Field(description="detection/src/baseline.py SEASON_RULE.")
     season_windows: list[SeasonWindow]
     baseline: MethodsBaselineStatus
+    quality_screens: QualityScreens = Field(
+        description="The raster data-quality screens in force, read from "
+        "src/raster_scan/cell_anomaly.py.")
     references: list[MethodsReference]

@@ -967,14 +967,17 @@ _ANOMALY_RANKING = ("descending robust z against this location's own TEST season
 # Every key of the ndci-mode response and pin before anomaly mode existed,
 # plus `excluded_degenerate` (fix round 1, 2026-10-09: added deliberately --
 # degenerate NDCI cells are counted but never pinned).
+# Fix round 2 (2026-10-10) adds `excluded_low_signal`, `quality_note` and the
+# pins' `visible_bands_dn`, also deliberately.
 _NDCI_RESPONSE_KEYS = {"run_id", "mode", "metric", "ranking", "n_requested", "min_separation_m",
                        "cohort_size", "pins", "reason", "baseline", "disclaimer",
-                       "excluded_degenerate"}
+                       "excluded_degenerate", "excluded_low_signal", "quality_note"}
 _NDCI_PIN_KEYS = {"rank", "cell_lat", "cell_lng", "pixel_centre_lat", "pixel_centre_lng",
                   "index_values", "percentile", "metric_value", "date_ms", "acquired_date",
-                  "acquired_at", "edge_of_no_data", "risk_tier"}
+                  "acquired_at", "edge_of_no_data", "risk_tier", "visible_bands_dn"}
 _COUNT_KEYS = ["measured", "assessable", "no_baseline", "insufficient_dates", "zero_mad",
-               "not_after_history", "too_old", "invalid", "watch", "high", "flagged_share"]
+               "not_after_history", "too_old", "invalid", "low_signal", "watch", "high",
+               "flagged_share"]
 _STATUS_KEYS = {"mode", "valid", "kind", "version", "built_at", "history_start", "history_end",
                 "season_rule", "min_independent_dates", "median_independent_dates",
                 "min_season_dates_by_location", "preprocessing_signature", "base_rates", "reason"}
@@ -1072,7 +1075,7 @@ def test_anomaly_response_carries_counts_baseline_and_the_test_disclaimer(client
     assert list(counts) == _COUNT_KEYS
     measured = afx.EP_ROWS * afx.EP_COLS
     assert counts["measured"] == body["cohort_size"] == measured
-    assert counts["assessable"] + sum(counts[k] for k in _COUNT_KEYS[2:8]) == measured
+    assert counts["assessable"] + sum(counts[k] for k in _COUNT_KEYS[2:9]) == measured
     assert counts["high"] == 3 and counts["watch"] == 1
     assert counts["flagged_share"] == 4 / measured
     assert body["excluded_degenerate"] == 0
@@ -1156,6 +1159,38 @@ def test_anomaly_mode_with_the_mode_off_is_409_even_without_a_run(client, tmp_pa
     assert response.status_code == 409
     assert response.json()["detail"]["reason"] == "mode_off"
     assert client.get("/raster-scan/highlights").status_code == 404
+
+
+def test_anomaly_mode_409_when_the_blob_has_no_visible_bands(client, tmp_path, cell_root):
+    """Never score unscreened cells: explicit anomaly is refused, the default
+    falls back to NDCI ranking, which says the screen did not run."""
+    afx.write_cell_artefact(cell_root, afx.endpoint_stats())
+    afx.clear_runs()
+    cells = {k: v for k, v in afx.endpoint_cells(_PEAKS).items() if k not in afx.TRUE_COLOR}
+    afx.store_run(tmp_path, cells)
+    response = client.get("/raster-scan/highlights", params={"mode": "anomaly"})
+    assert response.status_code == 409
+    assert response.json()["detail"]["reason"] == "visible_bands_missing"
+    assert response.json()["detail"]["season_key"] == "m09+-1"
+    fallback = client.get("/raster-scan/highlights").json()
+    assert fallback["mode"] == "ndci" and set(fallback) == _NDCI_RESPONSE_KEYS
+    assert fallback["excluded_low_signal"] is None
+    assert "low-signal screen could not run" in fallback["quality_note"]
+    assert fallback["disclaimer"] == DISCLAIMER_TEXT
+
+
+def test_ndci_mode_counts_low_signal_exclusions_on_a_served_run(client, tmp_path, cell_root):
+    afx.clear_runs()
+    cells = afx.endpoint_cells({(2, 2): 0.4, (8, 8): 0.3})
+    position = 2 * afx.EP_COLS + 2
+    cells["true_red"][position] = 13.0
+    afx.store_run(tmp_path, cells)
+    body = client.get("/raster-scan/highlights", params={"mode": "ndci", "n": 3}).json()
+    assert body["excluded_low_signal"] == 1 and body["excluded_degenerate"] == 0
+    assert body["quality_note"] is None
+    assert body["pins"][0]["index_values"]["ndci"] == float(np.float32(0.3))
+    assert body["pins"][0]["visible_bands_dn"] == {"red": 500.0, "green": 500.0, "blue": 500.0}
+    assert body["cohort_size"] == afx.EP_ROWS * afx.EP_COLS
 
 
 def test_anomaly_mode_404_when_there_is_no_run_in_test_mode(client, cell_root):

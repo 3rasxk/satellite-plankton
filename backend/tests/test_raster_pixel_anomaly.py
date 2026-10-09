@@ -66,6 +66,10 @@ K_NORTH = 7300  # north edge = 7300 * D ~ 13.115 N
 K_WEST = 55780  # west edge = 55780 * D ~ 100.218 E
 
 DEFAULT_STATS = (0.02, 0.01, 40)  # median, mad, n
+# Stored visible DN (red B4, green B3, blue B2) of an ordinary bright-enough
+# water pixel, well above the 50 DN low-signal screen.
+VISIBLE_DEFAULT = (400.0, 350.0, 300.0)
+TRUE_COLOR = bridge.RASTER_TRUE_COLOR_BANDS
 
 
 def f32(value: float) -> float:
@@ -223,14 +227,19 @@ def baseline_stats(rows: int = ROWS, cols: int = COLS, *, overrides=None, missin
     }
 
 
-def raster_cells(grid: OverlayGrid, field, *, dates=None, absent=(), masked=()) -> dict:
+def raster_cells(grid: OverlayGrid, field, *, dates=None, absent=(), masked=(),
+                 visible=None, with_visible=True) -> dict:
     """One stored cell per pixel of ``field`` (rows x cols NDCI), 0.1 cell
     north-east of the lattice centre. ``dates``: {(r, c): epoch ms}
-    overrides of NEW_MS. ``masked``: GEE's masked export (date 0, 0.0)."""
+    overrides of NEW_MS. ``masked``: GEE's masked export (date 0, 0.0).
+    ``visible``: {(r, c): (red, green, blue) DN} overrides of
+    VISIBLE_DEFAULT; ``with_visible=False`` stores no visible bands."""
     centre_lats, centre_lngs = grid.pixel_centres()
     absent, masked = set(absent), set(masked)
     dates = dates or {}
-    out = {"lat": [], "lng": [], DATE_BAND: [], **{b: [] for b in INDEX_BANDS}}
+    visible = visible or {}
+    out = {"lat": [], "lng": [], DATE_BAND: [], **{b: [] for b in INDEX_BANDS},
+           **{b: [] for b in TRUE_COLOR}}
     for r in range(grid.rows):
         for c in range(grid.cols):
             if (r, c) in absent:
@@ -239,7 +248,7 @@ def raster_cells(grid: OverlayGrid, field, *, dates=None, absent=(), masked=()) 
             out["lng"].append(centre_lngs[c] + 0.1 * D)
             if (r, c) in masked:
                 out[DATE_BAND].append(0)
-                for band in INDEX_BANDS:
+                for band in (*INDEX_BANDS, *TRUE_COLOR):
                     out[band].append(0.0)
                 continue
             out[DATE_BAND].append(dates.get((r, c), NEW_MS))
@@ -247,21 +256,33 @@ def raster_cells(grid: OverlayGrid, field, *, dates=None, absent=(), masked=()) 
             out["bda2"].append(1.0 + field[r][c])
             out["bda3"].append(0.3)
             out["b2_b3"].append(0.8)
-    return {
+            for band, dn in zip(TRUE_COLOR, visible.get((r, c), VISIBLE_DEFAULT)):
+                out[band].append(dn)
+    stored = {
         "lat": np.asarray(out["lat"], dtype=np.float64),
         "lng": np.asarray(out["lng"], dtype=np.float64),
         DATE_BAND: np.asarray(out[DATE_BAND], dtype=np.int64),
         **{b: np.asarray(out[b], dtype=np.float32) for b in INDEX_BANDS},
     }
+    if with_visible:
+        stored.update({b: np.asarray(out[b], dtype=np.float32) for b in TRUE_COLOR})
+    return stored
+
+
+def assess_all(cells: dict, context) -> dict:
+    """``cell_anomaly.assess`` over every stored cell, screened."""
+    return cell_anomaly.assess(cells["ndci"], cells["lat"], cells["lng"], cells[DATE_BAND],
+                               context, visible=cell_anomaly.visible_dn(cells))
 
 
 def assess_pixels(context, grid, cells, pixels) -> list[dict]:
     """``cell_anomaly.assess`` for the stored cells at the given pixels."""
     rows, cols = grid.cell_indices(cells["lat"], cells["lng"])
     index = [int(np.flatnonzero((rows == r) & (cols == c))[-1]) for r, c in pixels]
+    visible = cell_anomaly.visible_dn(cells)
     result = cell_anomaly.assess(
         cells["ndci"][index], cells["lat"][index], cells["lng"][index],
-        cells[DATE_BAND][index], context,
+        cells[DATE_BAND][index], context, visible=tuple(band[index] for band in visible),
     )
     return [cell_anomaly.describe(result, i) for i in range(len(index))]
 
@@ -402,22 +423,81 @@ def test_a_degenerate_ndci_is_invalid_and_never_assessed(cell_root):
     assert got[3]["reason"] is None and got[3]["level"] == "high", "just under the rule: a value"
 
 
+@pytest.mark.parametrize("band", [0, 1, 2], ids=["red_B4", "green_B3", "blue_B2"])
+def test_low_signal_boundary_is_50_dn_on_each_visible_band(cell_root, band):
+    """49 DN on ONE band screens the cell; 50 DN on every band does not."""
+    write_cell_artefact(cell_root, baseline_stats())
+    grid = lattice_grid()
+    field = np.full((ROWS, COLS), 0.08)  # z ~ 4: high if assessed
+    at_49 = list(VISIBLE_DEFAULT)
+    at_49[band] = 49.0
+    visible = {(0, 0): tuple(at_49), (0, 1): (50.0, 50.0, 50.0)}
+    got = assess_pixels(context_for(), grid, raster_cells(grid, field, visible=visible),
+                        [(0, 0), (0, 1)])
+    assert cell_anomaly.MIN_VISIBLE_DN == 50
+    assert got[0]["reason"] == "low_signal" and got[0]["robust_z"] is None
+    assert got[0]["visible_bands_dn"] == dict(zip(("red", "green", "blue"), at_49))
+    assert got[1]["reason"] is None and got[1]["level"] == "high"
+
+
+def test_a_near_black_cell_with_high_ndci_is_low_signal_not_an_anomaly(cell_root):
+    """The live run-6 pattern: red 1 DN, NDCI 0.97 -- a ratio of noise."""
+    write_cell_artefact(cell_root, baseline_stats())
+    grid = lattice_grid()
+    field = np.full((ROWS, COLS), 0.02)
+    field[2, 2] = 0.97
+    got = assess_pixels(context_for(), grid,
+                        raster_cells(grid, field, visible={(2, 2): (1.0, 20.0, 27.0)}), [(2, 2)])[0]
+    assert got["reason"] == "low_signal" and got["level"] is None
+    # The baseline facts are still shown: nothing is hidden, only not scored.
+    assert (got["median_ndci"], got["n_dates"]) == (f32(0.02), 40)
+
+
+def test_degenerate_takes_priority_over_low_signal_and_nan_bands_are_screened(cell_root):
+    write_cell_artefact(cell_root, baseline_stats())
+    grid = lattice_grid()
+    field = np.full((ROWS, COLS), 0.06)
+    field[0, 0] = 1.0  # degenerate AND near-black: `invalid` first
+    visible = {(0, 0): (0.0, 5.0, 5.0), (0, 1): (np.nan, 350.0, 300.0),
+               (0, 2): (400.0, np.inf, 300.0)}
+    got = assess_pixels(context_for(), grid, raster_cells(grid, field, visible=visible),
+                        [(0, 0), (0, 1), (0, 2)])
+    assert got[0]["reason"] == "invalid"
+    assert got[1]["reason"] == "low_signal", "an unverifiable band is screened, never assumed"
+    assert got[1]["visible_bands_dn"]["red"] is None
+    assert got[2]["reason"] == "low_signal"
+
+
+def test_assess_requires_the_visible_bands():
+    with pytest.raises(TypeError):
+        cell_anomaly.assess(np.zeros(1), np.zeros(1), np.zeros(1), np.zeros(1), None)
+
+
+def test_visible_bands_are_b4_b3_b2_as_the_raster_pipeline_stores_them():
+    """Read, not trusted: data-pipeline's _index_bands stores B4/B3/B2 under
+    true_red/true_green/true_blue."""
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[2] / "data-pipeline" / "src" / "raster.py").read_text()
+    for index, (stored, band) in enumerate(cell_anomaly.VISIBLE_BANDS):
+        assert stored == bridge.RASTER_TRUE_COLOR_BANDS[index]
+        assert f"true_{('red', 'green', 'blue')[index]} = b{band[1]}.rename(" \
+               f"RASTER_TRUE_COLOR_BANDS[{index}])" in source
+
+
 def test_flagged_share_is_watch_plus_high_over_assessable(cell_root):
     write_cell_artefact(cell_root, baseline_stats())
     grid = lattice_grid()
     field = np.full((ROWS, COLS), 0.02)
     field[1, 1], field[2, 2], field[3, 3] = 0.06, 0.07, 0.09  # watch, high, high
     cells = raster_cells(grid, field, dates={(4, 4): ms_on(HISTORY_END)})
-    result = cell_anomaly.assess(cells["ndci"], cells["lat"], cells["lng"], cells[DATE_BAND],
-                                 context_for())
+    result = assess_all(cells, context_for())
     counts = cell_anomaly.counts(result)
     assert (counts["watch"], counts["high"], counts["assessable"]) == (1, 2, ROWS * COLS - 1)
     assert counts["flagged_share"] == 3 / (ROWS * COLS - 1)
     on_history = raster_cells(grid, field, dates={(r, c): ms_on(HISTORY_END)
                                                   for r in range(ROWS) for c in range(COLS)})
-    none = cell_anomaly.counts(cell_anomaly.assess(
-        on_history["ndci"], on_history["lat"], on_history["lng"], on_history[DATE_BAND],
-        context_for()))
+    none = cell_anomaly.counts(assess_all(on_history, context_for()))
     assert none["assessable"] == 0 and none["flagged_share"] is None
 
 
@@ -427,7 +507,8 @@ def test_a_cell_without_a_baseline_key_is_no_baseline_never_a_default(cell_root)
     got = assess_pixels(context_for(), grid, raster_cells(grid, np.full((ROWS, COLS), 0.06)),
                         [(3, 3)])[0]
     assert got == {"robust_z": None, "median_ndci": None, "mad": None, "n_dates": None,
-                   "level": None, "reason": "no_baseline"}
+                   "level": None, "reason": "no_baseline",
+                   "visible_bands_dn": dict(zip(("red", "green", "blue"), VISIBLE_DEFAULT))}
 
 
 def test_reason_buckets_partition_the_measured_cells(cell_root):
@@ -447,9 +528,10 @@ def test_reason_buckets_partition_the_measured_cells(cell_root):
     field[rng.random((ROWS, COLS)) < 0.02] = 1.7
     choices = [NEW_MS, ms_on(HISTORY_END), ms_on("2026-08-25"), ms_on("2026-09-20")]
     dates = {(r, c): choices[int(rng.integers(0, 4))] for r in range(ROWS) for c in range(COLS)}
-    cells = raster_cells(grid, field, dates=dates)
-    result = cell_anomaly.assess(cells["ndci"], cells["lat"], cells["lng"], cells[DATE_BAND],
-                                 context_for())
+    dark = (12.0, 350.0, 300.0)
+    visible = {(r, c): dark for r in range(ROWS) for c in range(COLS) if rng.random() < 0.04}
+    cells = raster_cells(grid, field, dates=dates, visible=visible)
+    result = assess_all(cells, context_for())
     counts = cell_anomaly.counts(result)
     reasons = [counts[name] for name in cell_anomaly.REASON_ORDER]
     assert counts["measured"] == ROWS * COLS
@@ -472,8 +554,7 @@ def test_the_vectorised_z_is_what_assess_cells_classified(cell_root):
     grid = lattice_grid()
     rng = np.random.default_rng(9)
     cells = raster_cells(grid, rng.uniform(-0.05, 0.12, size=(ROWS, COLS)))
-    result = cell_anomaly.assess(cells["ndci"], cells["lat"], cells["lng"], cells[DATE_BAND],
-                                 context_for())
+    result = assess_all(cells, context_for())
     ok = result["reason"] == 0
     assert ok.all()
     z32, level, _ = logic.assess_cells(cells["ndci"], result["median_ndci"], result["mad"],
@@ -562,8 +643,9 @@ _PIXEL_KEYS_BEFORE = {
     "pixel_row", "pixel_col", "index_values", "unreadable_bands", "date_ms",
     "acquired_date", "acquired_at",
 }
+# + visible_bands_dn (fix round 2, 2026-10-10: added deliberately).
 _ANOMALY_KEYS = {"robust_z", "median_ndci", "mad", "n_dates", "level", "reason",
-                 "baseline_version", "season_key"}
+                 "baseline_version", "season_key", "visible_bands_dn"}
 
 # An endpoint fixture: a block of lattice cells inside the real study
 # polygon (13.10 N, 100.30 E), dated 2026-09-04, the run asking about
@@ -716,6 +798,32 @@ def test_pixel_reports_a_degenerate_reading_as_stored_but_never_assesses_it(
     assert body["anomaly"]["robust_z"] is None and body["anomaly"]["level"] is None
 
 
+def test_pixel_reports_low_signal_for_a_near_black_cell(client, tmp_path, cell_root):
+    write_cell_artefact(cell_root, endpoint_stats())
+    clear_runs()
+    cells = endpoint_cells({(6, 6): 0.97})
+    position = 6 * EP_COLS + 6
+    for band, dn in zip(TRUE_COLOR, (1.0, 20.0, 27.0)):
+        cells[band][position] = dn
+    store_run(tmp_path, cells)
+    lat, lng = lattice_centre((EP_ROW0 - 6, EP_COL0 + 6))
+    anomaly = client.get("/raster-scan/pixel", params={"lat": lat, "lng": lng}).json()["anomaly"]
+    assert anomaly["reason"] == "low_signal" and anomaly["robust_z"] is None
+    assert anomaly["visible_bands_dn"] == {"red": 1.0, "green": 20.0, "blue": 27.0}
+
+
+def test_pixel_anomaly_is_null_when_the_blob_has_no_visible_bands(client, tmp_path, cell_root):
+    """An unscreened cell is never scored; every reading field is unchanged."""
+    write_cell_artefact(cell_root, endpoint_stats())
+    clear_runs()
+    cells = {k: v for k, v in endpoint_cells({(3, 3): 0.09}).items() if k not in TRUE_COLOR}
+    store_run(tmp_path, cells)
+    lat, lng = lattice_centre((EP_ROW0 - 3, EP_COL0 + 3))
+    body = client.get("/raster-scan/pixel", params={"lat": lat, "lng": lng}).json()
+    assert body["state"] == "reading" and body["index_values"]["ndci"] == f32(0.09)
+    assert body["anomaly"] is None
+
+
 def test_pixel_never_500s_on_a_broken_cell_baseline(client, tmp_path, cell_root):
     manifest = write_cell_artefact(cell_root, endpoint_stats())
     (cell_root / manifest["baseline_version"] / "cells_m09.npz").write_bytes(b"garbage")
@@ -746,6 +854,8 @@ def test_pixel_anomaly_equals_the_highlights_pin_for_the_same_cell(client, tmp_p
         assert anomaly["n_dates"] == pin["n_dates"]
         assert anomaly["level"] == pin["anomaly_level"]
         assert anomaly["reason"] is None
+        assert anomaly["visible_bands_dn"] == pin["visible_bands_dn"] == {
+            "red": 500.0, "green": 500.0, "blue": 500.0}
         assert anomaly["baseline_version"] == highlights["baseline"]["version"]
         assert anomaly["season_key"] == highlights["baseline"]["level_b"]["season_key"]
         assert body["index_values"] == pin["index_values"]
@@ -770,8 +880,7 @@ def test_counts_json_is_plain_numbers(cell_root):
     write_cell_artefact(cell_root, baseline_stats())
     grid = lattice_grid()
     cells = raster_cells(grid, np.full((ROWS, COLS), 0.05))
-    result = cell_anomaly.assess(cells["ndci"], cells["lat"], cells["lng"], cells[DATE_BAND],
-                                 context_for())
+    result = assess_all(cells, context_for())
     counts = cell_anomaly.counts(result)
     assert all(type(v) is int for k, v in counts.items() if k != "flagged_share")
     assert type(counts["flagged_share"]) is float

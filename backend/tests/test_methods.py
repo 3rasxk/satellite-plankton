@@ -453,3 +453,33 @@ def test_test_mode_with_a_refused_artefact(client, _isolated, test_mode):
 def test_response_never_carries_a_risk_level(client):
     text = re.sub(r"\s+", " ", client.get("/methods").text)
     assert '"risk_level"' not in text
+
+
+# --------------------------------------------------------------------------
+# Data-quality screens (Task 13 fix round 2): read from cell_anomaly
+# --------------------------------------------------------------------------
+
+
+def test_quality_screens_are_the_constants_the_raster_code_applies(client):
+    from src.raster_scan import cell_anomaly
+
+    screens = _get(client)["quality_screens"]
+    assert set(screens) == {"degenerate_ndci", "low_signal"}
+    degenerate = screens["degenerate_ndci"]
+    assert degenerate["rule"] == cell_anomaly.DEGENERATE_NDCI_RULE == "abs(ndci) >= 1 - 1e-6"
+    assert float(degenerate["rule"].rsplit("- ", 1)[1]) == cell_anomaly.DEGENERATE_NDCI_TOLERANCE
+    assert degenerate["threshold_abs"] == cell_anomaly.DEGENERATE_NDCI_ABS
+    low = screens["low_signal"]
+    assert low["min_visible_dn"] == cell_anomaly.MIN_VISIBLE_DN == 50
+    assert low["bands"] == ["B2", "B3", "B4"]
+    assert low["approx_reflectance"] == 0.005
+    assert low["status"] == "developer-chosen, not validated"
+    assert low["rule"] == "any of B2, B3, B4 < 50 DN (or not a finite number)"
+
+
+def test_quality_screens_are_read_at_request_time(client, monkeypatch):
+    from src.raster_scan import cell_anomaly
+
+    monkeypatch.setattr(cell_anomaly, "MIN_VISIBLE_DN", 60)
+    low = _get(client)["quality_screens"]["low_signal"]
+    assert low["min_visible_dn"] == 60 and "< 60 DN" in low["rule"]

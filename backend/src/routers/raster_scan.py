@@ -382,10 +382,14 @@ def get_raster_pixel(
     rendered = _rendered_run(db, run_id)
     if rendered is None:
         raise HTTPException(status_code=404, detail=NO_RASTER_TO_QUERY)
+    # `pixel.inspect_run`, opened up so the one blob read also serves the
+    # anomaly block (which needs the cell's stored visible bands): same
+    # read, same errors and messages, same `inspect_cell` and grid.
     try:
-        found = pixel_lookup.inspect_run(rendered, lat, lng)
+        cells = highlight_ranking.read_run_cells(rendered)
     except pixel_lookup.RasterCellsUnavailableError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    found = pixel_lookup.inspect_cell(cells, lat, lng, pixel_lookup.grid_for_run(rendered, cells))
 
     # One baseline resolution; mode off returns before any file is read
     # and leaves every existing field (and the disclaimer) as it was.
@@ -393,7 +397,7 @@ def get_raster_pixel(
     anomaly = None
     disclaimer = DISCLAIMER_TEXT
     if isinstance(context, cell_anomaly.AnomalyContext):
-        anomaly = cell_anomaly.pixel_anomaly(found, context)
+        anomaly = cell_anomaly.pixel_anomaly(found, context, cells)
         disclaimer = context.disclaimer
 
     return RasterPixelResponse(
@@ -446,8 +450,11 @@ def get_raster_highlights(
     Run resolution and 404s are the pixel endpoint's: no rendered run, an
     explicit run that is not servable, or a run whose cells are gone.
     `mode=anomaly` answers 409 (`detail.reason`: mode_off,
-    no_cell_baseline, invalid:<code>, run_date_unusable) -- checked for
-    mode_off before the run, since no run could change that answer.
+    no_cell_baseline, invalid:<code>, run_date_unusable,
+    visible_bands_missing) -- checked for mode_off before the run, since no
+    run could change that answer. Both modes apply the data-quality
+    screens (src/raster_scan/cell_anomaly.py): degenerate NDCI and low
+    visible signal never pin.
     """
     status = None if mode == "ndci" else scientific_status.baseline_status()
     if mode == "anomaly" and status.get("mode") != "test":
@@ -461,21 +468,33 @@ def get_raster_highlights(
     if isinstance(context, cell_anomaly.Unavailable) and mode == "anomaly":
         raise _anomaly_unavailable(context)
 
-    anomaly_mode = isinstance(context, cell_anomaly.AnomalyContext)
-    metric = "ndci"  # ndci mode: the band the overlay draws
     try:
-        if anomaly_mode:
-            ranked = highlight_ranking.rank_anomaly_run(
-                rendered, context=context, n=n, min_separation_m=min_separation_m,
-            )
-        else:
-            ranked = highlight_ranking.rank_run(
-                rendered, n=n, min_separation_m=min_separation_m, metric=metric,
-            )
+        cells = highlight_ranking.read_run_cells(rendered)
     except pixel_lookup.RasterCellsUnavailableError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    grid = pixel_lookup.grid_for_run(rendered, cells)
 
-    if anomaly_mode:
+    ranked = None
+    if isinstance(context, cell_anomaly.AnomalyContext):
+        try:
+            ranked = highlight_ranking.rank_anomaly_cells(
+                cells, grid=grid, context=context, n=n, min_separation_m=min_separation_m,
+            )
+        except cell_anomaly.VisibleBandsMissing:
+            # Never score unscreened cells: refuse an explicit request, and
+            # let the default fall back to the NDCI ranking (which says so).
+            if mode == "anomaly":
+                raise _anomaly_unavailable(cell_anomaly.Unavailable(
+                    reason=cell_anomaly.VISIBLE_BANDS_MISSING, cause=None,
+                    season_key=context.season_key)) from None
+    metric = "ndci"  # ndci mode: the band the overlay draws
+    if ranked is None:
+        ranked = highlight_ranking.rank_cells(
+            cells, grid=grid, n=n, min_separation_m=min_separation_m, metric=metric,
+        )
+        context = None
+
+    if isinstance(context, cell_anomaly.AnomalyContext):
         return RasterAnomalyHighlightsResponse(
             run_id=rendered.id,
             mode="anomaly",

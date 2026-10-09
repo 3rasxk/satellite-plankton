@@ -31,36 +31,58 @@ fails in this order (so the reasons partition the measured cells):
                            DEGENERATE (|ndci| >= 1 - 1e-6, see below), or
                            acquired AFTER date_used (the observation rules
                            first, as in signal_anomaly);
-  2. `too_old`             acquired more than 14 days before date_used
+  2. `low_signal`          any visible band (B4 red, B3 green, B2 blue as
+                           stored) below MIN_VISIBLE_DN = 50 DN, or not a
+                           finite number (see "Data-quality screens");
+  3. `too_old`             acquired more than 14 days before date_used
                            (signal_anomaly.MAX_OBSERVATION_AGE_DAYS; 14
                            days exactly is allowed);
-  3. `not_after_history`   acquired on or before `level_b.history_end` --
+  4. `not_after_history`   acquired on or before `level_b.history_end` --
                            the leakage guard: the baseline may contain
                            that very acquisition, so it is never compared
                            with itself (strictly after only);
-  4. `no_baseline`         no baseline cell with its `cell_key` in this
+  5. `no_baseline`         no baseline cell with its `cell_key` in this
                            season's file (or unusable statistics);
-  5. `insufficient_dates`  n below the floor the Level B block declares
+  6. `insufficient_dates`  n below the floor the Level B block declares
                            (validated >= 30, never loosened);
-  6. `zero_mad`            MAD == 0 (z undefined).
+  7. `zero_mad`            MAD == 0 (z undefined).
 
 A reason is never a default: an unassessable cell has no z and no level.
 Dates are the cell's own UTC acquisition day (epoch ms // 86 400 000, the
-`acquired_date` the pixel endpoint reports). There are SIX reason buckets;
-`assessable` plus the six counts equals `measured`.
+`acquired_date` the pixel endpoint reports). There are SEVEN reason
+buckets; `assessable` plus the seven counts equals `measured`.
 
-Degenerate readings (backend rule, 2026-10-09)
-----------------------------------------------
-NDCI = (B5 - B4) / (B5 + B4) is exactly +1 when B4 is zero and exactly -1
-when B5 is zero. A zero band is not a physical water-colour value: in the
-stored rasters these cells sit mostly at mask edges (cloud, land, no-data)
-and saturate every ranking (run 5: 90 cells at 1.0, z 24-33, topping both
-pin lists). So a reading with |ndci| >= 1 - 1e-6 (`DEGENERATE_NDCI_ABS`,
-float32 noise included) is treated as unreadable: never assessed (counted
-in `invalid`) and never a pin in either highlight mode. It is still a
-measured cell -- the map paints it and `/raster-scan/pixel` reports it as
-stored. detection's [-1, 1] validity rule is unchanged; this is a stricter
-backend rule on top of it.
+Data-quality screens (backend rules, 2026-10-09/10)
+---------------------------------------------------
+Both screens change WHICH cells are scored and pinned, never the
+statistic. A screened cell is still a measured cell: the map paints it and
+`/raster-scan/pixel` reports its stored values. detection's [-1, 1]
+validity rule and its robust z are unchanged; these are stricter backend
+rules on top of them, applied in both highlight modes (and in anomaly mode
+they are the `invalid` and `low_signal` buckets).
+
+* Degenerate NDCI. NDCI = (B5 - B4) / (B5 + B4) is exactly +1 when B4 is
+  zero and exactly -1 when B5 is zero. A zero band is not a physical
+  water-colour value; in the stored rasters these cells sit mostly at mask
+  edges (run 5: 90 cells at 1.0, z 24-33, topping both pin lists). A
+  reading with |ndci| >= 1 - 1e-6 (`DEGENERATE_NDCI_ABS`, float32 noise
+  included) is never assessed (`invalid`) and never a pin.
+* Low visible signal. MIN_VISIBLE_DN = 50 DN (about 0.005 reflectance at
+  S2_SR_HARMONIZED's 1/10000 scale) on each of the stored visible bands.
+  THIS IS A DEVELOPER-CHOSEN SCREENING THRESHOLD, NOT VALIDATED AGAINST
+  FIELD DATA. Rationale: S2_SR_HARMONIZED removes the processing-baseline
+  offset and clips at 0, so very dark water, shadow and residual
+  cloud/land edges come out near 0 DN -- a noise floor where a ratio such
+  as NDCI explodes (live run 6: the top five anomaly pins, z 19-26 and NDCI
+  0.72-0.97, had red 1-13 DN while the run's red median is 356 and its 1st
+  percentile 127). A cell with ANY of red (B4), green (B3) or blue (B2)
+  below 50 DN, or with a non-finite stored value there (cannot be checked,
+  so screened), is `low_signal`: never assessed and never a pin. A run
+  whose blob does not store the three visible bands cannot be screened, so
+  it is never scored (anomaly mode answers 409 `visible_bands_missing`;
+  NDCI mode ranks as before and says the screen did not run). The value is
+  not configurable by environment on purpose: changing it changes what the
+  API scores, so it changes in code, with its tests.
 
 Limitations -- read before quoting a number from this
 -----------------------------------------------------
@@ -95,13 +117,14 @@ from ..site_anomaly import baseline_block, disclaimer_for, is_test_mode
 
 # Reason buckets, in the priority order of the module docstring.
 INVALID = "invalid"
+LOW_SIGNAL = "low_signal"
 TOO_OLD = "too_old"
 NOT_AFTER_HISTORY = "not_after_history"
 NO_BASELINE = "no_baseline"
 INSUFFICIENT_DATES = "insufficient_dates"
 ZERO_MAD = "zero_mad"
 REASON_ORDER: tuple[str, ...] = (
-    INVALID, TOO_OLD, NOT_AFTER_HISTORY, NO_BASELINE, INSUFFICIENT_DATES, ZERO_MAD,
+    INVALID, LOW_SIGNAL, TOO_OLD, NOT_AFTER_HISTORY, NO_BASELINE, INSUFFICIENT_DATES, ZERO_MAD,
 )
 # Array codes: 0 = assessable, k = REASON_ORDER[k - 1].
 REASON_CODE: dict[str, int] = {name: code for code, name in enumerate(REASON_ORDER, start=1)}
@@ -113,17 +136,35 @@ MODE_OFF = "mode_off"
 NO_CELL_BASELINE = "no_cell_baseline"
 RUN_DATE_UNUSABLE = "run_date_unusable"
 VERSION_MISMATCH = "version_mismatch"
+VISIBLE_BANDS_MISSING = "visible_bands_missing"
 
-# The order of the `counts` block. `assessable` plus the SIX reason counts
-# partition `measured`; watch and high count assessable cells at or over
-# each boundary; flagged_share = (watch + high) / assessable.
+# The order of the `counts` block. `assessable` plus the SEVEN reason
+# counts partition `measured`; watch and high count assessable cells at or
+# over each boundary; flagged_share = (watch + high) / assessable.
 COUNT_KEYS: tuple[str, ...] = (
     "measured", "assessable", NO_BASELINE, INSUFFICIENT_DATES, ZERO_MAD,
-    NOT_AFTER_HISTORY, TOO_OLD, INVALID, "watch", "high", "flagged_share",
+    NOT_AFTER_HISTORY, TOO_OLD, INVALID, LOW_SIGNAL, "watch", "high", "flagged_share",
 )
 
 # |ndci| at or above this is a degenerate reading (a zero band), not a value.
-DEGENERATE_NDCI_ABS = 1.0 - 1e-6
+DEGENERATE_NDCI_TOLERANCE = 1e-6
+DEGENERATE_NDCI_ABS = 1.0 - DEGENERATE_NDCI_TOLERANCE
+DEGENERATE_NDCI_RULE = "abs(ndci) >= 1 - 1e-6"
+
+# Developer-chosen screening threshold, NOT validated against field data:
+# a cell whose stored red, green or blue band is below this many digital
+# numbers (S2_SR_HARMONIZED, reflectance x 10000; 50 DN ~ 0.005) is too
+# close to the post-offset noise floor for a band ratio to mean anything.
+# It changes which cells are scored and pinned, not the statistic. See
+# the module docstring, "Data-quality screens". Deliberately no env var.
+MIN_VISIBLE_DN = 50
+# The stored visible bands, as (raster band name, Sentinel-2 band), in
+# red/green/blue order -- data-pipeline/src/raster.py `_index_bands` stores
+# B4 as true_red, B3 as true_green, B2 as true_blue.
+VISIBLE_BANDS: tuple[tuple[str, str], ...] = tuple(
+    zip(bridge.RASTER_TRUE_COLOR_BANDS, ("B4", "B3", "B2"))
+)
+_VISIBLE_KEYS = ("red", "green", "blue")
 
 _MS_PER_DAY = 86_400_000
 _EPOCH = date(1970, 1, 1)
@@ -137,6 +178,39 @@ def is_degenerate_ndci(ndci) -> np.ndarray:
     values = np.abs(np.asarray(ndci, dtype=np.float64))
     with np.errstate(invalid="ignore"):
         return values >= DEGENERATE_NDCI_ABS
+
+
+class VisibleBandsMissing(RuntimeError):
+    """The run's blob does not store the three visible bands, so the
+    low-signal screen cannot run and nothing may be scored."""
+
+
+def visible_dn(cells: dict) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+    """The stored (red, green, blue) DN arrays as float64, or None when any
+    of the three bands is not in the blob."""
+    if any(name not in cells for name, _band in VISIBLE_BANDS):
+        return None
+    return tuple(np.asarray(cells[name], dtype=np.float64) for name, _band in VISIBLE_BANDS)
+
+
+def is_low_signal(red, green, blue) -> np.ndarray:
+    """True where ANY visible band is below ``MIN_VISIBLE_DN`` or not finite
+    (unverifiable support is screened, never assumed). Vectorised."""
+    low = np.zeros(np.shape(red), dtype=bool)
+    with np.errstate(invalid="ignore"):
+        for band in (red, green, blue):
+            values = np.asarray(band, dtype=np.float64)
+            low |= ~np.isfinite(values) | (values < MIN_VISIBLE_DN)
+    return low
+
+
+def visible_bands_dict(red: float, green: float, blue: float) -> dict[str, float | None]:
+    """``{"red", "green", "blue"}`` of one cell: the stored DN widened, None
+    where not finite."""
+    return {
+        key: (float(value) if np.isfinite(value) else None)
+        for key, value in zip(_VISIBLE_KEYS, (red, green, blue))
+    }
 
 
 @dataclass(frozen=True)
@@ -216,19 +290,24 @@ def resolve(status: dict, date_used: str | None) -> AnomalyContext | Unavailable
     return AnomalyContext(status=status, cells=cells, date_used=target, season_key=key)
 
 
-def assess(ndci, lat, lng, date_ms, context: AnomalyContext) -> dict[str, np.ndarray]:
+def assess(ndci, lat, lng, date_ms, context: AnomalyContext, *,
+           visible: tuple) -> dict[str, np.ndarray]:
     """Assess measured cells against the context's season. Vectorised, pure.
 
     Inputs are equal-length arrays of the stored values (NDCI float32 is
-    widened, never rounded). Returns arrays of the same length:
+    widened, never rounded); ``visible`` is the cells' stored (red, green,
+    blue) DN (``visible_dn``) -- required, because no cell is scored
+    without the low-signal screen. Returns arrays of the same length:
       * ``reason``: uint8, 0 = assessable, else ``REASON_CODE`` (one per cell);
       * ``level``: uint8 ``baseline.LEVEL_CODES`` (0 none, 1 normal, 2 watch,
         3 high), non-zero only where assessable;
       * ``robust_z``: float64, NaN unless assessable;
       * ``median_ndci``, ``mad``: float64 baseline statistics of the cell's
         key, NaN when the season file has no such key;
-      * ``n_dates``: int64 date count of that key, -1 when it has none.
+      * ``n_dates``: int64 date count of that key, -1 when it has none;
+      * ``red``, ``green``, ``blue``: float64 stored visible DN.
     """
+    red, green, blue = (np.asarray(band, dtype=np.float64) for band in visible)
     cells = context.cells
     ndci = np.asarray(ndci, dtype=np.float64)
     lat = np.asarray(lat, dtype=np.float64)
@@ -263,6 +342,7 @@ def assess(ndci, lat, lng, date_ms, context: AnomalyContext) -> dict[str, np.nda
     for name, failed in (
         (INVALID, (logic_reason == _LOGIC_REASON["invalid_ndci"])
          | is_degenerate_ndci(ndci) | (age < 0)),
+        (LOW_SIGNAL, is_low_signal(red, green, blue)),
         (TOO_OLD, age > bridge.SIGNAL_ANOMALY_MAX_OBSERVATION_AGE_DAYS),
         (NOT_AFTER_HISTORY, day <= end_day),
         (NO_BASELINE, logic_reason == _LOGIC_REASON["no_baseline"]),
@@ -290,16 +370,20 @@ def assess(ndci, lat, lng, date_ms, context: AnomalyContext) -> dict[str, np.nda
         "median_ndci": median,
         "mad": mad,
         "n_dates": n_dates,
+        "red": red,
+        "green": green,
+        "blue": blue,
     }
 
 
 def describe(result: dict[str, np.ndarray], i: int) -> dict[str, Any]:
     """Cell ``i`` of an ``assess`` result as plain JSON values.
 
-    ``{"robust_z", "median_ndci", "mad", "n_dates", "level", "reason"}``:
-    the baseline statistics of the cell's key whenever it has one (also
-    when another rule makes the cell unassessable), z and level only when
-    assessable, the reason only when not.
+    ``{"robust_z", "median_ndci", "mad", "n_dates", "level", "reason",
+    "visible_bands_dn"}``: the baseline statistics of the cell's key
+    whenever it has one (also when another rule makes the cell
+    unassessable), z and level only when assessable, the reason only when
+    not, and the stored visible DN the screen judged.
     """
     code = int(result["reason"][i])
     n_dates = int(result["n_dates"][i])
@@ -315,13 +399,15 @@ def describe(result: dict[str, np.ndarray], i: int) -> dict[str, Any]:
         "n_dates": n_dates if n_dates >= 0 else None,
         "level": _LEVEL[int(result["level"][i])] if code == 0 else None,
         "reason": None if code == 0 else REASON_ORDER[code - 1],
+        "visible_bands_dn": visible_bands_dict(
+            result["red"][i], result["green"][i], result["blue"][i]),
     }
 
 
 def counts(result: dict[str, np.ndarray]) -> dict[str, int | float | None]:
     """The ``counts`` block, in ``COUNT_KEYS`` order; plain JSON numbers.
 
-    ``assessable`` + the six reason counts == ``measured``; ``watch`` and
+    ``assessable`` + the seven reason counts == ``measured``; ``watch`` and
     ``high`` count assessable cells only. ``flagged_share`` is
     ``(watch + high) / assessable`` -- how often the criterion fires in THIS
     scan -- and None when nothing is assessable (never a made-up 0).
@@ -342,22 +428,49 @@ def counts(result: dict[str, np.ndarray]) -> dict[str, int | float | None]:
     return {key: out[key] for key in COUNT_KEYS}
 
 
-def pixel_anomaly(found: dict, context: AnomalyContext) -> dict | None:
+def _stored_index(cells: dict, found: dict) -> int | None:
+    """The stored index of the cell an ``inspect_cell`` reading reports.
+
+    ``inspect_cell`` returns the stored values widened exactly (float64 of
+    float32/float64), so the cell is found by exact equality of its own
+    coordinate and date among measured cells; the last match, as the
+    click lookup and the renderer take the last cell of a pixel.
+    """
+    lat = np.asarray(cells["lat"], dtype=np.float64)
+    lng = np.asarray(cells["lng"], dtype=np.float64)
+    dates = np.asarray(cells[bridge.RASTER_DATE_BAND])
+    measured = bridge.valid_cell_mask(dates) & np.isfinite(np.asarray(cells["ndci"], dtype=np.float64))
+    hits = np.flatnonzero(
+        measured & (lat == found["cell_lat"]) & (lng == found["cell_lng"])
+        & (dates == found["date_ms"])
+    )
+    return int(hits[-1]) if hits.size else None
+
+
+def pixel_anomaly(found: dict, context: AnomalyContext, cells: dict) -> dict | None:
     """The ``anomaly`` block of ``/raster-scan/pixel`` for an ``inspect_cell`` result.
 
-    None unless ``found`` is a ``reading``. Assessed by the same ``assess``
-    call the highlights use, on the same stored numbers the click reports
-    (``cell_lat``/``cell_lng``, ``index_values["ndci"]``, ``date_ms``), so
-    a pin and a click on its square give the same anomaly.
+    ``cells`` is the blob ``found`` was read from. None unless ``found`` is a
+    ``reading`` AND the blob stores the visible bands (an unscreened cell is
+    never scored, the same rule that makes highlights answer 409). Assessed
+    by the same ``assess`` call the highlights use, on the stored values of
+    the very cell the click reports, so a pin and a click on its square give
+    the same anomaly -- including ``reason: "low_signal"``.
     """
     if found.get("state") != "reading":
         return None
+    visible = visible_dn(cells)
+    index = _stored_index(cells, found)
+    if visible is None or index is None:
+        return None
+    pick = np.array([index])
     result = assess(
-        np.array([found["index_values"]["ndci"]], dtype=np.float64),
-        np.array([found["cell_lat"]], dtype=np.float64),
-        np.array([found["cell_lng"]], dtype=np.float64),
-        np.array([found["date_ms"]], dtype=np.int64),
+        np.asarray(cells["ndci"], dtype=np.float64)[pick],
+        np.asarray(cells["lat"], dtype=np.float64)[pick],
+        np.asarray(cells["lng"], dtype=np.float64)[pick],
+        np.asarray(cells[bridge.RASTER_DATE_BAND]).astype(np.int64)[pick],
         context,
+        visible=tuple(band[pick] for band in visible),
     )
     return {
         **describe(result, 0),

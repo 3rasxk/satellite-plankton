@@ -20,7 +20,10 @@ Data sources, all read for each response (nothing is cached here):
   * src/config.py poll / minimum-scan intervals, src/raster_scan/trigger.py
     `SETTLE_HOURS`;
   * src/methods_info.py: the two references, copied from LIMITATIONS.md, the
-    revisit figure and the worked-example sample bands.
+    revisit figure and the worked-example sample bands;
+  * src/raster_scan/cell_anomaly.py: the raster data-quality screens
+    (`DEGENERATE_NDCI_RULE` / `DEGENERATE_NDCI_ABS`, `MIN_VISIBLE_DN`,
+    `VISIBLE_BANDS`), so the page shows the thresholds the code applies.
 
 No Earth Engine call and no database read. The handler is a plain `def`, so
 FastAPI runs it in its threadpool: in test mode `baseline_status()` stats and
@@ -43,11 +46,13 @@ from fastapi import APIRouter, Request
 from .. import _detection as bridge
 from .. import config as backend_config
 from .. import methods_info, scientific_status
-from ..raster_scan import render, trigger
+from ..raster_scan import cell_anomaly, render, trigger
 from ..schemas import (
+    DegenerateNdciScreen,
     DisplayDomain,
     IndexWorkedExample,
     LatestScenePolicy,
+    LowSignalScreen,
     MethodsBaselineStatus,
     MethodsGates,
     MethodsIndex,
@@ -55,6 +60,7 @@ from ..schemas import (
     MethodsReference,
     MethodsResponse,
     MethodsSentinel2,
+    QualityScreens,
     SeasonWindow,
     SignalAnomalyFloors,
     SignalAnomalyStatistic,
@@ -186,6 +192,39 @@ def _season_windows() -> list[SeasonWindow]:
     ]
 
 
+def _quality_screens() -> QualityScreens:
+    """The raster data-quality screens, from the constants the code applies."""
+    bands = sorted(band for _stored, band in cell_anomaly.VISIBLE_BANDS)
+    min_dn = cell_anomaly.MIN_VISIBLE_DN
+    return QualityScreens(
+        degenerate_ndci=DegenerateNdciScreen(
+            rule=cell_anomaly.DEGENERATE_NDCI_RULE,
+            threshold_abs=cell_anomaly.DEGENERATE_NDCI_ABS,
+            meaning="NDCI = (B5 - B4) / (B5 + B4) is exactly +1 when B4 is zero and -1 when "
+            "B5 is zero: a zero band, not a physical water-colour value (mostly mask-edge "
+            "artefacts).",
+            effect="Never scored against the TEST cell baseline (counted 'invalid') and never "
+            "a highlight pin in either mode; still a measured cell on the map and in the "
+            "cell inspector.",
+            status="developer-chosen backend rule; detection's [-1, 1] validity is unchanged",
+        ),
+        low_signal=LowSignalScreen(
+            rule=f"any of {', '.join(bands)} < {min_dn} DN (or not a finite number)",
+            min_visible_dn=min_dn,
+            approx_reflectance=min_dn / bridge.INDEX_SCALE_FACTOR,
+            bands=bands,
+            rationale="S2_SR_HARMONIZED removes the processing offset and clips at 0, so very "
+            "dark water, shadow and residual cloud or land edges come out near 0 DN, where a "
+            "band ratio such as NDCI explodes. The threshold is a screening choice, not a "
+            "measured noise floor.",
+            effect="Never scored against the TEST cell baseline (counted 'low_signal') and "
+            "never a highlight pin in either mode; still a measured cell on the map and in "
+            "the cell inspector. It changes which cells are scored, not the statistic.",
+            status="developer-chosen, not validated",
+        ),
+    )
+
+
 @router.get("/methods", response_model=MethodsResponse)
 def get_methods(request: Request) -> MethodsResponse:
     """Formulas, sensors, thresholds, gate states and references in force.
@@ -205,6 +244,7 @@ def get_methods(request: Request) -> MethodsResponse:
         season_rule=bridge.baseline_logic.SEASON_RULE,
         season_windows=_season_windows(),
         baseline=MethodsBaselineStatus(**status),
+        quality_screens=_quality_screens(),
         references=[MethodsReference(**reference) for reference in methods_info.REFERENCES],
         disclaimer=disclaimer_for(status),
     )

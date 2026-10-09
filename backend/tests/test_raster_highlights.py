@@ -47,11 +47,14 @@ STEP = 1000 / render.METRES_PER_DEGREE
 NORTH, WEST = 13.20, 100.20
 ROWS = COLS = 20
 
+# + visible_bands_dn (Task 13 fix round 2, 2026-10-10: added deliberately).
 PIN_FIELDS = {
     "rank", "cell_lat", "cell_lng", "pixel_centre_lat", "pixel_centre_lng",
     "index_values", "percentile", "date_ms", "acquired_date", "acquired_at",
-    "edge_of_no_data", "metric_value", "risk_tier",
+    "edge_of_no_data", "metric_value", "risk_tier", "visible_bands_dn",
 }
+TRUE_COLOR = bridge.RASTER_TRUE_COLOR_BANDS
+VISIBLE_DEFAULT = (400.0, 350.0, 300.0)  # red, green, blue DN; well above the 50 DN screen
 
 
 def synthetic_grid(rows: int = ROWS, cols: int = COLS) -> OverlayGrid:
@@ -76,19 +79,23 @@ def f32(value: float) -> float:
     return float(np.float32(value))
 
 
-def build_cells(grid, field, *, absent=(), masked=(), dates=None, extra=None):
+def build_cells(grid, field, *, absent=(), masked=(), dates=None, extra=None,
+                with_visible=True):
     """One stored cell per pixel of `field` (rows x cols NDCI values).
 
     absent -- (row, col) pixels with no stored cell at all.
     masked -- (row, col) pixels stored the way GEE's NPY export writes a
               masked pixel: date 0 and 0.0 in every band (the 0.0 trap).
-    extra  -- {band: {(row, col): value}} per-cell overrides.
+    extra  -- {band: {(row, col): value}} per-cell overrides (also for the
+              visible bands true_red / true_green / true_blue).
+    with_visible -- False stores no visible bands (an older blob).
     Cells sit 0.1 pixel north-east of their pixel centre.
     """
     centre_lats, centre_lngs = grid.pixel_centres()
     absent, masked = set(absent), set(masked)
     extra = extra or {}
-    rows_out = {"lat": [], "lng": [], DATE_BAND: [], **{b: [] for b in INDEX_BANDS}}
+    rows_out = {"lat": [], "lng": [], DATE_BAND: [], **{b: [] for b in INDEX_BANDS},
+                **{b: [] for b in TRUE_COLOR}}
     for r in range(grid.rows):
         for c in range(grid.cols):
             if (r, c) in absent:
@@ -97,7 +104,7 @@ def build_cells(grid, field, *, absent=(), masked=(), dates=None, extra=None):
             rows_out["lng"].append(centre_lngs[c] + 0.1 * grid.pixel_deg_lng)
             if (r, c) in masked:
                 rows_out[DATE_BAND].append(0)
-                for band in INDEX_BANDS:
+                for band in (*INDEX_BANDS, *TRUE_COLOR):
                     rows_out[band].append(0.0)
                 continue
             rows_out[DATE_BAND].append(NEW_MS if dates is None else dates[r][c])
@@ -105,12 +112,17 @@ def build_cells(grid, field, *, absent=(), masked=(), dates=None, extra=None):
             rows_out["bda2"].append(extra.get("bda2", {}).get((r, c), 1.0 + field[r][c]))
             rows_out["bda3"].append(extra.get("bda3", {}).get((r, c), 0.3))
             rows_out["b2_b3"].append(extra.get("b2_b3", {}).get((r, c), 0.8))
-    return {
+            for band, dn in zip(TRUE_COLOR, VISIBLE_DEFAULT):
+                rows_out[band].append(extra.get(band, {}).get((r, c), dn))
+    stored = {
         "lat": np.asarray(rows_out["lat"], dtype=np.float64),
         "lng": np.asarray(rows_out["lng"], dtype=np.float64),
         DATE_BAND: np.asarray(rows_out[DATE_BAND], dtype=np.int64),
         **{b: np.asarray(rows_out[b], dtype=np.float32) for b in INDEX_BANDS},
     }
+    if with_visible:
+        stored.update({b: np.asarray(rows_out[b], dtype=np.float32) for b in TRUE_COLOR})
+    return stored
 
 
 def pin_pixel(grid, pin):
@@ -375,6 +387,7 @@ def test_two_cells_in_one_pixel_rank_once_as_the_cell_that_painted_it():
         "lng": np.array([centre_lngs[4] - 0.2 * STEP]),
         DATE_BAND: np.array([NEW_MS], dtype=np.int64),
         **{b: np.array([0.2], dtype=np.float32) for b in INDEX_BANDS},
+        **{b: np.array([400.0], dtype=np.float32) for b in TRUE_COLOR},
     }
     painted = {**covered, "lat": covered["lat"] + 0.05 * STEP}
     painted = {**painted, **{b: np.array([0.05], dtype=np.float32) for b in INDEX_BANDS}}
@@ -414,7 +427,7 @@ def test_an_empty_cohort_gives_no_pins_and_says_why(case):
         cells = build_cells(grid, field)
     result = rank(cells, grid, n=5, sep=3000)
     assert result == {"cohort_size": 0, "pins": [], "reason": "no measured cells",
-                      "excluded_degenerate": 0}
+                      "excluded_degenerate": 0, "excluded_low_signal": 0, "quality_note": None}
 
 
 def test_an_unreadable_secondary_index_is_null_not_a_number():
@@ -455,6 +468,47 @@ def test_degenerate_readings_stay_in_the_cohort_but_never_pin():
     assert result["reason"] == "only 3 separable measured cells"
 
 
+@pytest.mark.parametrize("band", TRUE_COLOR)
+def test_ndci_pins_skip_a_low_signal_cell_at_49_dn_on_any_band(band):
+    grid = synthetic_grid()
+    field = np.full((ROWS, COLS), 0.01)
+    field[2, 2], field[2, 15], field[15, 2] = 0.30, 0.20, 0.10
+    cells = build_cells(grid, field, extra={band: {(2, 2): 49.0, (2, 15): 50.0}})
+    result = rank(cells, grid, n=3, sep=3000)
+    assert [pin_pixel(grid, p) for p in result["pins"]][:2] == [(2, 15), (15, 2)]
+    assert result["excluded_low_signal"] == 1 and result["excluded_degenerate"] == 0
+    assert result["cohort_size"] == ROWS * COLS, "a screened cell is still a measured cell"
+    assert result["quality_note"] is None
+    # Percentile still over the full cohort: the screened 0.30 cell is above.
+    assert result["pins"][0]["percentile"] == (ROWS * COLS - 2) / (ROWS * COLS) * 100.0
+    assert result["pins"][0]["visible_bands_dn"]["red" if band == "true_red" else
+                                                 "green" if band == "true_green" else "blue"] == 50.0
+
+
+def test_ndci_screens_are_disjoint_degenerate_first():
+    grid = synthetic_grid()
+    field = np.full((ROWS, COLS), 0.01)
+    field[3, 3], field[3, 12], field[12, 3] = 1.0, 0.97, 0.2
+    cells = build_cells(grid, field, extra={"true_red": {(3, 3): 0.0, (3, 12): 1.0}})
+    result = rank(cells, grid, n=3, sep=3000)
+    assert result["excluded_degenerate"] == 1 and result["excluded_low_signal"] == 1
+    assert pin_pixel(grid, result["pins"][0]) == (12, 3)
+
+
+def test_ndci_mode_without_visible_bands_ranks_as_before_and_says_the_screen_did_not_run():
+    grid = synthetic_grid()
+    field = np.full((ROWS, COLS), 0.01)
+    field[4, 4] = 0.2
+    screened = rank(build_cells(grid, field), grid, n=3)
+    unscreened = rank(build_cells(grid, field, with_visible=False), grid, n=3)
+    assert unscreened["excluded_low_signal"] is None
+    assert "low-signal screen could not run" in unscreened["quality_note"]
+    assert [p["metric_value"] for p in unscreened["pins"]] == [
+        p["metric_value"] for p in screened["pins"]]
+    assert all(p["visible_bands_dn"] is None for p in unscreened["pins"])
+    assert screened["pins"][0]["visible_bands_dn"] == {"red": 400.0, "green": 350.0, "blue": 300.0}
+
+
 def test_a_degenerate_cell_never_suppresses_a_real_neighbour():
     grid = synthetic_grid()
     field = np.full((ROWS, COLS), -0.05)
@@ -469,8 +523,9 @@ def test_an_all_degenerate_cohort_says_so():
     result = rank(build_cells(grid, np.ones((ROWS, COLS))), grid, n=5, sep=3000)
     assert result["pins"] == [] and result["cohort_size"] == ROWS * COLS
     assert result["excluded_degenerate"] == ROWS * COLS
-    assert result["reason"] == (f"no measured cells eligible for pins ({ROWS * COLS} excluded: "
-                                "NDCI exactly +/-1, a zero band)")
+    assert result["reason"] == (f"no measured cells eligible for pins (all {ROWS * COLS} "
+                                "excluded by the data-quality screens: NDCI exactly +/-1, or a "
+                                "visible band below the minimum signal)")
 
 
 # --------------------------------------------------------------------------
@@ -584,7 +639,8 @@ from tests import test_raster_pixel_anomaly as afx  # noqa: E402
 
 ANOMALY_PIN_FIELDS = PIN_FIELDS | {"robust_z", "median_ndci", "mad", "n_dates", "anomaly_level"}
 COUNT_KEYS = ["measured", "assessable", "no_baseline", "insufficient_dates", "zero_mad",
-              "not_after_history", "too_old", "invalid", "watch", "high", "flagged_share"]
+              "not_after_history", "too_old", "invalid", "low_signal", "watch", "high",
+              "flagged_share"]
 A_ROWS, A_COLS = afx.ROWS, afx.COLS
 
 
@@ -767,10 +823,10 @@ def test_anomaly_counts_partition_the_cohort_with_the_specified_keys(anomaly_roo
     assert counts == {
         "measured": 899, "assessable": 899 - 3 - 4 - 2 - 1 - 2 - 1,
         "no_baseline": 2, "insufficient_dates": 3, "zero_mad": 4,
-        "not_after_history": 2, "too_old": 1, "invalid": 1, "watch": 0, "high": 1,
-        "flagged_share": 1 / 886,
+        "not_after_history": 2, "too_old": 1, "invalid": 1, "low_signal": 0, "watch": 0,
+        "high": 1, "flagged_share": 1 / 886,
     }
-    reasons = sum(counts[k] for k in COUNT_KEYS[2:8])
+    reasons = sum(counts[k] for k in COUNT_KEYS[2:9])
     assert counts["assessable"] + reasons == counts["measured"] == result["cohort_size"]
 
 
@@ -816,11 +872,37 @@ def test_degenerate_cells_are_never_anomaly_pins(anomaly_root):
     afx.write_cell_artefact(anomaly_root, afx.baseline_stats())
     field = np.full((A_ROWS, A_COLS), 0.02)
     field[3, 3], field[3, 20], field[8, 8] = 1.0, 0.9999995, 0.08
-    result = rank_anomalies(afx.raster_cells(afx.lattice_grid(), field))
+    # (3, 3) is also near-black: counted once, as degenerate (disjoint counts).
+    result = rank_anomalies(afx.raster_cells(afx.lattice_grid(), field,
+                                             visible={(3, 3): (0.0, 4.0, 9.0)}))
     assert [a_pixel(p) for p in result["pins"]] == [(8, 8)]
-    assert result["counts"]["invalid"] == 2
-    assert result["excluded_degenerate"] == 2
+    assert result["counts"]["invalid"] == 2 and result["counts"]["low_signal"] == 0
+    assert result["excluded_degenerate"] == 2 and result["excluded_low_signal"] == 0
     assert result["counts"]["measured"] == result["cohort_size"] == A_ROWS * A_COLS
+
+
+def test_a_near_black_high_ndci_cell_is_never_an_anomaly_pin(anomaly_root):
+    afx.write_cell_artefact(anomaly_root, afx.baseline_stats())
+    field = np.full((A_ROWS, A_COLS), 0.02)
+    field[4, 4], field[9, 20] = 0.97, 0.08
+    cells = afx.raster_cells(afx.lattice_grid(), field, visible={(4, 4): (1.0, 0.0, 27.0)})
+    result = rank_anomalies(cells)
+    assert [a_pixel(p) for p in result["pins"]] == [(9, 20)]
+    assert result["counts"]["low_signal"] == 1 and result["excluded_low_signal"] == 1
+    assert result["pins"][0]["visible_bands_dn"] == dict(zip(("red", "green", "blue"),
+                                                             afx.VISIBLE_DEFAULT))
+    counts = result["counts"]
+    reasons = [counts[k] for k in COUNT_KEYS[2:9]]
+    assert counts["assessable"] + sum(reasons) == counts["measured"]
+
+
+def test_anomaly_ranking_refuses_a_blob_without_visible_bands(anomaly_root):
+    afx.write_cell_artefact(anomaly_root, afx.baseline_stats())
+    cells = afx.raster_cells(afx.lattice_grid(), np.full((A_ROWS, A_COLS), 0.08),
+                             with_visible=False)
+    from src.raster_scan import cell_anomaly
+    with pytest.raises(cell_anomaly.VisibleBandsMissing):
+        rank_anomalies(cells)
 
 
 def test_anomaly_pins_keep_the_edge_of_no_data_rule(anomaly_root):
@@ -860,4 +942,5 @@ def test_ndci_ranking_is_unchanged_when_a_cell_baseline_is_active(anomaly_root):
     after = rank(build_cells(grid, field), grid, n=3)
     assert before == after
     assert set(after["pins"][0]) == PIN_FIELDS
-    assert set(after) == {"cohort_size", "pins", "reason", "excluded_degenerate"}
+    assert set(after) == {"cohort_size", "pins", "reason", "excluded_degenerate",
+                          "excluded_low_signal", "quality_note"}
