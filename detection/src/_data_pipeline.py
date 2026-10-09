@@ -184,6 +184,15 @@ DateBandPrecisionError = _dp.DateBandPrecisionError
 get_ndci_history = _dp.get_ndci_history
 preprocessing_params = _dp.preprocessing_params
 
+# Per-cell season statistics for the Level B TEST baseline
+# (data-pipeline/src/baseline_raster.py). Same pass-through reasoning: only
+# scripts/build_test_baseline.py (via backend/src/_detection.py) builds
+# them, and `cell_baseline_params` is the pure description of how cells are
+# made, which the cell baseline hashes into its own preprocessing signature
+# (deliberately different from the site signature above).
+build_cell_baseline = _dp.build_cell_baseline
+cell_baseline_params = _dp.cell_baseline_params
+
 # Per-date scene assessment for the latest-scene policy
 # (data-pipeline/src/scene_assess.py). Re-exported as a pass-through, same
 # reasoning as the raster names above: backend's raster-scan trigger decides
@@ -254,6 +263,8 @@ __all__ = [
     "valid_cell_mask",
     "get_ndci_history",
     "preprocessing_params",
+    "build_cell_baseline",
+    "cell_baseline_params",
     "assess_new_scenes",
     "SceneAssessment",
     "scene_thresholds",

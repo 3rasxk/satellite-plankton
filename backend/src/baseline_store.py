@@ -10,6 +10,9 @@ Layout, one directory per baseline version::
 
     <root>/<baseline_version>/manifest.json   description and activation declaration
     <root>/<baseline_version>/sites.json      {"rows": {site_id: [history rows]}}
+    <root>/<baseline_version>/cells_mMM.npz   Level B only: one per target month
+                                              MM = 01..12 (lat, lng float64;
+                                              median, mad float32; n uint16)
 
 ``write_artifact`` / ``read_artifact`` / ``latest_artifact_path`` do not
 validate the manifest or judge whether the baseline is fit to use; they hand
@@ -28,30 +31,64 @@ Parsed files are cached on each file's (mtime_ns, size, inode), but
 validation is re-run on every call, because "today" and the live signature
 are not properties of the files.
 
+``load_cell_baseline`` / ``cell_baseline_or_reason`` read one season of the
+Level B (per-cell) baseline from the same artefact. They NEVER raise: a
+missing, stale or malformed cell baseline is None plus a logged reason. They
+require the Level A part to validate too (one artefact, one version), plus
+``validate_level_b`` against the live CELL preprocessing signature (raster
+scale ``config.RASTER_SCAN_SCALE_M`` and the study polygon), all twelve
+season files present, and the requested file agreeing with the manifest. A
+broken Level B block never affects the Level A gate.
+
 Limitations: the rows are dimensionless NDCI readings from a point-buffer
 mean over clear-sky water pixels, kept only on cloud-free days. They are a
 statistical record of one place, not bloom evidence, and carry no validation
-against recorded bloom events.
+against recorded bloom events. A Level B cell is one sampled native pixel
+per day at the raster scale; its median/MAD describe that pixel's own
+clear-sky record only.
 """
 
 from __future__ import annotations
 
 import copy
 import json
+import logging
 import os
+import re
 import shutil
 import tempfile
-from dataclasses import dataclass
+import threading
+from collections import OrderedDict
+from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
+from functools import cached_property
 from pathlib import Path
 
+import numpy as np
+
 from . import _detection as bridge
-from . import config
+from . import _study_area, config
+
+logger = logging.getLogger(__name__)
 
 BASELINE_ROOT = Path(__file__).resolve().parents[1] / "data" / "baselines"
 
 MANIFEST_NAME = "manifest.json"
 SITES_NAME = "sites.json"
+
+# Level B season files: exactly cells_m01.npz .. cells_m12.npz, nothing else
+# (the name becomes a path, so it is matched, never trusted).
+CELLS_FILE_PATTERN = re.compile(r"^cells_m(0[1-9]|1[0-2])\.npz$")
+# The arrays of a cells file and the dtype each is stored as. float64
+# coordinates keep Earth Engine's pixelLonLat exactly; float32 is ample for
+# NDCI statistics; uint16 counts dates.
+CELL_ARRAY_DTYPES: dict[str, np.dtype] = {
+    "lat": np.dtype(np.float64),
+    "lng": np.dtype(np.float64),
+    "median": np.dtype(np.float32),
+    "mad": np.dtype(np.float32),
+    "n": np.dtype(np.uint16),
+}
 
 
 def _check_version(version: object) -> str:
@@ -91,24 +128,85 @@ class ArtifactExists(FileExistsError):
         )
 
 
-def write_artifact(
-    root: Path, manifest: dict, rows_by_location: dict[str, list[dict]], *, replace: bool = False,
-) -> Path:
-    """Write ``manifest`` and ``rows_by_location``; return the version directory.
+def _prepare_cells(name: str, arrays: dict) -> dict[str, np.ndarray]:
+    """Validate one season's arrays and cast them to ``CELL_ARRAY_DTYPES``.
 
-    The directory is ``<root>/<manifest["baseline_version"]>``. Both files are
+    Raises ``ValueError`` (never writes) for an unsafe file name, missing or
+    extra arrays, non-1-D or unequal lengths, non-finite statistics or
+    coordinates, or counts that are not whole numbers in uint16 range.
+    """
+    if not isinstance(name, str) or not CELLS_FILE_PATTERN.match(name):
+        raise ValueError(f"unsafe or unexpected cells file name: {name!r}")
+    if set(arrays) != set(CELL_ARRAY_DTYPES):
+        raise ValueError(
+            f"{name}: arrays must be exactly {sorted(CELL_ARRAY_DTYPES)}, got {sorted(arrays)}"
+        )
+    raw = {key: np.asarray(arrays[key]) for key in CELL_ARRAY_DTYPES}
+    lengths = {key: value.shape for key, value in raw.items()}
+    if any(value.ndim != 1 for value in raw.values()) or len(set(lengths.values())) != 1:
+        raise ValueError(f"{name}: arrays must be 1-D and of equal length, got {lengths}")
+    for key in ("lat", "lng", "median", "mad"):
+        if raw[key].size and not np.all(np.isfinite(raw[key].astype(np.float64))):
+            raise ValueError(f"{name}: {key} holds non-finite values")
+    counts = raw["n"].astype(np.float64)
+    if counts.size and (
+        not np.all(counts == np.round(counts)) or counts.min() < 0 or counts.max() > np.iinfo(np.uint16).max
+    ):
+        raise ValueError(f"{name}: n must be whole numbers of dates in uint16 range")
+    return {key: raw[key].astype(dtype) for key, dtype in CELL_ARRAY_DTYPES.items()}
+
+
+def read_cells_file(path: Path) -> dict[str, np.ndarray]:
+    """Read one Level B season file, refusing anything but the stored layout.
+
+    Exactly the arrays of ``CELL_ARRAY_DTYPES``, each with exactly that
+    dtype (a narrowed coordinate is refused, not widened back), 1-D and of
+    equal length. Pickled content is never loaded. Raises ``ValueError``.
+    """
+    with np.load(Path(path), allow_pickle=False) as data:
+        names = set(data.files)
+        if names != set(CELL_ARRAY_DTYPES):
+            raise ValueError(f"{path}: arrays {sorted(names)} != {sorted(CELL_ARRAY_DTYPES)}")
+        arrays = {name: data[name] for name in CELL_ARRAY_DTYPES}
+    for name, dtype in CELL_ARRAY_DTYPES.items():
+        if arrays[name].dtype != dtype:
+            raise ValueError(f"{path}: {name} is {arrays[name].dtype}, expected {dtype}")
+        if arrays[name].ndim != 1:
+            raise ValueError(f"{path}: {name} is not 1-D")
+    if len({value.size for value in arrays.values()}) != 1:
+        raise ValueError(f"{path}: arrays differ in length")
+    return arrays
+
+
+def write_artifact(
+    root: Path,
+    manifest: dict,
+    rows_by_location: dict[str, list[dict]],
+    *,
+    replace: bool = False,
+    cells_by_file: dict[str, dict] | None = None,
+) -> Path:
+    """Write ``manifest``, ``rows_by_location`` and any Level B cells; return the version directory.
+
+    The directory is ``<root>/<manifest["baseline_version"]>``. Every file is
     written into a hidden scratch directory first and moved into place only
-    when both succeeded, so a failed or interrupted write never leaves a
+    when all succeeded, so a failed or interrupted write never leaves a
     directory that ``latest_artifact_path`` would take for a complete one.
+
+    ``cells_by_file`` maps ``cells_mMM.npz`` names to ``{"lat", "lng",
+    "median", "mad", "n"}`` arrays (Level B); they are validated and cast to
+    ``CELL_ARRAY_DTYPES`` before anything is created, and written with
+    ``np.savez_compressed``.
 
     An existing directory for the same version is refused with
     ``ArtifactExists`` (nothing written) unless ``replace=True``, which
     replaces it.
 
-    Raises ``ValueError`` for an unusable version name or a value JSON cannot
-    carry (NaN, inf). Nothing is left behind in that case.
+    Raises ``ValueError`` for an unusable version name, a value JSON cannot
+    carry (NaN, inf) or malformed cells. Nothing is left behind in that case.
     """
     version = _check_version(manifest.get("baseline_version"))
+    prepared = {name: _prepare_cells(name, arrays) for name, arrays in (cells_by_file or {}).items()}
     root = Path(root)
     final = root / version
     if final.exists() and not replace:
@@ -119,6 +217,8 @@ def write_artifact(
     try:
         _dump(manifest, scratch / MANIFEST_NAME, indent=2)
         _dump({"rows": rows_by_location}, scratch / SITES_NAME, indent=None)
+        for name, arrays in prepared.items():
+            np.savez_compressed(scratch / name, **arrays)
         if final.exists():
             if not replace:  # appeared while the files were being written
                 raise ArtifactExists(final)
@@ -250,13 +350,14 @@ def _check_structure(manifest: dict, rows_by_location: object) -> None:
             raise ValueError(f"sites.json rows for {site_id!r} are not a list of objects")
 
 
-def _validated_artifact() -> tuple[dict, dict] | None:
-    """The cached, validated ``(manifest, rows)`` -- NOT copies; internal only.
+def _validated_artifact_at() -> tuple[Path, dict, dict] | None:
+    """``(path, manifest, rows)`` of the validated artefact -- NOT copies; internal only.
 
     None when the mode is not ``test`` or no complete artefact exists. Raises
     ``BaselineInvalid`` (reason in ``str(exc)``) for a refused manifest and
     other exceptions (``OSError``, ``ValueError`` incl. JSON errors,
-    ``KeyError``) for an unreadable or malformed one.
+    ``KeyError``) for an unreadable or malformed one. Level A checks only:
+    the ``level_b`` block is not looked at here.
     """
     if config.BASELINE_MODE != "test":
         return None
@@ -268,7 +369,13 @@ def _validated_artifact() -> tuple[dict, dict] | None:
     live_signature = logic.preprocessing_signature(bridge.preprocessing_params())
     logic.validate_manifest(manifest, live_signature=live_signature, today=_utc_today())
     _check_structure(manifest, rows_by_location)
-    return manifest, rows_by_location
+    return path, manifest, rows_by_location
+
+
+def _validated_artifact() -> tuple[dict, dict] | None:
+    """The cached, validated ``(manifest, rows)``; see ``_validated_artifact_at``."""
+    loaded = _validated_artifact_at()
+    return None if loaded is None else (loaded[1], loaded[2])
 
 
 def active_manifest() -> dict | None:
@@ -299,3 +406,220 @@ def load_active_baseline() -> ActiveBaseline | None:
         rows_by_location=copy.deepcopy(rows_by_location),
         version=manifest["baseline_version"],
     )
+
+
+# --------------------------------------------------------------------------
+# Level B: per-cell season baseline (never raises)
+# --------------------------------------------------------------------------
+
+
+def live_cell_preprocessing_params() -> dict:
+    """How the production raster's cells are made NOW: raster scale and study polygon.
+
+    Read at call time (``config.RASTER_SCAN_SCALE_M``), so a changed raster
+    scale makes an existing cell baseline incompatible instead of silently
+    comparing a 100 m cell with a 200 m history.
+    """
+    return bridge.cell_baseline_params(
+        scale_m=config.RASTER_SCAN_SCALE_M,
+        polygon_latlng=_study_area.STUDY_AREA_POLYGON_LATLNG,
+    )
+
+
+def live_cell_signature() -> str:
+    """The cell preprocessing signature a Level B baseline must carry to be used."""
+    return bridge.baseline_logic.preprocessing_signature(live_cell_preprocessing_params())
+
+
+# Packing of a (row, col) cell key into one int64 for sorted lookup. Keys are
+# |row|, |col| < 2**31 (a 100 m cell is ~0.0009 deg; 180 deg is ~2e5 cells).
+_KEY_PACK = 1 << 32
+
+
+def _packed_keys(rows: np.ndarray, cols: np.ndarray) -> np.ndarray:
+    return rows.astype(np.int64) * _KEY_PACK + cols.astype(np.int64)
+
+
+@dataclass(frozen=True, eq=False)
+class CellBaseline:
+    """One season of the Level B TEST baseline, validated at load time.
+
+    Arrays are read-only and shared with the loader's cache (copying ~290k
+    cells per request would be the expensive part); ``index_of`` /
+    ``key_index`` match cells by ``baseline.cell_key``, never by position.
+    ``history_end`` is the leakage cutoff: only a cell acquired strictly
+    after it may be assessed against this baseline.
+    """
+
+    season_key: str
+    months: tuple[int, int, int]
+    version: str
+    history_end: str
+    scale_m: int
+    file: str
+    lat: np.ndarray = field(repr=False)
+    lng: np.ndarray = field(repr=False)
+    median: np.ndarray = field(repr=False)
+    mad: np.ndarray = field(repr=False)
+    n: np.ndarray = field(repr=False)
+
+    @cached_property
+    def _sorted_keys(self) -> tuple[np.ndarray, np.ndarray]:
+        rows, cols = bridge.baseline_logic.cell_keys(self.lat, self.lng, self.scale_m)
+        packed = _packed_keys(rows, cols)
+        order = np.argsort(packed, kind="stable")
+        return packed[order], order
+
+    @cached_property
+    def key_index(self) -> dict[tuple[int, int], int]:
+        """``{cell_key: array index}``, built on first use. ~170 bytes per
+        cell; prefer ``index_of`` for many cells at once."""
+        rows, cols = bridge.baseline_logic.cell_keys(self.lat, self.lng, self.scale_m)
+        return {key: i for i, key in enumerate(zip(rows.tolist(), cols.tolist()))}
+
+    def index_of(self, lat, lng) -> np.ndarray:
+        """Array index of the baseline cell at each (lat, lng), -1 where none.
+
+        Vectorised; non-finite coordinates are -1. Same key, same half-cell
+        tolerance as ``baseline.cell_key``.
+        """
+        lat = np.asarray(lat, dtype=np.float64)
+        lng = np.asarray(lng, dtype=np.float64)
+        out = np.full(lat.shape, -1, dtype=np.int64)
+        finite = np.isfinite(lat) & np.isfinite(lng)
+        if not finite.any() or self.lat.size == 0:
+            return out
+        rows, cols = bridge.baseline_logic.cell_keys(lat[finite], lng[finite], self.scale_m)
+        wanted = _packed_keys(rows, cols)
+        keys, order = self._sorted_keys
+        pos = np.searchsorted(keys, wanted)
+        clipped = np.minimum(pos, keys.size - 1)
+        found = (pos < keys.size) & (keys[clipped] == wanted)
+        out[finite] = np.where(found, order[clipped], -1)
+        return out
+
+
+# Parsed and checked seasons, keyed on (artefact path, season, manifest /
+# sites / cells file states). Small: one season is ~7 MB of arrays.
+_CELL_CACHE_SIZE = 2
+_cell_cache: "OrderedDict[tuple, CellBaseline]" = OrderedDict()
+_cell_cache_lock = threading.Lock()
+_last_cell_warning: str | None = None
+
+
+def clear_cell_cache() -> None:
+    """Forget every cached season (tests; or after replacing an artefact by hand)."""
+    with _cell_cache_lock:
+        _cell_cache.clear()
+
+
+def _load_season(path: Path, season_key: str, manifest: dict) -> CellBaseline:
+    """Read one season file and check it against the manifest (raises)."""
+    logic = bridge.baseline_logic
+    level_b = manifest["level_b"]
+    info = level_b["seasons"][season_key]
+    arrays = read_cells_file(path / info["file"])
+    scale_m = level_b["scale_m"]
+
+    reaching = int(np.count_nonzero(arrays["n"] >= level_b["min_independent_dates"]))
+    if arrays["n"].size != info["cells"] or reaching != info["cells_n_ge_floor"]:
+        raise logic.BaselineInvalid(f"level_b_inconsistent:{season_key}")
+    if logic.grid_offset_cells(arrays["lat"], arrays["lng"], scale_m) > logic.CELL_GRID_TOLERANCE_CELLS:
+        raise logic.BaselineInvalid(f"level_b_off_grid:{season_key}")
+    rows, cols = logic.cell_keys(arrays["lat"], arrays["lng"], scale_m)
+    if np.unique(_packed_keys(rows, cols)).size != arrays["n"].size:
+        raise logic.BaselineInvalid(f"level_b_duplicate_cells:{season_key}")
+
+    for value in arrays.values():
+        value.setflags(write=False)
+    return CellBaseline(
+        season_key=season_key,
+        months=tuple(info["months"]),
+        version=manifest["baseline_version"],
+        history_end=level_b["history_end"],
+        scale_m=scale_m,
+        file=info["file"],
+        **arrays,
+    )
+
+
+def _cached_season(path: Path, season_key: str, manifest: dict) -> CellBaseline:
+    info = manifest["level_b"]["seasons"][season_key]
+    key = (
+        str(path),
+        season_key,
+        _file_state(path / MANIFEST_NAME),
+        _file_state(path / SITES_NAME),
+        _file_state(path / info["file"]),
+    )
+    with _cell_cache_lock:
+        hit = _cell_cache.get(key)
+        if hit is not None:
+            _cell_cache.move_to_end(key)
+            return hit
+    loaded = _load_season(path, season_key, manifest)  # file IO outside the lock
+    with _cell_cache_lock:
+        _cell_cache[key] = loaded
+        _cell_cache.move_to_end(key)
+        while len(_cell_cache) > _CELL_CACHE_SIZE:
+            _cell_cache.popitem(last=False)
+    return loaded
+
+
+def _cell_refused(season_key: str, reason: str, *, detail: str | None = None, exc_info: bool = False):
+    """Log (once per distinct message) why no cell baseline is used; return ``(None, reason)``."""
+    global _last_cell_warning
+    message = f"Level B cell baseline {season_key} not used ({reason})"
+    if detail:
+        message += f": {detail}"
+    if message != _last_cell_warning:
+        logger.warning(message, exc_info=exc_info)
+        _last_cell_warning = message
+    return None, reason
+
+
+def cell_baseline_or_reason(season_key: str) -> tuple[CellBaseline | None, str | None]:
+    """``(CellBaseline, None)`` for a usable season, else ``(None, reason)``. Never raises.
+
+    Reasons: ``mode_off`` (BASELINE_MODE is not ``test``; no file is looked
+    at), ``no_artifact``, ``no_level_b`` (a Level A-only artefact),
+    ``unknown_season:<key>``, ``missing_cells_file:<name>`` (any of the
+    twelve), ``invalid:<BaselineInvalid reason>`` (Level A or Level B
+    validation, a file disagreeing with the manifest, cells off the grid or
+    sharing a key) and ``unreadable`` (anything else). Every reason but
+    ``mode_off`` is logged at WARNING, once per distinct message.
+    """
+    global _last_cell_warning
+    try:
+        if config.BASELINE_MODE != "test":
+            return None, "mode_off"
+        loaded = _validated_artifact_at()
+        if loaded is None:
+            return _cell_refused(season_key, "no_artifact")
+        path, manifest, _rows = loaded
+        level_b = manifest.get("level_b")
+        if level_b is None:
+            return _cell_refused(season_key, "no_level_b")
+        logic = bridge.baseline_logic
+        logic.validate_level_b(level_b, live_cell_signature=live_cell_signature(), today=_utc_today())
+        seasons = level_b["seasons"]
+        if season_key not in seasons:
+            return _cell_refused(season_key, f"unknown_season:{season_key}")
+        for info in seasons.values():
+            if not (path / info["file"]).is_file():
+                return _cell_refused(season_key, f"missing_cells_file:{info['file']}")
+        cells = _cached_season(path, season_key, manifest)
+    except bridge.baseline_logic.BaselineInvalid as exc:
+        return _cell_refused(season_key, f"invalid:{exc}")
+    except Exception as exc:  # noqa: BLE001 -- the cell baseline must fail closed, never raise
+        return _cell_refused(season_key, "unreadable", detail=f"{type(exc).__name__}: {exc}", exc_info=True)
+    _last_cell_warning = None
+    return cells, None
+
+
+def load_cell_baseline(season_key: str) -> CellBaseline | None:
+    """The usable Level B season ``season_key`` (e.g. ``"m10+-1"``), or None. Never raises.
+
+    See ``cell_baseline_or_reason`` for when and why it is None.
+    """
+    return cell_baseline_or_reason(season_key)[0]

@@ -37,9 +37,16 @@ and other downstream consumers:
                                                decision for the latest-scene
                                                policy, see scene_assess.py
     SceneAssessment, decide(...), scene_thresholds()  (pure, no GEE call)
+    build_cell_baseline(polygon_latlng, months, start, end, scale_m)
+                                                  -- per-cell season NDCI
+                                               median/MAD/count for the
+                                               Level B TEST baseline, see
+                                               baseline_raster.py
+    cell_baseline_params(scale_m, polygon_latlng) (pure, no GEE call)
 """
 
 from .auth import GEEAuthError, GEEConfigError, initialize_ee
+from .baseline_raster import build_cell_baseline, cell_baseline_params
 from .history import get_ndci_history, preprocessing_params
 from .imagery import get_ndci_heatmap, get_true_color_image
 from .modis import get_modis_chlorophyll_history, get_modis_sst
@@ -101,6 +108,8 @@ __all__ = [
     "valid_cell_mask",
     "get_ndci_history",
     "preprocessing_params",
+    "build_cell_baseline",
+    "cell_baseline_params",
     "assess_new_scenes",
     "SceneAssessment",
     "scene_thresholds",

@@ -156,6 +156,13 @@ get_modis_chlorophyll_history = _data_pipeline_bridge.get_modis_chlorophyll_hist
 # its preprocessing signature. Used by scripts/build_test_baseline.py only.
 get_ndci_history = _data_pipeline_bridge.get_ndci_history
 preprocessing_params = _data_pipeline_bridge.preprocessing_params
+# Per-cell season statistics for the Level B (per-cell) TEST baseline
+# (data-pipeline/src/baseline_raster.py) and the pure description of how
+# those cells are made, hashed into the cell baseline's own preprocessing
+# signature. Used by scripts/build_test_baseline.py (build) and
+# src/baseline_store.py (live signature for validation).
+build_cell_baseline = _data_pipeline_bridge.build_cell_baseline
+cell_baseline_params = _data_pipeline_bridge.cell_baseline_params
 day_of_year_climatology = _data_pipeline_bridge.day_of_year_climatology
 # MODIS product identity (data-pipeline/src/modis.py), for GET /methods.
 MODIS_COLLECTION_ID = _data_pipeline_bridge.MODIS_COLLECTION_ID
@@ -267,6 +274,8 @@ __all__ = [
     "get_modis_chlorophyll_history",
     "get_ndci_history",
     "preprocessing_params",
+    "build_cell_baseline",
+    "cell_baseline_params",
     "day_of_year_climatology",
     "MODIS_COLLECTION_ID",
     "MODIS_CHLOR_A_BAND",

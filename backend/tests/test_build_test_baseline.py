@@ -471,3 +471,299 @@ def test_default_sites_are_the_monitored_grid():
     from src.grid import MONITORED_GRID
 
     assert builder.DEFAULT_SITES is MONITORED_GRID
+
+
+# ==========================================================================
+# Level B (per-cell baseline): --level AB / B
+# ==========================================================================
+
+import numpy as np  # noqa: E402
+
+from src import _study_area, config  # noqa: E402
+from src.baseline_store import read_cells_file  # noqa: E402
+
+DEG = 200 / 111319.49079327357
+CELL_END = "2026-09-24"  # BUILT_ON - 15 days
+GRID_DTYPE = [
+    ("median", "<f4"), ("mad", "<f4"), ("n", "<i4"), ("longitude", "<f8"), ("latitude", "<f8"),
+]
+
+
+class FakeCells:
+    """Stands in for the Earth Engine per-cell fetch; records its calls.
+
+    Every season gets a 4 x 5 grid of cells on the production pixel grid
+    (centres at (k + 1/2) cells from 0 deg) plus one masked cell (n = 0).
+    ``low_n_by_month`` makes that many cells of a season fall under the
+    30-date floor; ``offset_cells`` shifts the whole grid off the pixel grid.
+    """
+
+    def __init__(self, low_n_by_month=None, offset_cells=0.0):
+        self.low_n_by_month = low_n_by_month or {}
+        self.offset_cells = offset_cells
+        self.calls = []
+
+    def dates(self, months, start, end):
+        out = [
+            f"{year}-{month:02d}-{day:02d}"
+            for year in range(2018, 2026) for month in months for day in (1, 10, 20)
+        ]
+        return sorted(d for d in out if start <= d < end)
+
+    def __call__(self, polygon, months, start, end, scale_m):
+        self.calls.append((polygon, months, start, end, scale_m))
+        target = months[1]
+        g = np.zeros((4, 6), dtype=GRID_DTYPE)
+        low = self.low_n_by_month.get(target, 1)
+        for i in range(4):
+            for j in range(6):
+                k = i * 6 + j
+                if j == 5:
+                    continue  # masked cell: zeros everywhere, n = 0
+                n = 10 if k < low else 40 + target
+                g[i, j] = (
+                    0.02 + 0.001 * k, 0.01 + 0.0005 * target, n,
+                    (55800 + j + 0.5 + self.offset_cells) * DEG,
+                    (7003 - i + 0.5) * DEG,
+                )
+        return g, self.dates(months, start, end)
+
+
+def _build_ab(root, cells=None, fetch=None, **overrides):
+    kwargs = dict(level="AB", fetch_cells=cells or FakeCells(), cell_end=CELL_END)
+    kwargs.update(overrides)
+    return _build(root, fetch, **kwargs)
+
+
+def _live_cell_signature():
+    from src.baseline_store import live_cell_preprocessing_params
+
+    return baseline.preprocessing_signature(live_cell_preprocessing_params())
+
+
+def test_level_ab_writes_twelve_season_files_into_the_same_version(tmp_path):
+    cells = FakeCells()
+    path = _build_ab(tmp_path, cells)
+    names = sorted(p.name for p in path.iterdir())
+    assert names == sorted(
+        ["manifest.json", "sites.json", *(baseline.cells_file_name(m) for m in range(1, 13))]
+    )
+    manifest, _ = read_artifact(path)
+    assert path.name == manifest["baseline_version"]
+    # Level A is the same as a plain build's.
+    assert manifest["preprocessing_signature"] == baseline.preprocessing_signature(
+        _detection.preprocessing_params()
+    )
+
+
+def test_level_b_fetches_twelve_seasons_in_order(tmp_path):
+    cells = FakeCells()
+    _build_ab(tmp_path, cells)
+    assert [c[1] for c in cells.calls] == [baseline.season_months(m) for m in range(1, 13)]
+    assert {c[0] for c in cells.calls} == {tuple(_study_area.STUDY_AREA_POLYGON_LATLNG)}
+    assert {(c[2], c[3], c[4]) for c in cells.calls} == {
+        ("2017-03-28", CELL_END, config.RASTER_SCAN_SCALE_M)
+    }
+
+
+def test_level_b_manifest_block(tmp_path):
+    path = _build_ab(tmp_path)
+    manifest, _ = read_artifact(path)
+    block = manifest["level_b"]
+
+    assert block["scale_m"] == config.RASTER_SCAN_SCALE_M
+    assert block["cell_preprocessing_signature"] == _live_cell_signature()
+    assert block["cell_preprocessing_signature"] != manifest["preprocessing_signature"]
+    assert block["query_end_exclusive"] == CELL_END
+    assert block["history_end"] == "2026-09-23"
+    assert block["history_start"] == "2018-01-01"
+    assert set(block["seasons"]) == {baseline.season_key(m) for m in range(1, 13)}
+    oct_season = block["seasons"]["m10+-1"]
+    assert oct_season["file"] == "cells_m10.npz"
+    assert oct_season["months"] == [9, 10, 11]
+    assert oct_season["cells"] == 20  # the masked cell is not stored
+    assert oct_season["cells_n_ge_floor"] == 19
+    assert oct_season["n_min"] == 10 and oct_season["n_max"] == 50
+    assert oct_season["n_dates"] == len(FakeCells().dates((9, 10, 11), "2017-03-28", CELL_END))
+    for key in ("mad_p05", "mad_p50", "mad_p95"):
+        assert oct_season[key] == pytest.approx(0.015)
+
+    baseline.validate_manifest(
+        manifest,
+        live_signature=baseline.preprocessing_signature(_detection.preprocessing_params()),
+        today=BUILT_ON,
+        live_cell_signature=_live_cell_signature(),
+    )
+
+
+def test_cells_files_hold_what_the_builder_computed(tmp_path):
+    path = _build_ab(tmp_path)
+    expected = _detection.build_cell_baseline(
+        _study_area.STUDY_AREA_POLYGON_LATLNG, (9, 10, 11), "2017-03-28", CELL_END,
+        config.RASTER_SCAN_SCALE_M, _fetch=FakeCells(),
+    )
+    got = read_cells_file(path / "cells_m10.npz")
+    for key in ("lat", "lng", "median", "mad", "n"):
+        np.testing.assert_array_equal(got[key], expected[key])
+        assert got[key].dtype == expected[key].dtype
+
+
+def test_a_season_under_ninety_percent_refuses_everything(tmp_path):
+    root = tmp_path / "baselines"
+    cells = FakeCells(low_n_by_month={7: 3})  # 17 of 20 cells = 85 %
+    with pytest.raises(builder.BuilderRefused) as excinfo:
+        _build_ab(root, cells)
+    message = str(excinfo.value)
+    assert "m07+-1" in message
+    assert "85.0%" in message
+    assert "90%" in message
+    assert not root.exists()
+    # Refused at the failing season: the later seasons were never fetched.
+    assert [c[1][1] for c in cells.calls] == list(range(1, 8))
+
+
+def test_exactly_ninety_percent_is_accepted(tmp_path):
+    cells = FakeCells(low_n_by_month={m: 2 for m in range(1, 13)})  # 18 of 20 cells
+    manifest, _ = read_artifact(_build_ab(tmp_path, cells))
+    assert manifest["level_b"]["seasons"]["m01+-1"]["share_n_ge_floor"] == 0.9
+
+
+def test_cells_off_the_production_pixel_grid_are_refused(tmp_path):
+    root = tmp_path / "baselines"
+    with pytest.raises(builder.BuilderRefused, match="pixel grid"):
+        _build_ab(root, FakeCells(offset_cells=0.5))
+    assert not root.exists()
+
+
+def test_level_a_refusal_comes_before_any_cell_fetch(tmp_path):
+    root = tmp_path / "baselines"
+    thin = _exact_floor_rows(per_month=5)
+    cells = FakeCells()
+    with pytest.raises(builder.BuilderRefused, match="alpha"):
+        _build_ab(root, cells, FakeHistory({13.0: thin, 12.0: thin}))
+    assert cells.calls == []
+    assert not root.exists()
+
+
+def test_level_ab_refuses_an_existing_version_before_fetching(tmp_path):
+    path = _build(tmp_path)  # Level A only
+    cells = FakeCells()
+    fetch = _rich_fetch()
+    with pytest.raises(builder.ArtifactExists):
+        _build_ab(tmp_path, cells, fetch)
+    assert cells.calls == [] and fetch.calls == []
+    assert "level_b" not in read_artifact(path)[0]
+
+
+def test_unknown_level_is_refused(tmp_path):
+    with pytest.raises(ValueError):
+        _build(tmp_path, level="C")
+
+
+# --------------------------------------------------------------------------
+# main(): --level
+# --------------------------------------------------------------------------
+
+
+def _main_b(root, *extra, cells=None, fetch=None):
+    return builder.main(
+        ["--root", str(root), *extra],
+        fetch_history=fetch or _rich_fetch(),
+        fetch_cells=cells or FakeCells(),
+        sites=SITES,
+        today=BUILT_ON,
+    )
+
+
+def test_main_default_level_is_a_and_never_fetches_cells(tmp_path):
+    cells = FakeCells()
+    assert _main_b(tmp_path, cells=cells) == 0
+    assert cells.calls == []
+    [artefact] = list(tmp_path.iterdir())
+    assert "level_b" not in read_artifact(artefact)[0]
+
+
+def test_main_level_ab_defaults_the_cell_end_to_fifteen_days_ago(tmp_path, capsys):
+    cells = FakeCells()
+    fetch = _rich_fetch()
+    assert _main_b(tmp_path, "--level", "AB", cells=cells, fetch=fetch) == 0
+    assert {c[3] for c in cells.calls} == {(BUILT_ON - timedelta(days=15)).isoformat()}
+    # Level A keeps its own default end (tomorrow).
+    assert {c[3] for c in fetch.calls} == {"2026-10-10"}
+    [artefact] = list(tmp_path.iterdir())
+    assert read_artifact(artefact)[0]["level_b"]["history_end"] == "2026-09-23"
+    out = capsys.readouterr().out
+    assert "m10+-1" in out and "Level B" in out
+
+
+def test_main_cell_end_flag(tmp_path):
+    cells = FakeCells()
+    assert _main_b(tmp_path, "--level", "AB", "--cell-end", "2026-06-01", cells=cells) == 0
+    assert {c[3] for c in cells.calls} == {"2026-06-01"}
+
+
+def test_main_level_ab_refusal_exits_two_and_writes_nothing(tmp_path, capsys):
+    root = tmp_path / "baselines"
+    code = _main_b(root, "--level", "AB", cells=FakeCells(low_n_by_month={3: 5}))
+    err = capsys.readouterr().err
+    assert code == 2
+    assert not root.exists()
+    assert "m03+-1" in err and "refused" in err.lower()
+
+
+def test_main_level_ab_dry_run_prints_every_season_and_writes_nothing(tmp_path, capsys):
+    root = tmp_path / "baselines"
+    cells = FakeCells(low_n_by_month={3: 5})
+    code = _main_b(root, "--level", "AB", "--dry-run", cells=cells)
+    out = capsys.readouterr().out
+    assert code == 2  # a real build would be refused
+    assert not root.exists()
+    assert len(cells.calls) == 12  # a dry run looks at every season
+    for month in range(1, 13):
+        assert baseline.season_key(month) in out
+    assert "m03+-1" in out.split("refused")[-1]
+
+
+def test_main_level_b_needs_an_existing_level_a_artefact(tmp_path, capsys):
+    root = tmp_path / "baselines"
+    cells = FakeCells()
+    code = _main_b(root, "--level", "B", "--replace", cells=cells)
+    err = capsys.readouterr().err
+    assert code == 2
+    assert cells.calls == []
+    assert "--level AB" in err
+    assert not root.exists() or list(root.iterdir()) == []
+
+
+def test_main_level_b_without_replace_is_refused_before_fetching(tmp_path, capsys):
+    root = tmp_path / "baselines"
+    assert _main_b(root) == 0
+    capsys.readouterr()
+    cells = FakeCells()
+    code = _main_b(root, "--level", "B", cells=cells)
+    err = capsys.readouterr().err
+    assert code == 2
+    assert cells.calls == []
+    assert "--replace" in err
+
+
+def test_main_level_b_adds_cells_and_keeps_level_a_unchanged(tmp_path):
+    root = tmp_path / "baselines"
+    assert _main_b(root) == 0
+    [artefact] = list(root.iterdir())
+    manifest_before, _ = read_artifact(artefact)
+    sites_before = (artefact / "sites.json").read_bytes()
+
+    fetch = _rich_fetch()
+    cells = FakeCells()
+    assert _main_b(root, "--level", "B", "--replace", cells=cells, fetch=fetch) == 0
+
+    assert fetch.calls == []  # Level A is carried over, not refetched
+    assert len(cells.calls) == 12
+    assert [p.name for p in root.iterdir()] == [artefact.name]
+    assert (artefact / "sites.json").read_bytes() == sites_before
+    manifest_after, _ = read_artifact(artefact)
+    level_b = manifest_after.pop("level_b")
+    assert manifest_after == manifest_before
+    assert set(level_b["seasons"]) == {baseline.season_key(m) for m in range(1, 13)}
+    assert (artefact / "cells_m01.npz").is_file()
