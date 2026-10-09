@@ -65,6 +65,18 @@ SCHEDULER_ENABLED: bool = os.environ.get("SCHEDULER_ENABLED", "true").strip().lo
 }
 SCHEDULER_INTERVAL_MINUTES: int = int(os.environ.get("SCHEDULER_INTERVAL_MINUTES", "360"))
 
+
+# TEST seasonal baseline switch (src/baseline_store.py, src/scientific_status.py).
+# Off by default. Only the exact value `test` turns it on -- no trimming, no
+# case folding, no "true"/"1" -- so a typo leaves it off rather than on. The
+# gates read this module attribute at call time (tests monkeypatch it).
+# Turning it on never turns on risk evaluation; see scientific_status.py.
+def _parse_baseline_mode(raw: str | None) -> str:
+    return "test" if raw == "test" else "off"
+
+
+BASELINE_MODE: str = _parse_baseline_mode(os.environ.get("BASELINE_MODE"))
+
 def as_aware_utc(dt):
     """SQLite round-trips DateTime(timezone=True) columns as naive
     datetimes (it doesn't actually persist tzinfo) -- every timestamp this

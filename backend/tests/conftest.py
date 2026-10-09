@@ -23,6 +23,14 @@ if str(_BACKEND_DIR) not in sys.path:
 
 _TEST_DB_DIR = tempfile.mkdtemp(prefix="backend_pytest_")
 os.environ["DATABASE_URL"] = f"sqlite:///{_TEST_DB_DIR}/test.db"
+# A TestClient runs the application's real lifespan. Disable scheduled
+# jobs at the application boundary for the entire pytest process so a
+# test cannot accidentally reach GEE merely by constructing its own
+# client fixture.
+os.environ["SCHEDULER_ENABLED"] = "false"
+# The TEST baseline gate is opt-in per test (monkeypatch config.BASELINE_MODE);
+# never let a developer's backend/.env enable it for the whole suite.
+os.environ["BASELINE_MODE"] = "off"
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -30,29 +38,36 @@ from fastapi.testclient import TestClient  # noqa: E402
 from src import main as main_module  # noqa: E402
 
 
-class _NoopScheduler:
-    """Stand-in for APScheduler's BackgroundScheduler. `src/main.py`'s
-    `on_startup` calls `.start()`/`.shutdown()` on whatever
-    `create_scheduler()` returns; in tests the *real* scheduler must
-    never fire `refresh_grid()` (a live GEE call, `next_run_time=now()`)
-    just because a TestClient was constructed. GEEAuthError-forcing
-    tests patch `bridge.*` directly instead -- this stub only stops the
-    unrelated background job from firing during unrelated tests."""
+def pytest_addoption(parser):
+    parser.addoption(
+        "--live-gee",
+        action="store_true",
+        default=False,
+        help="run tests that contact the real Google Earth Engine service",
+    )
 
-    def start(self) -> None:
-        pass
 
-    def shutdown(self, wait: bool = False) -> None:
-        pass
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "live_gee: contacts the real Google Earth Engine service"
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    if config.getoption("--live-gee"):
+        return
+    offline = pytest.mark.skip(reason="requires --live-gee")
+    for item in items:
+        if "live_gee" in item.keywords:
+            item.add_marker(offline)
 
 
 @pytest.fixture()
-def client(monkeypatch):
+def client():
     """TestClient wired to the isolated SQLite file above (never
-    backend/data/app.db), with the scheduler swapped for a no-op so
-    merely constructing the client never triggers a live GEE call.
+    backend/data/app.db), with scheduling disabled process-wide so
+    merely constructing any TestClient never triggers a live GEE call.
     Triggers real startup (init_db/ensure_monitored_sites) and shutdown
     events each test -- both are idempotent, so re-running is safe."""
-    monkeypatch.setattr(main_module, "create_scheduler", lambda: _NoopScheduler())
     with TestClient(main_module.app) as c:
         yield c
