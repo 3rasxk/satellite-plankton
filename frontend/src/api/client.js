@@ -15,13 +15,20 @@ import axios from 'axios'
 
 const DEV_FALLBACK_BASE_URL = 'http://localhost:8000'
 
-const baseURL = import.meta.env.VITE_API_BASE_URL || DEV_FALLBACK_BASE_URL
+// `import.meta.env` exists only under Vite. Plain Node (`node --test`, which
+// loads src/lib/provenance.js and therefore this file) has none, so read it
+// defensively instead of throwing at import.
+const viteEnv = import.meta.env
+const env = viteEnv ?? {}
+
+const baseURL = env.VITE_API_BASE_URL || DEV_FALLBACK_BASE_URL
 
 // Runs once, at module import -- not per request. Without this, an unset
 // VITE_API_BASE_URL degrades silently to the localhost fallback and the
 // only symptom is a bare ERR_CONNECTION_REFUSED per call, which says
 // nothing about *why* the URL is localhost. Say both facts out loud.
-if (!import.meta.env.VITE_API_BASE_URL) {
+// Only inside Vite: under plain Node there is no .env to have forgotten.
+if (viteEnv && !env.VITE_API_BASE_URL) {
   console.warn(
     `[api] VITE_API_BASE_URL is not set — falling back to ${DEV_FALLBACK_BASE_URL}. ` +
       'A backend must be running there, or every API call fails with ' +
@@ -66,6 +73,26 @@ export async function getRasterScan() {
 // water was measured and found empty.
 export async function getRasterPixel(lat, lng, runId) {
   const { data } = await client.get('/raster-scan/pixel', { params: { lat, lng, run_id: runId } })
+  return data
+}
+
+// Highlight / anomaly pins of a stored raster run. Reads the run's stored
+// cells, like /raster-scan/pixel -- no Earth Engine call. `params` is passed
+// through as given: run_id, n (3-10), min_separation_m (1000-10000), and
+// mode ('anomaly' | 'ndci'; the server picks 'anomaly' only while a valid
+// TEST cell baseline is in force). A pin is a ranking inside one scan or a
+// TEST-baseline anomaly, never a risk marking; `risk_tier` is always null.
+export async function getHighlights(params = {}) {
+  const { data } = await client.get('/raster-scan/highlights', { params })
+  return data
+}
+
+// The methods the server actually runs: index formulas with worked examples
+// computed by the server's own functions, sensor constants, gates, season
+// windows, the TEST baseline block and verified references. Static per
+// deployment; no Earth Engine call, no database.
+export async function getMethods() {
+  const { data } = await client.get('/methods')
   return data
 }
 

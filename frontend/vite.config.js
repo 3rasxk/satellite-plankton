@@ -1,5 +1,31 @@
+import { execFileSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+
+// Build-time provenance for citations and the /data reproducibility block
+// (src/lib/buildInfo.js). Each falls back to "dev" rather than failing the
+// build: a tarball without .git, or git missing on PATH, still builds.
+function readAppVersion() {
+  try {
+    const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'))
+    return typeof pkg.version === 'string' && pkg.version ? pkg.version : 'dev'
+  } catch {
+    return 'dev'
+  }
+}
+
+function readGitSha() {
+  try {
+    const sha = execFileSync('git', ['rev-parse', '--short', 'HEAD'], {
+      cwd: new URL('.', import.meta.url),
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).toString().trim()
+    return /^[0-9a-f]{4,40}$/.test(sha) ? sha : 'dev'
+  } catch {
+    return 'dev'
+  }
+}
 
 // Proxy `/api/*` to the local backend so the app is same-origin.
 //
@@ -27,6 +53,10 @@ const apiProxy = {
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  define: {
+    __APP_VERSION__: JSON.stringify(readAppVersion()),
+    __GIT_SHA__: JSON.stringify(readGitSha()),
+  },
   server: { proxy: apiProxy },
   preview: { proxy: apiProxy },
 })
