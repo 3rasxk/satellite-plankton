@@ -1,6 +1,6 @@
 # Academic Dashboard Redesign — Design Spec
 
-Date: 2026-10-09 · Status: draft for review · Scope: `frontend/` plus one additive read-only backend endpoint (`GET /methods`)
+Date: 2026-10-09 · Status: draft for review · Scope: `frontend/` plus two additive read-only backend endpoints (`GET /methods`, `GET /raster-scan/highlights`)
 
 ## 1. Intent
 
@@ -28,7 +28,7 @@ Shared shell: top bar (logo/title, 5 nav links, TH/EN toggle, "Cite" and "Data" 
 | Route | Name (TH / EN) | Purpose | Data (all existing unless noted) |
 |---|---|---|---|
 | `/` | ภาพรวม / Overview | Current situation, honestly stated | `/summary`, `/raster-scan`, `/risk-map` |
-| `/map` | แผนที่ราสเตอร์ / Raster map | Explore the area, inspect any cell | `/raster-scan`, `/raster-scan/overlay.png`, `/raster-scan/true-color.png`, `/raster-scan/pixel` |
+| `/map` | แผนที่ราสเตอร์ / Raster map | Explore the area, inspect any cell, highlight pins | `/raster-scan`, `/raster-scan/overlay.png`, `/raster-scan/true-color.png`, `/raster-scan/pixel`, **new** `/raster-scan/highlights` |
 | `/sites` | จุดเฝ้าระวัง / Monitoring sites | 7 fixed sites: table + per-site detail | `/risk-map`, `/risk-map/{id}/image`, `/timeseries` |
 | `/methods` | วิธีการ / Methods | Indices, sensors, masks, references | **new** `GET /methods` |
 | `/data` | ข้อมูลและข้อจำกัด / Data & limits | Provenance table, exports, limitations | `/raster-scan`, `/summary`, `/methods` |
@@ -41,7 +41,7 @@ Shared shell: top bar (logo/title, 5 nav links, TH/EN toggle, "Cite" and "Data" 
 
 1. **Status banner** (text derived only from API fields; table below). Never colour-coded as safe.
 2. **Key facts** (4 cards, each with a source chip): *Newest scene date* (`/raster-scan.newest_scene_date`); *Measured area* (`coverage`, as % of the study polygon with a reading, with the "not measured ≠ low" note); *Scenes mixed* (`scene_count`, with link to the date-share chart); *Sites with a usable reading* (`risk_level_counts` → n of `total_sites`; `no_usable_data` and `not_checked_yet` shown separately and never merged).
-3. **Map preview** (static NDCI overlay + legend, link to `/map`).
+3. **Map preview** (static NDCI overlay + legend + top-5 highlight pins per §4.6, link to `/map`).
 4. **Sites strip**: seven chips (name, status, newest `actual_date`), linking to `/sites/:id`.
 5. **Truth-boundary footer.**
 
@@ -65,6 +65,20 @@ Keeps the working Leaflet page and its logic; upgrades presentation:
 - **Permalink:** `?lat=&lng=&run=&layer=&zoom=` is read on load and written on interaction, so a judge can open the exact cell.
 - **Actions:** Copy citation, Copy permalink, Download this cell (CSV), Open raw JSON (new tab to the API URL).
 - Pixel request is made only for map clicks, never for control clicks (regression guard already implemented; kept under test).
+- **Highlight pins (user request, 2026-10-09).** Numbered pins mark where the served run's **NDCI is highest** — a descriptive ranking inside one scan, **not** a bloom-risk marking. Full rules in §4.6.
+
+### 4.6 Highlight pins ("หมุดค่าสูงสุดในรอบสแกน")
+
+**Why not "risk" pins.** There is no valid Sentinel-2 baseline and no validated NDCI threshold for this product and region, so any "at risk of bloom" pin would be an unsupported claim (CLAUDE.md §0/§1; `risk_evaluation.active` is false). A ranking by value needs no threshold and asserts nothing beyond the data: "these cells had the highest NDCI in this scan".
+
+- **What a pin is.** The top *N* (default 5, user-adjustable 3–10) measured cells of the served run, ranked by NDCI, after spatial de-duplication (greedy non-maximum suppression: a cell is skipped if within `min_separation_m` — default 3000 m — of a higher-ranked pin), so five adjacent cells cannot fill the list. Only `state == "reading"` cells qualify; unmeasured/outside cells never get pins.
+- **Appearance.** Numbered dark-neutral marker (shape distinct from the 7 monitoring-site markers). **Never** a risk colour, never red/amber, never the accent colour (reserved for interaction). A legend entry reads "Highest NDCI in this scan (rank within one image) — not a risk level".
+- **Popup / inspector (per pin).** Rank *k* of *N*; NDCI and the other three indices; `acquired_date` and `acquired_at`; cell and pixel-centre coordinates; run_id; the cohort size (number of measured cells ranked); percentile of this cell within the run; `edge_of_no_data` flag (true when any of the 8 neighbouring cells in the raster is unmeasured — a **fact about the data**, shown as "next to unmeasured area: cloud edges and masks can distort index values"). Fixed caveat text: *high NDCI can also come from suspended sediment (e.g. river mouths), shallow bottom, sun glint or cloud edges; it does not by itself identify a bloom or a species.* Buttons: Zoom to cell, Copy permalink, Download CSV row, Open raw JSON.
+- **Where they appear.** `/map` (all *N*, toggle "Show highlights", default on), `/` map preview (top 5, read-only), `/data` (table of the pins with all fields, CSV export). A pin list is also available in the `/map` left rail for keyboard users (each row focuses the pin).
+- **Permalink.** `?pin=k&run=` restores the selection; pins are recomputed from the stored run so the same run always gives the same pins (deterministic tie-break: higher NDCI, then lower row, then lower column).
+- **Honest empty states.** No run → no pins and the reason; run with fewer than *N* separable measured cells → fewer pins, stated; all-null NDCI → none.
+- **Gate-ready, not gate-active.** If `risk_evaluation_active` becomes true in the future, the API may return a `risk_tier` per pin and the UI will show it with baseline provenance. While the gate is inactive the field is absent/null and the UI has no code path that renders a tier on a pin (tested).
+- **If a true risk threshold is wanted.** It needs a validated baseline or published threshold for this sensor product and region, plus an independent (non-satellite-derived) validation set. That is a separate, explicit decision by the project owner; this spec does not pre-empt it.
 
 ### 4.3 Sites `/sites`, `/sites/:siteId`
 
@@ -122,6 +136,22 @@ New router `backend/src/routers/methods.py`; schema `MethodsResponse(DisclaimerM
 
 Single-source rules: index `value` of the worked example is computed by calling `detection/src/indices.py` functions at request time; `gates` come from `scientific_status`; floors from the detection constants; `max_scene_age_days` from `default_max_scene_age_days()`; display domains from the data-pipeline `BAND_DOMAINS`. Static metadata (formula strings, roles, notes, wavelengths, references) sits in one new module next to the indices and is covered by tests (§11). Reached through the existing cross-project bridges (CLAUDE.md §8).
 
+### 6.1 Backend: `GET /raster-scan/highlights` (additive, read-only)
+
+Query: `run_id` (optional, default = the served run, same resolution as `/raster-scan/pixel`), `n` (3–10, default 5), `min_separation_m` (1000–10000, default 3000). Reads the run's stored cells blob like the pixel endpoint — **no GEE call**. Response `RasterHighlightsResponse(DisclaimerMixin)`:
+
+```json
+{"run_id": 4, "metric": "ndci", "ranking": "descending value within this run; not a risk level",
+ "n_requested": 5, "min_separation_m": 3000, "cohort_size": 187560,
+ "pins": [{"rank":1,"cell_lat":0.0,"cell_lng":0.0,"pixel_centre_lat":0.0,"pixel_centre_lng":0.0,
+           "index_values":{"ndci":0.0,"bda2":0.0,"bda3":0.0,"b2_b3":0.0},
+           "percentile":99.99,"acquired_date":"YYYY-MM-DD","acquired_at":"…Z",
+           "edge_of_no_data":false,"risk_tier":null}],
+ "reason": null}
+```
+
+Rules: only finite, date-valid cells; deterministic ordering and tie-break (§4.6); `percentile` computed over the same cohort; `risk_tier` is always `null` while the gate is inactive; 404 with the same wording as `/raster-scan/pixel` when no run/cells exist. The ranking helper lives in `backend/src/raster_scan/` beside `pixel.py` and is unit-tested on synthetic grids (de-duplication, tie-break, edge flag, fewer-than-N, empty).
+
 ## 7. Visual design
 
 - **Character:** calm, high-density, printable — a scientific atlas, not a marketing page. Light theme only (**Ruling**); a print stylesheet for `/methods` and `/data` so they export cleanly to PDF.
@@ -152,18 +182,18 @@ Every data block has four states with its own copy: *loading* (skeleton), *empty
 
 ## 11. Testing and verification
 
-- **Unit (node:test, existing runner):** i18n key parity TH/EN; `format` (null, rounding, minus sign, units); `statusBanner` over every row of the §4.1 table; `statusChip` over every API status; `citation`/`permalink` round-trip; `csv` escaping and column order; limitation headings coverage; DOIs match `LIMITATIONS.md`.
+- **Unit (node:test, existing runner):** pin copy never contains risk wording and no code path renders a tier while the gate is inactive; i18n key parity TH/EN; `format` (null, rounding, minus sign, units); `statusBanner` over every row of the §4.1 table; `statusChip` over every API status; `citation`/`permalink` round-trip; `csv` escaping and column order; limitation headings coverage; DOIs match `LIMITATIONS.md`.
 - **Component:** render-to-string of `Value`, `StatusChip`, `SourceChip` (popover content), `FigureFrame`, and the control-click-does-not-probe regression.
-- **Backend (pytest):** `/methods` schema; worked example equals hand arithmetic of the displayed formula; gates equal `scientific_status`; floors equal detection constants; DOIs ⊂ `LIMITATIONS.md`; no network/GEE.
+- **Backend (pytest):** `/raster-scan/highlights` ranking, de-duplication, tie-break, edge flag, null `risk_tier`; `/methods` schema; worked example equals hand arithmetic of the displayed formula; gates equal `scientific_status`; floors equal detection constants; DOIs ⊂ `LIMITATIONS.md`; no network/GEE.
 - **Browser (Chrome, local stack):** every route at 1440×900, 1024×768, 390×844; screenshots reviewed for overlap, truncation, Thai line breaks; console clean; keyboard walkthrough; Lighthouse-style a11y spot check; permalink round-trip; TH↔EN toggle on each page; empty-DB and backend-down states.
 - **Definition of done:** all suites green, lint and build clean, browser checklist passed with screenshots saved under `docs/screenshots/` (**Ruling**), README and `docs/FRONTEND_PLAN.md` updated.
 
 ## 12. Phases (for the implementation plan)
 
-1. Backend `/methods` + tests.
+1. Backend `/methods` and `/raster-scan/highlights` + tests.
 2. Shell, tokens, i18n, shared UI components + pure-logic modules with tests.
 3. Overview.
-4. Map upgrade (rail, scene-date chart, inspector provenance, permalink, actions).
+4. Map upgrade (rail, scene-date chart, inspector provenance, permalink, actions, highlight pins §4.6).
 5. Sites table + detail.
 6. Methods.
 7. Data & limits (+ print stylesheet).
@@ -176,7 +206,8 @@ Each phase ships working software and is committed separately.
 - Bilingual TH/EN, Thai default; English toggle (researchers + officials audience).
 - Light theme only, plus print stylesheet; no dark mode.
 - Serif for long-form prose only; sans for UI.
-- Single new backend endpoint (`/methods`) rather than duplicating formulas in the frontend, to keep them verifiable.
+- Two additive backend endpoints: `/methods` (rather than duplicating formulas in the frontend, to keep them verifiable) and `/raster-scan/highlights`.
+- Pins mark the **highest NDCI in the scan**, not bloom risk (user asked for "risk" pins; no validated baseline/threshold exists, so a risk label would overclaim). Neutral marker, never a risk colour; a risk tier can attach only when the gate is active.
 - References limited to those already verified in `LIMITATIONS.md`; none added from memory.
 - No historical raster browser, no bulk cell export, no write actions (out of scope).
 - Screenshots committed as verification evidence.
@@ -190,4 +221,4 @@ Each phase ships working software and is committed separately.
 
 ## 15. Out of scope
 
-LINE/push, ML, new satellite processing, authentication, deployment, dark mode, backend changes other than `/methods`.
+LINE/push, ML, new satellite processing, authentication, deployment, dark mode, backend changes other than `/methods` and `/raster-scan/highlights`, any threshold-based "at risk" marking.
