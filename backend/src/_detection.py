@@ -84,6 +84,7 @@ def _load_detection_module(filename: str, module_name: str):
 _prediction = _load_detection_module("prediction.py", "detection_src_prediction")
 _climatology_bridge = _load_detection_module("climatology.py", "detection_src_climatology")
 _signal_anomaly = _load_detection_module("signal_anomaly.py", "detection_src_signal_anomaly")
+_baseline = _load_detection_module("baseline.py", "detection_src_baseline")
 
 # `prediction.py` imports `_data_pipeline` under its bare sibling name.
 # Reuse that loaded object. Climatology is loaded explicitly above because
@@ -105,6 +106,13 @@ load_prediction_config = _prediction.load_config
 SIGNAL_ANOMALY_MIN_INDEPENDENT_DATES = _signal_anomaly.MIN_INDEPENDENT_DATES
 SIGNAL_ANOMALY_MAX_OBSERVATION_AGE_DAYS = _signal_anomaly.MAX_OBSERVATION_AGE_DAYS
 
+# --- TEST seasonal baseline (detection/src/baseline.py) ---------------------
+# The whole module, unmodified, under a name that says what it is: season
+# scope, preprocessing signature, self-check, manifest build and validation.
+# scripts/build_test_baseline.py builds a manifest with it; nothing in
+# backend/ reimplements any of it.
+baseline_logic = _baseline
+
 # --- Errors / lower-level pipeline calls -----------------------------------
 # GEEAuthError must always propagate out of backend routers too (never
 # caught-and-faked, per CLAUDE.md) -- routers catch it only to translate
@@ -125,6 +133,11 @@ get_sentinel2_bands = _data_pipeline_bridge.get_sentinel2_bands
 # policy actually in force, instead of a backend-local copy of it.
 default_max_scene_age_days = _data_pipeline_bridge.default_max_scene_age_days
 get_modis_chlorophyll_history = _data_pipeline_bridge.get_modis_chlorophyll_history
+# Per-site Sentinel-2 NDCI history rows (data-pipeline/src/history.py) and the
+# pure description of how those rows are made, which the baseline hashes into
+# its preprocessing signature. Used by scripts/build_test_baseline.py only.
+get_ndci_history = _data_pipeline_bridge.get_ndci_history
+preprocessing_params = _data_pipeline_bridge.preprocessing_params
 day_of_year_climatology = _data_pipeline_bridge.day_of_year_climatology
 
 # Image rendering (data-pipeline/src/imagery.py, re-exported through
@@ -200,6 +213,7 @@ __all__ = [
     "load_prediction_config",
     "SIGNAL_ANOMALY_MIN_INDEPENDENT_DATES",
     "SIGNAL_ANOMALY_MAX_OBSERVATION_AGE_DAYS",
+    "baseline_logic",
     "GEEAuthError",
     "GEEConfigError",
     "NoCloudFreeImageryError",
@@ -207,6 +221,8 @@ __all__ = [
     "get_sentinel2_bands",
     "default_max_scene_age_days",
     "get_modis_chlorophyll_history",
+    "get_ndci_history",
+    "preprocessing_params",
     "day_of_year_climatology",
     "z_score",
     "get_true_color_image",
