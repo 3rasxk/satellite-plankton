@@ -37,6 +37,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import math
 import sys
 from datetime import date
 from pathlib import Path
@@ -118,23 +119,38 @@ def scoped_history(
 ) -> list[dict]:
     """Rows acquired in ``season_months(target_month)``, tagged with the scope.
 
-    Returns new dicts carrying ``location_id``, ``season_key`` and
-    ``preprocessing_signature``; the input rows are not mutated. Rows whose
-    ``acquisition_date`` cannot be parsed are dropped.
+    Returns new dicts; the input rows are not mutated. Existing tags are never
+    overwritten (a missing or ``None`` tag counts as absent):
+
+    * a row already tagged with a different ``location_id`` is dropped, and so
+      is a row already tagged with a different ``season_key``; neither is
+      relabelled into this scope;
+    * a row already tagged with a different ``preprocessing_signature`` is KEPT
+      with that tag, so ``assess_signal_anomaly`` can report
+      ``incompatible_preprocessing`` instead of silently using it;
+    * absent tags are filled with ``location_id``, this target month's
+      ``season_key`` and ``preprocessing_signature``.
+
+    Rows whose ``acquisition_date`` cannot be parsed are dropped.
     """
     months = season_months(target_month)
     key = season_key(target_month)
     scoped: list[dict] = []
     for row in rows:
-        if _month_of(row.get("acquisition_date")) in months:
-            scoped.append(
-                {
-                    **row,
-                    "location_id": location_id,
-                    "season_key": key,
-                    "preprocessing_signature": preprocessing_signature,
-                }
-            )
+        if _month_of(row.get("acquisition_date")) not in months:
+            continue
+        row_location = row.get("location_id")
+        if row_location is not None and row_location != location_id:
+            continue
+        row_season = row.get("season_key")
+        if row_season is not None and row_season != key:
+            continue
+        tagged = dict(row)
+        tagged["location_id"] = location_id
+        tagged["season_key"] = key
+        if tagged.get("preprocessing_signature") is None:
+            tagged["preprocessing_signature"] = preprocessing_signature
+        scoped.append(tagged)
     return scoped
 
 
@@ -310,24 +326,32 @@ class BaselineInvalid(ValueError):
 
 
 def _is_number(value: object) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
+    """True for a finite int/float (NaN, inf and bool are not numbers here)."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
 
 def validate_manifest(manifest: dict, *, live_signature: str, today: date) -> None:
     """Raise ``BaselineInvalid`` unless the manifest is safe to activate.
 
     Checks run in this order and the first failure wins:
-      1. required top-level keys           -> ``missing_field:<name>``
-      2. ``baseline_kind == "test"``       -> ``not_test_kind``
+      1. required top-level keys             -> ``missing_field:<name>``
+      2. ``baseline_kind == "test"``         -> ``not_test_kind``
       3. signature equals ``live_signature`` -> ``signature_mismatch``
-      4. ``history_end`` not after today   -> ``history_in_future``
-      5. floors in ``signal_anomaly``      -> ``below_floor``
+      4. ``history_end`` not after today     -> ``history_in_future``
+      5. floors in ``signal_anomaly``        -> ``below_floor``
+      6. ``season_rule == SEASON_RULE``      -> ``season_rule_mismatch``
+      7. ``signal_anomaly.status == "active"`` -> ``inactive_declaration``
+      8. declared ``mad_scale`` / ``watch_at_z`` / ``high_at_z`` equal the
+         ``signal_anomaly`` constants       -> ``threshold_mismatch``
+      9. nested ``preprocessing_signature`` / ``baseline_version`` equal the
+         top-level ones                      -> ``inconsistent_declaration``
 
     A ``history_end`` that is not an ISO date is reported as
-    ``missing_field:history_end`` (unusable). Missing or non-numeric floor
-    values are ``missing_field:signal_anomaly.<name>`` and ``below_floor``
-    respectively, so a hand-edited manifest can never loosen the floors owned
-    by ``signal_anomaly.py``.
+    ``missing_field:history_end`` (unusable). A missing nested declaration
+    field is ``missing_field:signal_anomaly.<name>`` (raised at the step that
+    needs it). Floor values must be finite numbers (NaN, inf, bool and strings
+    are ``below_floor``), so a hand-edited manifest can never loosen the floors
+    owned by ``signal_anomaly.py``.
     """
     for name in _REQUIRED_TOP_LEVEL:
         if name not in manifest or manifest[name] is None:
@@ -349,12 +373,33 @@ def validate_manifest(manifest: dict, *, live_signature: str, today: date) -> No
     declaration = manifest["signal_anomaly"]
     if not isinstance(declaration, dict):
         raise BaselineInvalid("missing_field:signal_anomaly")
-    for name in ("minimum_independent_dates", "max_observation_age_days"):
+
+    def declared(name: str):
         if name not in declaration or declaration[name] is None:
             raise BaselineInvalid(f"missing_field:signal_anomaly.{name}")
-    minimum_dates = declaration["minimum_independent_dates"]
-    max_age = declaration["max_observation_age_days"]
+        return declaration[name]
+
+    minimum_dates = declared("minimum_independent_dates")
+    max_age = declared("max_observation_age_days")
     if not (_is_number(minimum_dates) and _is_number(max_age)):
         raise BaselineInvalid("below_floor")
     if minimum_dates < MIN_INDEPENDENT_DATES or not 0 <= max_age <= MAX_OBSERVATION_AGE_DAYS:
         raise BaselineInvalid("below_floor")
+
+    if manifest["season_rule"] != SEASON_RULE:
+        raise BaselineInvalid("season_rule_mismatch")
+
+    if declared("status") != "active":
+        raise BaselineInvalid("inactive_declaration")
+
+    mad_scale = declared("mad_scale")
+    watch_at = declared("watch_at_z")
+    high_at = declared("high_at_z")
+    if not (_is_number(mad_scale) and _is_number(watch_at) and _is_number(high_at)):
+        raise BaselineInvalid("threshold_mismatch")
+    if not math.isclose(mad_scale, MAD_SCALE, rel_tol=0.0, abs_tol=1e-12) or watch_at != WATCH_AT_Z or high_at != HIGH_AT_Z:
+        raise BaselineInvalid("threshold_mismatch")
+
+    for name in ("preprocessing_signature", "baseline_version"):
+        if declared(name) != manifest[name]:
+            raise BaselineInvalid("inconsistent_declaration")
