@@ -29,16 +29,16 @@
 
 ## Review Focus
 
-- A number displayed without a working source reference, or `null` shown as `0`/blank. (F1, F2)
-- Any risk wording/colour, or a pin legend that reads as a risk marking. (F4)
+- A number displayed without a working source reference, or `null` shown as `0`/blank. (Tasks 1-2)
+- Any risk wording/colour, or a pin legend that reads as a risk marking. (Task 4)
 - TH/EN key drift and untranslated server text. (F1)
-- Control clicks on the map triggering pixel requests (regression guard exists; keep). (F4)
-- Stale data presented as current (poll failed, no newer scene, stale run). (F3, F4)
-- Truncated Thai text and overlapping panels at 390/1024/1440 widths. (F8, controller)
+- Control clicks on the map triggering pixel requests (regression guard exists; keep). (Task 4)
+- Stale data presented as current (poll failed, no newer scene, stale run). (Tasks 3-4)
+- Truncated Thai text and overlapping panels at 390/1024/1440 widths. (Task 8, controller)
 
 ---
 
-## Task F1: Logic foundations — i18n, formatting, status vocabulary, provenance, citation, permalink, CSV
+## Task 1: Logic foundations — i18n, formatting, status vocabulary, provenance, citation, permalink, CSV
 
 **Files:**
 - Create: `frontend/src/i18n/{index.js,th.js,en.js}`, `frontend/src/lib/{format.js,statusChip.js,statusBanner.js,provenance.js,citation.js,permalink.js,csv.js,buildInfo.js}`
@@ -64,7 +64,7 @@
 
 ---
 
-## Task F2: Shell, tokens, routing and shared UI components
+## Task 2: Shell, tokens, routing and shared UI components
 
 **Files:**
 - Create: `frontend/src/components/ui/{NavBar,LangToggle,TruthFooter,BaselineBanner,SourceChip,FigureFrame,StatusChip,CiteButton,Value,PageHeader,EmptyState,ErrorState}.jsx`, `frontend/src/i18n/LangContext.jsx`, `frontend/src/hooks/useBaseline.js`, `frontend/src/pages/NotFoundPage.jsx`
@@ -90,7 +90,7 @@
 
 ---
 
-## Task F3: Overview page (`/`)
+## Task 3: Overview page (`/`)
 
 **Files:** Create `frontend/src/pages/OverviewPage.jsx`, `frontend/src/components/OverviewMapPreview.jsx`; modify `main.jsx` route; i18n additions; Test `frontend/tests/overview.test.js`.
 
@@ -102,7 +102,7 @@
 
 ---
 
-## Task F4: Raster map upgrade (`/map`) — rail, provenance inspector, pins, permalink, actions
+## Task 4: Raster map upgrade (`/map`) — rail, provenance inspector, pins, permalink, actions
 
 **Files:** Modify `frontend/src/pages/RasterPage.jsx` (becomes the `/map` page), `RasterPixelPanel.jsx`, `RasterScanBanner.jsx` (only to remove duplicated claims now carried by the rail; keep its tested content), `RasterLegend.jsx`; Create `frontend/src/components/{RasterRail,SceneDateChart,HighlightPins,PinList,PinLegend}.jsx`, `frontend/src/lib/mapModel.js`; i18n additions; Tests `frontend/tests/{map_model,pins,pixel_panel}.test.js` (+ keep existing raster tests green).
 
@@ -120,7 +120,7 @@
 
 ---
 
-## Task F5: Monitoring sites (`/sites`, `/sites/:siteId`)
+## Task 5: Monitoring sites (`/sites`, `/sites/:siteId`)
 
 **Files:** Create `frontend/src/pages/{SitesPage,SiteDetailPage}.jsx`, `frontend/src/components/{SitesTable,SiteImages,ModisSeries}.jsx`, `frontend/src/lib/sitesModel.js`; reuse `TimeSeriesChart`, `SatelliteImage`; i18n additions; Tests `frontend/tests/sites_model.test.js`.
 
@@ -131,7 +131,7 @@
 
 ---
 
-## Task F6: Methods page (`/methods`)
+## Task 6: Methods page (`/methods`)
 
 **Files:** Create `frontend/src/pages/MethodsPage.jsx`, `frontend/src/components/{IndexCard,GateTable,ReferenceList}.jsx`; i18n additions (long-form prose keys); Tests `frontend/tests/methods_model.test.js`.
 
@@ -142,7 +142,7 @@
 
 ---
 
-## Task F7: Data & limits (`/data`) and exports
+## Task 7: Data & limits (`/data`) and exports
 
 **Files:** Create `frontend/src/pages/DataPage.jsx`, `frontend/src/components/{RunTable,ApiReference,LimitationsList}.jsx`; i18n additions; Tests `frontend/tests/data_model.test.js`.
 
@@ -153,7 +153,7 @@
 
 ---
 
-## Task F8: Integration QA, legacy cleanup and docs (controller + one implementer)
+## Task 8: Integration QA, legacy cleanup and docs (controller + one implementer)
 
 **Files:** delete only unreferenced legacy files after a grep proves nothing imports them (`AnomalyPage`, `AquaculturePage`, `ReportsPage`, `NdciPage`, `SummaryPage`, `Sidebar`, `AnomalyStrip`, `RegionTrendChart`, `RiskLegend`, `StatCard`, `MapControls`… — verify each; keep anything a new page reuses); update `README.md`, `backend/README.md` (cooldown flow → latest-scene policy), `docs/FRONTEND_PLAN.md`, `docs/DETECTION_PLAN.md` (§ cooldown), `LIMITATIONS.md` (TEST-mode paragraph, MODIS grid 4.6 km, the two quality screens, the "no cell self-check" limit), `CLAUDE.md` §0/§1 (record the TEST baseline as an explicitly gated, off-by-default, uncalibrated mode; correct "~1 km" MODIS to the Level-3 grid; do not alter the locked decisions table beyond adding rows that state this).
 
