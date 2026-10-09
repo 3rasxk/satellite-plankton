@@ -6,7 +6,7 @@ disk and the run row describing them. Nothing here calls Earth Engine,
 renders, or computes an index; a request that arrives before any scan
 has run gets an explicit "no raster yet", never a placeholder picture.
 
-Three endpoints, deliberately split:
+Four endpoints, deliberately split:
   - `GET /raster-scan` returns metadata only (bounds, legend, scene
     dates, coverage). Small, JSON, safe to poll.
   - `GET /raster-scan/overlay.png` returns the image bytes. Megabytes,
@@ -16,6 +16,10 @@ Three endpoints, deliberately split:
     blob the overlay was drawn from. Also not a live call: a click asks
     what was already measured, and the answer must be the number behind
     the pixel on screen, identical every time it is asked.
+  - `GET /raster-scan/highlights` ranks the same stored cells by NDCI
+    (src/raster_scan/highlights.py): the top-N measured cells of one run
+    after spatial de-duplication. A ranking by value inside one scan --
+    no threshold, no baseline, no tier.
 
 Metadata binds the image URL and pixel queries to its run_id. Explicit
 run IDs never fall back to a newer render; callers omitting the ID retain
@@ -47,6 +51,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
@@ -57,11 +62,13 @@ from .. import _detection as bridge
 from ..config import as_aware_utc
 from ..db import get_db
 from ..db_models import RasterScanRun, SceneAssessmentRow, ScenePollStatus
+from ..raster_scan import highlights as highlight_ranking
 from ..raster_scan import pixel as pixel_lookup
 from ..raster_scan.trigger import POLL_STATUS_ID, PASSED, is_settled
 from ..schemas import (
     LatestSceneInfo,
     RasterCoverage,
+    RasterHighlightsResponse,
     RasterPixelResponse,
     RasterScanResponse,
     ScenePollInfo,
@@ -72,6 +79,14 @@ logger = logging.getLogger("backend.routers.raster_scan")
 router = APIRouter(tags=["raster-scan"])
 
 OVERLAY_BAND = "ndci"
+
+# The 404 for "no rendered run to read cells from", shared by every
+# endpoint that reads the stored cells so the wording cannot drift apart.
+NO_RASTER_TO_QUERY = "No raster overlay is available to query. Run a raster scan first."
+
+# Answer to `mode=anomaly` until a per-cell (Level B) baseline exists. The
+# parameter is accepted now so the contract does not change when it does.
+ANOMALY_MODE_UNAVAILABLE = "anomaly mode requires the Level B baseline"
 
 
 def _coverage(overlay: dict) -> RasterCoverage | None:
@@ -338,10 +353,7 @@ def get_raster_pixel(
     """
     rendered = _rendered_run(db, run_id)
     if rendered is None:
-        raise HTTPException(
-            status_code=404,
-            detail="No raster overlay is available to query. Run a raster scan first.",
-        )
+        raise HTTPException(status_code=404, detail=NO_RASTER_TO_QUERY)
     try:
         found = pixel_lookup.inspect_run(rendered, lat, lng)
     except pixel_lookup.RasterCellsUnavailableError as exc:
@@ -352,4 +364,52 @@ def get_raster_pixel(
         date_used=rendered.date_used,
         scale_m=rendered.scale_m,
         **found,
+    )
+
+
+@router.get("/raster-scan/highlights", response_model=RasterHighlightsResponse)
+def get_raster_highlights(
+    run_id: int | None = Query(None, ge=1, le=2**63 - 1,
+                               description="Exact rendered run; omit for the latest available."),
+    n: int = Query(5, ge=3, le=10, description="Number of pins wanted (3-10)."),
+    min_separation_m: int = Query(
+        3000, ge=1000, le=10000,
+        description="De-duplication radius in metres: a cell closer than this to a "
+        "higher-ranked pin is skipped."),
+    mode: Literal["ndci", "anomaly"] = Query(
+        "ndci", description="'ndci' ranks by NDCI. 'anomaly' needs a per-cell baseline "
+        "that does not exist yet and answers 501."),
+    db: Session = Depends(get_db),
+) -> RasterHighlightsResponse:
+    """The highest-NDCI measured cells of one stored run, de-duplicated.
+
+    Reads the blob the overlay was drawn from, like `/raster-scan/pixel`
+    (sync, so the read runs in the threadpool) -- never Earth Engine. The
+    same run always yields the same pins. A ranking by value inside one
+    scan: high NDCI can also come from suspended sediment, shallow bottom,
+    sun glint or cloud edges, and does not by itself identify a bloom.
+
+    Run resolution and 404s are the pixel endpoint's: no rendered run, an
+    explicit run that is not servable, or a run whose cells are gone.
+    """
+    if mode == "anomaly":
+        raise HTTPException(status_code=501, detail=ANOMALY_MODE_UNAVAILABLE)
+    metric = "ndci"  # the band the overlay draws; the only rankable metric so far
+    rendered = _rendered_run(db, run_id)
+    if rendered is None:
+        raise HTTPException(status_code=404, detail=NO_RASTER_TO_QUERY)
+    try:
+        ranked = highlight_ranking.rank_run(
+            rendered, n=n, min_separation_m=min_separation_m, metric=metric,
+        )
+    except pixel_lookup.RasterCellsUnavailableError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return RasterHighlightsResponse(
+        run_id=rendered.id,
+        mode=mode,
+        metric=metric,
+        n_requested=n,
+        min_separation_m=min_separation_m,
+        **ranked,
     )

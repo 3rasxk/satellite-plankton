@@ -689,3 +689,92 @@ class RasterPixelResponse(DisclaimerMixin):
         "other way round.")
     acquired_at: str | None = Field(
         default=None, description="`date_ms` as a full UTC timestamp.")
+
+
+# --------------------------------------------------------------------------
+# /raster-scan/highlights
+# --------------------------------------------------------------------------
+
+HIGHLIGHT_RANKING_TEXT = "descending value within this run; not a risk level"
+
+
+class RasterHighlightPin(BaseModel):
+    """One highlight pin: a measured cell of the served run, by rank.
+
+    Read from the stored blob (src/raster_scan/highlights.py), never from
+    Earth Engine. A rank by value inside one scan -- high NDCI can also come
+    from suspended sediment, shallow bottom, sun glint or cloud edges, and
+    does not by itself identify a bloom or a species.
+    """
+
+    rank: int = Field(description="1 = highest value in this run after de-duplication.")
+    cell_lat: float = Field(
+        description="The sampled pixel's own latitude -- where the observation is.")
+    cell_lng: float = Field(description="The sampled pixel's own longitude.")
+    pixel_centre_lat: float = Field(
+        description="Centre latitude of the overlay square this cell paints. A display "
+        "coordinate; `cell_lat` is the measurement's own.")
+    pixel_centre_lng: float = Field(description="Centre longitude of that square.")
+    index_values: dict[str, float | None] = Field(
+        description="The four stored indices (ndci, bda2, bda3, b2_b3), widened from "
+        "float32, never rounded. A non-finite stored value is null, not a number.")
+    percentile: float = Field(
+        description="Share of this run's cohort with a strictly lower metric, x 100. "
+        "Relative to this run only; not comparable across runs.")
+    metric_value: float = Field(description="The value this pin was ranked by.")
+    date_ms: int = Field(description="This cell's own acquisition time (epoch ms, UTC).")
+    acquired_date: str = Field(description="`date_ms` as YYYY-MM-DD (UTC).")
+    acquired_at: str = Field(description="`date_ms` as a full UTC timestamp.")
+    edge_of_no_data: bool = Field(
+        description="True when any of the 8 neighbouring overlay squares whose centre lies "
+        "inside the study polygon carries no reading (cloud, land mask, no pass). Neighbours "
+        "outside the polygon do not count. Cloud edges and masks can distort index values.")
+    risk_tier: None = Field(
+        default=None, description="Always null: no tier is computed for a pin -- no valid "
+        "spectral-index baseline or validated threshold exists. Reserved so a future, "
+        "separately approved gate can fill it without a contract change.")
+
+
+class RasterHighlightsResponse(DisclaimerMixin):
+    """The top-N measured cells of one stored raster run, ranked by value.
+
+    A descriptive ranking inside one scan: no threshold, no baseline, no
+    classification. Cells are ranked only where the overlay paints a
+    reading (date-valid, finite NDCI, inside the study polygon), so a
+    masked or unmeasured area can never hold a pin.
+    """
+
+    model_config = ConfigDict(json_schema_extra={"example": {
+        "run_id": 4, "mode": "ndci", "metric": "ndci", "ranking": HIGHLIGHT_RANKING_TEXT,
+        "n_requested": 5, "min_separation_m": 3000, "cohort_size": 187560,
+        "pins": [{
+            "rank": 1, "cell_lat": 13.049944, "cell_lng": 100.620321,
+            "pixel_centre_lat": 13.050137, "pixel_centre_lng": 100.620126,
+            "index_values": {"ndci": 0.112, "bda2": 1.25, "bda3": 0.41, "b2_b3": 0.83},
+            "percentile": 99.99, "metric_value": 0.112, "date_ms": 1788492600000,
+            "acquired_date": "2026-09-04", "acquired_at": "2026-09-04T03:30:00Z",
+            "edge_of_no_data": False, "risk_tier": None,
+        }],
+        "reason": None, "baseline": None, "disclaimer": DISCLAIMER_TEXT,
+    }})
+
+    run_id: int = Field(description="The run whose stored cells were ranked.")
+    mode: Literal["ndci", "anomaly"] = Field(
+        description="'ndci': rank by NDCI. 'anomaly' is reserved for a per-cell baseline "
+        "that does not exist yet (the endpoint answers 501).")
+    metric: str = Field(description="The stored band the pins are ranked by.")
+    ranking: Literal["descending value within this run; not a risk level"] = Field(
+        default=HIGHLIGHT_RANKING_TEXT, description="What the order means.")
+    n_requested: int = Field(description="Pins asked for (3-10).")
+    min_separation_m: int = Field(
+        description="De-duplication radius: a cell closer than this (great-circle, between "
+        "cell coordinates) to a higher-ranked pin is skipped.")
+    cohort_size: int = Field(
+        description="Measured cells ranked -- the overlay squares carrying a reading.")
+    pins: list[RasterHighlightPin] = Field(description="Highest first; may be fewer than n.")
+    reason: str | None = Field(
+        default=None, description="Why there are fewer pins than requested: 'no measured "
+        "cells' or 'only k separable measured cells'. Null when n pins were found.")
+    baseline: dict | None = Field(
+        default=None, description="Baseline the pins were compared with. Always null in "
+        "'ndci' mode: a ranking by value needs none.")

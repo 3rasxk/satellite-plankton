@@ -18,7 +18,7 @@ from src.db import SessionLocal
 from src.db_models import RasterScanRun, SceneAssessmentRow, ScenePollStatus
 from src import config
 from src.raster_scan import render, storage
-from src.schemas import RasterScanResponse
+from src.schemas import RasterHighlightsResponse, RasterScanResponse
 
 
 # Distinguishes "the caller said nothing" from "the caller said None".
@@ -757,3 +757,190 @@ def test_the_poll_fields_say_a_stale_poll_is_not_proof_of_no_newer_scene():
     assert "never" in text and "no newer scene" in text
     assert "reassessed_after_use" in RasterScanResponse.model_json_schema()[
         "$defs"]["LatestSceneInfo"]["properties"]
+
+
+# --------------------------------------------------------------------------
+# GET /raster-scan/highlights (dashboard spec §4.6/§6.1; baseline spec §6):
+# the top-N measured cells of one stored run by NDCI -- a ranking inside
+# one scan, never a risk marking. Read from the blob, never from GEE.
+# --------------------------------------------------------------------------
+
+_PIXEL_404 = "No raster overlay is available to query. Run a raster scan first."
+_RANKING = "descending value within this run; not a risk level"
+_STEP_200M = 200 / render.METRES_PER_DEGREE
+
+
+def _rendered_cells(db, tmp_path, cells, *, started=None, hint="hl"):
+    """A run whose cells are on disk and whose overlay was rendered from
+    them, exactly as a real scan leaves it."""
+    run = _run(tmp_path, run_id_hint=hint, started=started or datetime.now(timezone.utc))
+    db.add(run)
+    db.commit()
+    run.blob_path = storage.write_cells(run.id, cells, root=tmp_path)["path"]
+    db.commit()
+    render.render_and_store(db, run, root=tmp_path)
+    db.refresh(run)
+    return run
+
+
+def _four_cells():
+    """Three separated readings inside the real study polygon, plus one
+    200 m east of the highest -- a neighbour NMS must drop at 3 km."""
+    lat = np.array([12.97, 12.97, 13.10, 13.20])
+    lng = np.array([100.01, 100.01 + _STEP_200M, 100.30, 100.60])
+    ndci = np.array([0.125, 0.11, 0.09, 0.07], dtype=np.float32)
+    return {
+        "lat": lat, "lng": lng, "ndci": ndci,
+        "bda2": np.array([1.1, 1.2, 1.3, 1.4], dtype=np.float32),
+        "bda3": np.array([np.nan, 0.2, 0.3, 0.4], dtype=np.float32),
+        "b2_b3": np.array([0.8, 0.85, 0.9, 0.95], dtype=np.float32),
+        bridge.RASTER_DATE_BAND: np.array(
+            [1788492600000, 1788492600000, 1787628600000, 1788492600000], dtype=np.int64),
+    }
+
+
+def test_highlights_rank_the_served_runs_cells_by_ndci(client, tmp_path):
+    _clear()
+    with SessionLocal() as db:
+        run_id = _rendered_cells(db, tmp_path, _four_cells()).id
+
+    response = client.get("/raster-scan/highlights", params={"n": 3})
+    assert response.status_code == 200
+    body = response.json()
+    RasterHighlightsResponse.model_validate(body)
+    assert body["run_id"] == run_id
+    assert body["mode"] == "ndci" and body["metric"] == "ndci"
+    assert body["ranking"] == _RANKING
+    assert body["n_requested"] == 3 and body["min_separation_m"] == 3000
+    assert body["cohort_size"] == 4
+    assert body["reason"] is None
+    assert body["baseline"] is None
+    assert body["disclaimer"]
+
+    pins = body["pins"]
+    assert [p["rank"] for p in pins] == [1, 2, 3]
+    assert [p["metric_value"] for p in pins] == [0.125, float(np.float32(0.09)),
+                                                 float(np.float32(0.07))]
+    assert all(p["risk_tier"] is None for p in pins)
+    assert pins[0]["index_values"]["bda3"] is None, "an unreadable index is null, not a number"
+    assert pins[1]["acquired_date"] == "2026-08-25"
+    assert pins[0]["percentile"] == 75.0
+    # A pin is what a click on its own cell reports.
+    clicked = client.get("/raster-scan/pixel", params={
+        "lat": pins[1]["cell_lat"], "lng": pins[1]["cell_lng"], "run_id": run_id,
+    }).json()
+    assert clicked["index_values"] == pins[1]["index_values"]
+    assert clicked["date_ms"] == pins[1]["date_ms"]
+
+
+def test_highlights_say_risk_only_to_deny_it(client, tmp_path):
+    _clear()
+    with SessionLocal() as db:
+        _rendered_cells(db, tmp_path, _four_cells())
+    body = client.get("/raster-scan/highlights").json()
+    text = str({k: v for k, v in body.items() if k != "ranking"}).replace("risk_tier", "")
+    assert "risk" not in text.lower()
+    for forbidden in ("risk_level", "anomaly_z", "spatial_anomaly_z", "threshold_tier"):
+        assert forbidden not in body
+
+
+def test_highlights_report_fewer_separable_cells_than_requested(client, tmp_path):
+    _clear()
+    with SessionLocal() as db:
+        _rendered_cells(db, tmp_path, _four_cells())
+    body = client.get("/raster-scan/highlights",
+                      params={"n": 5, "min_separation_m": 10000}).json()
+    # 12.97/100.01 -> 13.10/100.30 is ~34 km; 13.10/100.30 -> 13.20/100.60 ~34 km.
+    assert len(body["pins"]) == 3
+    assert body["reason"] == "only 3 separable measured cells"
+
+
+def test_highlights_for_an_explicit_run_never_use_a_newer_one(client, tmp_path):
+    _clear()
+    now = datetime.now(timezone.utc)
+    with SessionLocal() as db:
+        old = _rendered_reading(db, tmp_path, started=now - timedelta(hours=1),
+                                value=0.125, date_ms=1787628600000)
+        old_id = old.id
+        _rendered_reading(db, tmp_path, started=now, value=-0.03125, date_ms=1788492600000)
+    body = client.get("/raster-scan/highlights", params={"run_id": old_id}).json()
+    assert body["run_id"] == old_id
+    assert [p["metric_value"] for p in body["pins"]] == [0.125]
+    assert body["reason"] == "only 1 separable measured cells"
+
+
+def test_highlights_404_with_the_pixel_wording_when_no_run_exists(client):
+    _clear()
+    response = client.get("/raster-scan/highlights")
+    assert response.status_code == 404
+    assert response.json()["detail"] == _PIXEL_404
+    assert client.get("/raster-scan/pixel",
+                      params={"lat": 12.97, "lng": 100.01}).json()["detail"] == _PIXEL_404
+    missing = client.get("/raster-scan/highlights", params={"run_id": 999999})
+    assert missing.status_code == 404
+    assert missing.json()["detail"] == _PIXEL_404
+
+
+def test_highlights_404_when_the_overlay_survives_but_its_cells_do_not(client, tmp_path):
+    """Same as the pixel endpoint: the picture can be shown, but no number
+    behind it can be ranked."""
+    _clear()
+    with SessionLocal() as db:
+        db.add(_run(tmp_path, run_id_hint="noblob", started=datetime.now(timezone.utc)))
+        db.commit()
+    highlight = client.get("/raster-scan/highlights")
+    pixel_answer = client.get("/raster-scan/pixel", params={"lat": 12.97, "lng": 100.01})
+    assert highlight.status_code == pixel_answer.status_code == 404
+    assert highlight.json()["detail"] == pixel_answer.json()["detail"]
+    assert "no stored cells" in highlight.json()["detail"]
+
+
+def test_anomaly_mode_is_501_until_the_level_b_baseline_exists(client, tmp_path):
+    _clear()
+    with SessionLocal() as db:
+        _rendered_cells(db, tmp_path, _four_cells())
+    response = client.get("/raster-scan/highlights", params={"mode": "anomaly"})
+    assert response.status_code == 501
+    assert response.json()["detail"] == "anomaly mode requires the Level B baseline"
+
+
+@pytest.mark.parametrize("params", [
+    {"n": 2}, {"n": 11}, {"n": "five"},
+    {"min_separation_m": 999}, {"min_separation_m": 10001},
+    {"mode": "risk"}, {"mode": ""},
+    {"run_id": 0}, {"run_id": -1}, {"run_id": "1.5"}, {"run_id": str(2**63)},
+])
+def test_highlights_refuse_out_of_range_parameters(client, params):
+    assert client.get("/raster-scan/highlights", params=params).status_code == 422
+
+
+@pytest.mark.parametrize("params", [
+    {"n": 3}, {"n": 10}, {"min_separation_m": 1000}, {"min_separation_m": 10000},
+])
+def test_highlights_accept_the_ends_of_each_range(client, tmp_path, params):
+    _clear()
+    with SessionLocal() as db:
+        _rendered_cells(db, tmp_path, _four_cells())
+    assert client.get("/raster-scan/highlights", params=params).status_code == 200
+
+
+def test_highlights_handler_is_sync_so_blob_read_runs_in_threadpool():
+    import inspect
+    from src.routers import raster_scan as raster_scan_router
+
+    assert not inspect.iscoroutinefunction(raster_scan_router.get_raster_highlights)
+
+
+def test_highlight_pin_schema_refuses_a_tier():
+    from pydantic import ValidationError
+    from src.schemas import RasterHighlightPin
+
+    fields = {
+        "rank": 1, "cell_lat": 13.0, "cell_lng": 100.0, "pixel_centre_lat": 13.0,
+        "pixel_centre_lng": 100.0, "index_values": {"ndci": 0.1}, "percentile": 50.0,
+        "date_ms": 1788492600000, "acquired_date": "2026-09-04",
+        "acquired_at": "2026-09-04T03:30:00Z", "edge_of_no_data": False, "metric_value": 0.1,
+    }
+    assert RasterHighlightPin(**fields).risk_tier is None
+    with pytest.raises(ValidationError):
+        RasterHighlightPin(**fields, risk_tier="watch")
