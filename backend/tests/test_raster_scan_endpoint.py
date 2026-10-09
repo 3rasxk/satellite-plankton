@@ -15,8 +15,10 @@ from sqlalchemy import delete
 from src import _study_area
 from src import _detection as bridge
 from src.db import SessionLocal
-from src.db_models import RasterScanRun
+from src.db_models import RasterScanRun, SceneAssessmentRow, ScenePollStatus
+from src import config
 from src.raster_scan import render, storage
+from src.schemas import RasterScanResponse
 
 
 # Distinguishes "the caller said nothing" from "the caller said None".
@@ -373,3 +375,385 @@ def test_true_color_url_only_when_the_png_exists_on_disk(client, tmp_path, asset
         assert body["true_color_url"] == f"/raster-scan/true-color.png?run_id={run_id}"
     else:
         assert body["true_color_url"] is None
+
+
+# --------------------------------------------------------------------------
+# Latest-scene fields (spec 2026-10-09 §7): the newest assessed acquisition,
+# the last used date and the poll's health, served beside the raster so a
+# viewer can tell "not used, showing earlier data" from "nothing newer".
+# --------------------------------------------------------------------------
+
+# Every field /raster-scan served before the latest-scene fields existed.
+_PRE_EXISTING_KEYS = {
+    "disclaimer", "run_id", "status", "date_used", "scale_m", "cell_count", "scene_count",
+    "oldest_scene_date", "newest_scene_date", "scene_dates", "source_metadata", "completed_at",
+    "coverage", "bounds", "legend", "overlay_url", "true_color_url", "stale_run_id", "reason",
+}
+_NEW_KEYS = {"latest_scene", "last_used_scene_date", "poll"}
+
+
+def _clear_scenes():
+    with SessionLocal() as db:
+        db.execute(delete(SceneAssessmentRow))
+        db.execute(delete(ScenePollStatus))
+        db.commit()
+
+
+@pytest.fixture(autouse=True)
+def _leave_no_scene_rows_behind():
+    """This module's scene rows must not leak into later test files that
+    share the session database (the trigger tests expect empty tables)."""
+    yield
+    _clear_scenes()
+
+
+def _assessment(date, *, decision="passed", cloud=0.1, water=5000, reason=None,
+                assessed_at=None, used_in_run_id=None) -> SceneAssessmentRow:
+    return SceneAssessmentRow(
+        acquisition_date=date, decision=decision, cloud_fraction=cloud, water_pixels=water,
+        reason=reason, used_in_run_id=used_in_run_id,
+        assessed_at=assessed_at or datetime(2026, 10, 9, 6, 0, tzinfo=timezone.utc),
+    )
+
+
+def _served_run(tmp_path, hint="scene") -> int:
+    """Store one servable run and return its id."""
+    with SessionLocal() as db:
+        run = _run(tmp_path, run_id_hint=hint, started=datetime.now(timezone.utc))
+        db.add(run)
+        db.commit()
+        return run.id
+
+
+def test_empty_scene_tables_serve_null_for_all_three_fields(client, tmp_path):
+    _clear()
+    _clear_scenes()
+    _served_run(tmp_path)
+    body = client.get("/raster-scan").json()
+    assert body["latest_scene"] is None
+    assert body["last_used_scene_date"] is None
+    assert body["poll"] is None
+
+
+def test_scene_fields_are_served_even_when_no_overlay_exists(client):
+    """The case where they matter most: no picture, yet the poll may be
+    failing -- the viewer must still be told."""
+    _clear()
+    _clear_scenes()
+    with SessionLocal() as db:
+        db.add(_assessment("2026-10-08", decision="rejected_cloud", cloud=0.83,
+                           reason="cloud 83 % > 50 %"))
+        db.add(ScenePollStatus(id=1, last_error="boom", last_error_kind="gee_auth",
+                               last_error_at=datetime(2026, 10, 9, 5, 0, tzinfo=timezone.utc)))
+        db.commit()
+    body = client.get("/raster-scan").json()
+    assert body["run_id"] is None
+    assert body["latest_scene"]["acquisition_date"] == "2026-10-08"
+    assert body["latest_scene"]["used_in_served_run"] is False
+    assert body["poll"]["last_error_kind"] == "gee_auth"
+
+
+def test_existing_fields_are_unchanged_on_a_served_run(client, tmp_path):
+    """The new fields are additive: the pre-existing key set and values
+    are exactly what they were, with or without scene rows."""
+    _clear()
+    _clear_scenes()
+    run_id = _served_run(tmp_path, "pin")
+
+    def check(body):
+        assert set(body) == _PRE_EXISTING_KEYS | _NEW_KEYS
+        assert body["run_id"] == run_id
+        assert body["status"] == "ok"
+        assert body["date_used"] == "2026-09-06"
+        assert body["scale_m"] == 200
+        assert body["cell_count"] == 1234
+        assert body["scene_count"] == 3
+        assert body["oldest_scene_date"] == "2026-08-23"
+        assert body["newest_scene_date"] == "2026-09-02"
+        assert [e["date"] for e in body["scene_dates"]] == ["2026-09-02", "2026-08-23"]
+        assert body["coverage"] == {
+            "measured_fraction": 0.25, "measured_pixels": 2500, "polygon_pixels": 10000}
+        assert body["bounds"] == [[12.5, 99.9], [13.6, 101.0]]
+        assert body["overlay_url"] == f"/raster-scan/overlay.png?run_id={run_id}"
+        assert body["true_color_url"] is None
+        assert body["stale_run_id"] is None
+        assert body["reason"] is None
+        assert body["disclaimer"]
+
+    check(client.get("/raster-scan").json())
+    with SessionLocal() as db:
+        db.add(_assessment("2026-10-08", decision="rejected_cloud", cloud=0.83))
+        db.add(ScenePollStatus(id=1, last_poll_ok_at=datetime(2026, 10, 9, 5, tzinfo=timezone.utc)))
+        db.commit()
+    check(client.get("/raster-scan").json())
+
+
+def test_newest_rejected_row_is_echoed_with_the_threshold_and_older_used_date(
+    client, tmp_path, monkeypatch,
+):
+    _clear()
+    _clear_scenes()
+    run_id = _served_run(tmp_path)
+    monkeypatch.setattr(bridge, "scene_thresholds", lambda: (0.5, 1000))
+    with SessionLocal() as db:
+        db.add(_assessment("2026-10-05", cloud=0.12, used_in_run_id=run_id))
+        db.add(_assessment("2026-10-08", decision="rejected_cloud", cloud=0.83, water=7777,
+                           reason="cloud fraction 0.83 > 0.5",
+                           assessed_at=datetime(2026, 10, 9, 6, 30, 15, tzinfo=timezone.utc)))
+        db.commit()
+
+    body = client.get("/raster-scan").json()
+    assert body["latest_scene"] == {
+        "acquisition_date": "2026-10-08",
+        "decision": "rejected_cloud",
+        "cloud_fraction": 0.83,
+        "threshold_cloud_fraction": 0.5,
+        "min_water_pixels": 1000,
+        "reason": "cloud fraction 0.83 > 0.5",
+        "used_in_run_id": None,
+        "assessed_at": "2026-10-09T06:30:15+00:00",
+        "settled": False,
+        "used_in_served_run": False,
+        "reassessed_after_use": False,
+    }
+    assert body["last_used_scene_date"] == "2026-10-05"
+
+
+def test_the_threshold_comes_from_the_live_configuration(client, tmp_path, monkeypatch):
+    _clear()
+    _clear_scenes()
+    _served_run(tmp_path)
+    monkeypatch.setenv("RASTER_SCENE_MAX_CLOUD_FRACTION", "0.35")
+    monkeypatch.setenv("RASTER_SCENE_MIN_WATER_PIXELS", "250")
+    with SessionLocal() as db:
+        db.add(_assessment("2026-10-08"))
+        db.commit()
+    latest = client.get("/raster-scan").json()["latest_scene"]
+    assert latest["threshold_cloud_fraction"] == 0.35
+    assert latest["min_water_pixels"] == 250
+
+
+def test_an_invalid_threshold_setting_does_not_break_the_endpoint(client, tmp_path, monkeypatch):
+    """scene_thresholds() raises on a bad env value. The row is still
+    served; the thresholds are null rather than a guess or a 500."""
+    _clear()
+    _clear_scenes()
+    run_id = _served_run(tmp_path)
+    monkeypatch.setenv("RASTER_SCENE_MAX_CLOUD_FRACTION", "banana")
+    with SessionLocal() as db:
+        db.add(_assessment("2026-10-08", cloud=0.2))
+        db.commit()
+    response = client.get("/raster-scan")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["run_id"] == run_id
+    assert body["latest_scene"]["acquisition_date"] == "2026-10-08"
+    assert body["latest_scene"]["cloud_fraction"] == 0.2
+    assert body["latest_scene"]["threshold_cloud_fraction"] is None
+    assert body["latest_scene"]["min_water_pixels"] is None
+
+
+def test_latest_scene_is_the_greatest_acquisition_date_not_the_last_assessed(client, tmp_path):
+    _clear()
+    _clear_scenes()
+    _served_run(tmp_path)
+    with SessionLocal() as db:
+        # Inserted newest-date first and assessed earliest; ordering must
+        # follow the acquisition date.
+        db.add(_assessment("2026-10-08", assessed_at=datetime(2026, 10, 8, 20, tzinfo=timezone.utc)))
+        db.add(_assessment("2026-10-02", assessed_at=datetime(2026, 10, 9, 8, tzinfo=timezone.utc)))
+        db.commit()
+    assert client.get("/raster-scan").json()["latest_scene"]["acquisition_date"] == "2026-10-08"
+
+
+def test_used_in_served_run_is_true_only_for_the_run_actually_served(client, tmp_path):
+    _clear()
+    _clear_scenes()
+    run_id = _served_run(tmp_path)
+    with SessionLocal() as db:
+        db.add(_assessment("2026-10-08", used_in_run_id=run_id))
+        db.commit()
+    latest = client.get("/raster-scan").json()["latest_scene"]
+    assert latest["used_in_run_id"] == run_id
+    assert latest["used_in_served_run"] is True
+    assert latest["reassessed_after_use"] is False
+
+    with SessionLocal() as db:
+        row = db.get(SceneAssessmentRow, "2026-10-08")
+        row.used_in_run_id = run_id + 999  # used by some other (not served) run
+        db.commit()
+    latest = client.get("/raster-scan").json()["latest_scene"]
+    assert latest["used_in_run_id"] == run_id + 999
+    assert latest["used_in_served_run"] is False
+    assert latest["reassessed_after_use"] is False
+
+    with SessionLocal() as db:
+        db.get(SceneAssessmentRow, "2026-10-08").used_in_run_id = None
+        db.commit()
+    latest = client.get("/raster-scan").json()["latest_scene"]
+    assert latest["used_in_run_id"] is None
+    assert latest["used_in_served_run"] is False
+
+
+@pytest.mark.parametrize("decision", ["rejected_cloud", "rejected_no_water"])
+def test_a_used_date_reassessed_as_not_passing_is_flagged(client, tmp_path, decision):
+    """The scan happened and its id is kept, but the date no longer
+    passes. The response must let a viewer say exactly that."""
+    _clear()
+    _clear_scenes()
+    run_id = _served_run(tmp_path)
+    with SessionLocal() as db:
+        db.add(_assessment("2026-10-08", decision=decision, cloud=0.9, used_in_run_id=run_id))
+        db.commit()
+    body = client.get("/raster-scan").json()
+    latest = body["latest_scene"]
+    assert latest["decision"] == decision
+    assert latest["used_in_run_id"] == run_id
+    assert latest["used_in_served_run"] is True
+    assert latest["reassessed_after_use"] is True
+    assert body["last_used_scene_date"] == "2026-10-08"
+
+
+def test_a_passing_unused_or_used_date_is_not_flagged_as_reassessed(client, tmp_path):
+    _clear()
+    _clear_scenes()
+    run_id = _served_run(tmp_path)
+    with SessionLocal() as db:
+        db.add(_assessment("2026-10-08", decision="passed"))
+        db.commit()
+    assert client.get("/raster-scan").json()["latest_scene"]["reassessed_after_use"] is False
+    with SessionLocal() as db:
+        db.get(SceneAssessmentRow, "2026-10-08").used_in_run_id = run_id
+        db.commit()
+    assert client.get("/raster-scan").json()["latest_scene"]["reassessed_after_use"] is False
+
+
+def test_last_used_scene_date_ignores_newer_unused_rows(client, tmp_path):
+    _clear()
+    _clear_scenes()
+    run_id = _served_run(tmp_path)
+    with SessionLocal() as db:
+        db.add(_assessment("2026-10-01", used_in_run_id=run_id - 1 if run_id > 1 else 1))
+        db.add(_assessment("2026-10-04", used_in_run_id=run_id))
+        db.add(_assessment("2026-10-07"))
+        db.add(_assessment("2026-10-08", decision="rejected_cloud", cloud=0.9))
+        db.commit()
+    body = client.get("/raster-scan").json()
+    assert body["last_used_scene_date"] == "2026-10-04"
+    assert body["latest_scene"]["acquisition_date"] == "2026-10-08"
+
+
+@pytest.mark.parametrize("assessed_at, settled", [
+    # 2026-10-08 00:00 UTC + 36 h = 2026-10-09 12:00 UTC
+    (datetime(2026, 10, 9, 11, 59, 59, tzinfo=timezone.utc), False),
+    (datetime(2026, 10, 9, 12, 0, 0, tzinfo=timezone.utc), True),
+    (datetime(2026, 10, 10, 3, 0, 0, tzinfo=timezone.utc), True),
+    (datetime(2026, 10, 8, 9, 0, 0, tzinfo=timezone.utc), False),
+])
+def test_settled_follows_the_36_hour_rule_on_assessed_at(client, tmp_path, assessed_at, settled):
+    _clear()
+    _clear_scenes()
+    _served_run(tmp_path)
+    with SessionLocal() as db:
+        db.add(_assessment("2026-10-08", assessed_at=assessed_at))
+        db.commit()
+    assert client.get("/raster-scan").json()["latest_scene"]["settled"] is settled
+
+
+def test_timestamps_are_iso_utc_strings_even_though_sqlite_returns_naive(client, tmp_path):
+    _clear()
+    _clear_scenes()
+    _served_run(tmp_path)
+    with SessionLocal() as db:
+        db.add(_assessment("2026-10-08", assessed_at=datetime(2026, 10, 9, 6, 0, tzinfo=timezone.utc)))
+        db.add(ScenePollStatus(
+            id=1,
+            last_poll_started_at=datetime(2026, 10, 9, 7, 0, tzinfo=timezone.utc),
+            last_poll_ok_at=datetime(2026, 10, 9, 7, 0, 5, tzinfo=timezone.utc),
+        ))
+        db.commit()
+    body = client.get("/raster-scan").json()
+    assert body["latest_scene"]["assessed_at"] == "2026-10-09T06:00:00+00:00"
+    assert body["poll"]["last_poll_started_at"] == "2026-10-09T07:00:00+00:00"
+    assert body["poll"]["last_poll_ok_at"] == "2026-10-09T07:00:05+00:00"
+
+
+def test_poll_block_maps_every_status_column_including_the_error(client, tmp_path):
+    _clear()
+    _clear_scenes()
+    _served_run(tmp_path)
+    with SessionLocal() as db:
+        db.add(ScenePollStatus(
+            id=1,
+            last_poll_started_at=datetime(2026, 10, 9, 8, 0, tzinfo=timezone.utc),
+            last_poll_ok_at=datetime(2026, 10, 9, 4, 0, tzinfo=timezone.utc),
+            last_error="Earth Engine credentials expired",
+            last_error_at=datetime(2026, 10, 9, 8, 0, 2, tzinfo=timezone.utc),
+            last_error_kind="gee_auth",
+        ))
+        db.commit()
+    assert client.get("/raster-scan").json()["poll"] == {
+        "last_poll_started_at": "2026-10-09T08:00:00+00:00",
+        "last_poll_ok_at": "2026-10-09T04:00:00+00:00",
+        "last_error": "Earth Engine credentials expired",
+        "last_error_at": "2026-10-09T08:00:02+00:00",
+        "last_error_kind": "gee_auth",
+    }
+
+
+def test_poll_block_serves_nulls_for_a_poll_that_never_finished_or_failed(client, tmp_path):
+    _clear()
+    _clear_scenes()
+    _served_run(tmp_path)
+    with SessionLocal() as db:
+        db.add(ScenePollStatus(
+            id=1, last_poll_started_at=datetime(2026, 10, 9, 8, 0, tzinfo=timezone.utc)))
+        db.commit()
+    assert client.get("/raster-scan").json()["poll"] == {
+        "last_poll_started_at": "2026-10-09T08:00:00+00:00",
+        "last_poll_ok_at": None,
+        "last_error": None,
+        "last_error_at": None,
+        "last_error_kind": None,
+    }
+
+
+@pytest.mark.parametrize("mode", ["off", "test"])
+def test_scene_fields_do_not_depend_on_baseline_mode(client, tmp_path, monkeypatch, mode):
+    _clear()
+    _clear_scenes()
+    run_id = _served_run(tmp_path)
+    monkeypatch.setattr(config, "BASELINE_MODE", mode)
+    with SessionLocal() as db:
+        db.add(_assessment("2026-10-08", used_in_run_id=run_id))
+        db.add(ScenePollStatus(id=1, last_poll_ok_at=datetime(2026, 10, 9, 5, tzinfo=timezone.utc)))
+        db.commit()
+    body = client.get("/raster-scan").json()
+    assert body["latest_scene"]["acquisition_date"] == "2026-10-08"
+    assert body["last_used_scene_date"] == "2026-10-08"
+    assert body["poll"]["last_poll_ok_at"] == "2026-10-09T05:00:00+00:00"
+
+
+def test_the_served_payload_validates_against_the_response_schema(client, tmp_path):
+    _clear()
+    _clear_scenes()
+    run_id = _served_run(tmp_path)
+    with SessionLocal() as db:
+        db.add(_assessment("2026-10-08", decision="rejected_cloud", cloud=0.8,
+                           used_in_run_id=run_id))
+        db.add(ScenePollStatus(id=1, last_error="x", last_error_kind="unexpected"))
+        db.commit()
+    body = client.get("/raster-scan").json()
+    parsed = RasterScanResponse.model_validate(body)
+    assert parsed.latest_scene is not None
+    assert parsed.latest_scene.reassessed_after_use is True
+    assert parsed.poll is not None and parsed.poll.last_error_kind == "unexpected"
+
+
+def test_the_poll_fields_say_a_stale_poll_is_not_proof_of_no_newer_scene():
+    props = RasterScanResponse.model_json_schema()["$defs"]["ScenePollInfo"]["properties"]
+    text = props["last_poll_ok_at"]["description"]
+    assert "not checked" in text
+    assert "never" in text and "no newer scene" in text
+    assert "reassessed_after_use" in RasterScanResponse.model_json_schema()[
+        "$defs"]["LatestSceneInfo"]["properties"]

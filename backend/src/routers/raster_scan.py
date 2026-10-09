@@ -28,6 +28,15 @@ painted with (see render.legend_swatches). A legend that re-derives the
 ramp is a second implementation, and one that drifts is a quiet lie
 about what a colour means.
 
+`GET /raster-scan` also carries the latest-scene policy's state
+(`latest_scene`, `last_used_scene_date`, `poll`), read from the
+`scene_assessments` and `scene_poll_status` tables the hourly poll writes
+(src/raster_scan/trigger.py). They answer "which acquisition is the newest
+one we know of, did it reach this picture, and can the poll currently see
+new scenes at all". They are metadata about scene selection, served
+whatever BASELINE_MODE is, and a stale or failing poll is reported as such
+-- never as "no newer scene".
+
 Truth boundary, unchanged from every other endpoint here: the raster
 carries index readings with their own per-pixel acquisition dates. No
 anomaly statistic, no risk level, no classification -- no valid
@@ -36,18 +45,29 @@ spectral-index baseline exists (CLAUDE.md §0/§1).
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from .. import _detection as bridge
 from ..config import as_aware_utc
 from ..db import get_db
-from ..db_models import RasterScanRun
+from ..db_models import RasterScanRun, SceneAssessmentRow, ScenePollStatus
 from ..raster_scan import pixel as pixel_lookup
-from ..schemas import RasterCoverage, RasterPixelResponse, RasterScanResponse
+from ..raster_scan.trigger import POLL_STATUS_ID, PASSED, is_settled
+from ..schemas import (
+    LatestSceneInfo,
+    RasterCoverage,
+    RasterPixelResponse,
+    RasterScanResponse,
+    ScenePollInfo,
+)
+
+logger = logging.getLogger("backend.routers.raster_scan")
 
 router = APIRouter(tags=["raster-scan"])
 
@@ -109,6 +129,88 @@ def _asset_on_disk(overlay: dict, name: str) -> bool:
     return bool(asset) and "path" in asset and Path(asset["path"]).exists()
 
 
+def _iso_utc(value) -> str | None:
+    """A stored (SQLite: naive, UTC) timestamp as an ISO 8601 UTC string."""
+    return None if value is None else as_aware_utc(value).isoformat()
+
+
+def _scene_thresholds() -> tuple[float | None, int | None]:
+    """The scene-screen thresholds as currently configured.
+
+    `scene_thresholds()` raises on an invalid environment value rather than
+    substituting a default. Metadata must still be served in that case, but
+    a guessed threshold would misstate the criterion, so both are null.
+    """
+    try:
+        max_cloud_fraction, min_water_pixels = bridge.scene_thresholds()
+    except ValueError as exc:
+        logger.warning("scene thresholds unavailable for /raster-scan: %s", exc)
+        return None, None
+    return max_cloud_fraction, min_water_pixels
+
+
+def _latest_scene(db: Session, served_run_id: int | None) -> LatestSceneInfo | None:
+    """The assessment row with the greatest acquisition date, or None."""
+    row = db.execute(
+        select(SceneAssessmentRow)
+        .order_by(SceneAssessmentRow.acquisition_date.desc())
+        .limit(1)
+    ).scalars().first()
+    if row is None:
+        return None
+    max_cloud_fraction, min_water_pixels = _scene_thresholds()
+    used = row.used_in_run_id is not None
+    return LatestSceneInfo(
+        acquisition_date=row.acquisition_date,
+        decision=row.decision,
+        cloud_fraction=row.cloud_fraction,
+        threshold_cloud_fraction=max_cloud_fraction,
+        min_water_pixels=min_water_pixels,
+        reason=row.reason,
+        used_in_run_id=row.used_in_run_id,
+        assessed_at=_iso_utc(row.assessed_at),
+        settled=is_settled(row.acquisition_date, row.assessed_at),
+        used_in_served_run=used and row.used_in_run_id == served_run_id,
+        # Used by a scan, yet no longer assessed as passing: the raster was
+        # built from the date before it was re-assessed (trigger.py keeps
+        # `used_in_run_id` through a re-assessment).
+        reassessed_after_use=used and row.decision != PASSED,
+    )
+
+
+def _last_used_scene_date(db: Session) -> str | None:
+    """The greatest acquisition date any raster scan has used."""
+    return db.execute(
+        select(func.max(SceneAssessmentRow.acquisition_date)).where(
+            SceneAssessmentRow.used_in_run_id.is_not(None)
+        )
+    ).scalar_one_or_none()
+
+
+def _poll_info(db: Session) -> ScenePollInfo | None:
+    """The newer-scene poll's recorded health, or None when it has none."""
+    status = db.get(ScenePollStatus, POLL_STATUS_ID)
+    if status is None:
+        return None
+    return ScenePollInfo(
+        last_poll_started_at=_iso_utc(status.last_poll_started_at),
+        last_poll_ok_at=_iso_utc(status.last_poll_ok_at),
+        last_error=status.last_error,
+        last_error_at=_iso_utc(status.last_error_at),
+        last_error_kind=status.last_error_kind,
+    )
+
+
+def _scene_fields(db: Session, served_run_id: int | None) -> dict:
+    """The three latest-scene response fields, independent of whether an
+    overlay is served (a failing poll matters most when there is none)."""
+    return {
+        "latest_scene": _latest_scene(db, served_run_id),
+        "last_used_scene_date": _last_used_scene_date(db),
+        "poll": _poll_info(db),
+    }
+
+
 @router.get("/raster-scan", response_model=RasterScanResponse)
 async def get_raster_scan(db: Session = Depends(get_db)) -> RasterScanResponse:
     """Metadata for the newest raster overlay that still exists on disk."""
@@ -128,6 +230,7 @@ async def get_raster_scan(db: Session = Depends(get_db)) -> RasterScanResponse:
                 else "The most recent runs have no overlay on disk "
                 "(never rendered, failed to render, or expired by retention)."
             ),
+            **_scene_fields(db, None),
         )
 
     overlay = rendered.overlay
@@ -158,6 +261,7 @@ async def get_raster_scan(db: Session = Depends(get_db)) -> RasterScanResponse:
             else None
         ),
         stale_run_id=latest.id if latest and latest.id != rendered.id else None,
+        **_scene_fields(db, rendered.id),
     )
 
 

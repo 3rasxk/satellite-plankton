@@ -455,6 +455,81 @@ class RasterCoverage(BaseModel):
         "included. The denominator.")
 
 
+class LatestSceneInfo(BaseModel):
+    """The newest Sentinel-2 acquisition date the latest-scene policy has
+    assessed (`scene_assessments`, src/raster_scan/trigger.py), and whether
+    it reached the served raster.
+
+    Read-only metadata about WHICH SCENES WERE CHOSEN. It is a cloud and
+    water-pixel screen of a date, not a bloom statement: "passed" means
+    enough cloud-free water was observed to be worth scanning, nothing more.
+    The previous raster keeps being served when the newest date is rejected.
+    """
+
+    acquisition_date: str = Field(
+        description="Newest assessed acquisition date, YYYY-MM-DD (UTC). One date combines "
+        "every tile and orbit of that UTC day over the study polygon.")
+    decision: str = Field(
+        description="'passed', 'rejected_cloud' or 'rejected_no_water' -- the decision at the "
+        "time of the latest assessment. A date that is not yet settled can change it.")
+    cloud_fraction: float | None = Field(
+        default=None, description="Cloud share (0-1) of the observed water pixels. Null only "
+        "when no water pixel was observed (rejected_no_water).")
+    threshold_cloud_fraction: float | None = Field(
+        default=None, description="The maximum cloud fraction currently configured "
+        "(RASTER_SCENE_MAX_CLOUD_FRACTION): a date passes at or below it. The decision itself "
+        "was made when the date was assessed, under the threshold in force then. Null when "
+        "the configured value is invalid.")
+    min_water_pixels: int | None = Field(
+        default=None, description="The minimum unmasked water pixels currently configured "
+        "(RASTER_SCENE_MIN_WATER_PIXELS) for a date to pass. Null when the configured value "
+        "is invalid.")
+    reason: str | None = Field(
+        default=None, description="Why the date was rejected; null for a passing date.")
+    used_in_run_id: int | None = Field(
+        default=None, description="The raster scan run this date triggered, once one finished "
+        "using it; null while unused. Kept even if a later re-assessment rejects the date.")
+    assessed_at: str = Field(description="When the date was last assessed (UTC, ISO 8601).")
+    settled: bool = Field(
+        description="True once the assessment was made at least 36 h after the date began (UTC), "
+        "when every granule of that day has normally been ingested, so the decision is final. "
+        "False means later assessments may still change it (e.g. rejected_cloud to passed as "
+        "tiles arrive).")
+    used_in_served_run: bool = Field(
+        description="True when `used_in_run_id` is the run whose raster is served in this "
+        "response (`run_id`). False when the date is unused, or was used by a different run.")
+    reassessed_after_use: bool = Field(
+        description="True when this date was used by a scan (`used_in_run_id` is set) but its "
+        "latest assessment is not 'passed'. The raster was built from it before it was "
+        "re-assessed as not passing; say so rather than calling it simply 'not used'.")
+
+
+class ScenePollInfo(BaseModel):
+    """Health of the latest-scene poll that looks for newer acquisitions.
+
+    This is the only way to tell "no newer usable scene" apart from "the
+    poll could not check": read `last_poll_ok_at` before reading anything
+    into the absence of a newer scene.
+    """
+
+    last_poll_started_at: str | None = Field(
+        default=None, description="When the poll last began (UTC, ISO 8601). A poll skipped "
+        "because the process was shutting down records nothing.")
+    last_poll_ok_at: str | None = Field(
+        default=None, description="When a poll last completed its scene assessment without "
+        "error (UTC, ISO 8601), whether or not it found anything new. A missing or old value "
+        "means newer scenes may exist that this system has not checked; it is never evidence "
+        "of no newer scene.")
+    last_error: str | None = Field(
+        default=None, description="The most recent poll failure message. Kept after later "
+        "successes: compare `last_error_at` with `last_poll_ok_at`.")
+    last_error_at: str | None = Field(
+        default=None, description="When that failure happened (UTC, ISO 8601).")
+    last_error_kind: str | None = Field(
+        default=None, description="'gee_auth', 'gee_config', 'assessment_failed' or "
+        "'unexpected'.")
+
+
 class RasterScanResponse(DisclaimerMixin):
     """Metadata for the newest raster overlay still present on disk.
 
@@ -463,6 +538,11 @@ class RasterScanResponse(DisclaimerMixin):
     overlay has been rendered -- there is no placeholder raster, because
     an empty overlay drawn over the study area would assert "we looked
     and saw nothing", which is not the same as "we have not looked".
+
+    The exceptions are `latest_scene`, `last_used_scene_date` and `poll`:
+    they describe the scene-selection poll rather than the overlay, are
+    independent of BASELINE_MODE, and are served with or without an
+    overlay (null only when their tables hold nothing).
     """
 
     run_id: int | None = Field(default=None, description="Run that produced the served overlay.")
@@ -509,6 +589,18 @@ class RasterScanResponse(DisclaimerMixin):
         "(running, failed, or expired). The served picture is older than the newest attempt.")
     reason: str | None = Field(
         default=None, description="Why no overlay is being served, when there is none.")
+    latest_scene: LatestSceneInfo | None = Field(
+        default=None, description="The newest acquisition date assessed by the latest-scene "
+        "policy, whether it passed, and whether it is in the served raster. Null when no date "
+        "has been assessed. The served raster may predate it: a rejected or not-yet-scanned "
+        "newest date does not replace the earlier data.")
+    last_used_scene_date: str | None = Field(
+        default=None, description="The newest acquisition date a raster scan has used "
+        "(YYYY-MM-DD); null when none has.")
+    poll: ScenePollInfo | None = Field(
+        default=None, description="Health of the newer-scene poll. Null when it has never "
+        "recorded a status. A null or old `last_poll_ok_at` means newer scenes may exist that "
+        "this system has not checked -- never 'no newer scene'.")
 
 
 class RasterPixelResponse(DisclaimerMixin):
