@@ -234,11 +234,12 @@ def signal_anomaly_active() -> bool:
     requires the TEST baseline's own declaration to pass the same
     ``_signal_anomaly_active`` predicate. The TEST path never raises.
 
-    No caller in ``src/`` remains (since Task 5, 2026-10-09): the routes and
-    the scheduler decide from one ``baseline_status()`` / ``baseline_snapshot()``
-    and pair each cached level with its baseline version
-    (``src/site_anomaly.py``). Kept as the contract gate the tests pin, and
-    for a future caller that needs only the yes/no.
+    The data routes and the scheduler do not call it (since Task 5,
+    2026-10-09): they decide from one ``baseline_status()`` /
+    ``baseline_snapshot()`` and pair each cached level with its baseline
+    version (``src/site_anomaly.py``). Its one caller in ``src/`` is
+    ``GET /methods`` (``routers/methods.py``), which reports the yes/no as
+    the gate state; the tests pin it as the contract gate.
     """
     config = _load_config()
     if _signal_anomaly_active(config):

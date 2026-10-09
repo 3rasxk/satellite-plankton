@@ -105,6 +105,24 @@ load_prediction_config = _prediction.load_config
 # gate and the detection contract cannot disagree.
 SIGNAL_ANOMALY_MIN_INDEPENDENT_DATES = _signal_anomaly.MIN_INDEPENDENT_DATES
 SIGNAL_ANOMALY_MAX_OBSERVATION_AGE_DAYS = _signal_anomaly.MAX_OBSERVATION_AGE_DAYS
+# The robust-z definition the floors guard (provisional boundaries, not
+# validated Noctiluca thresholds). Displayed by GET /methods only.
+SIGNAL_ANOMALY_MAD_SCALE = _signal_anomaly.MAD_SCALE
+SIGNAL_ANOMALY_WATCH_AT_Z = _signal_anomaly.WATCH_AT_Z
+SIGNAL_ANOMALY_HIGH_AT_Z = _signal_anomaly.HIGH_AT_Z
+
+# --- Spectral index definitions (detection/src/indices.py) -----------------
+# The very module prediction.py computes index_values with (it imports
+# `indices` under its bare sibling name), so GET /methods' worked examples
+# call the same INDEX_FUNCTIONS objects every reading goes through -- not a
+# second copy loaded under another name. INDEX_METADATA and the band tables
+# are that module's static display text, kept beside the functions.
+_indices = sys.modules[_prediction.compute_all_indices.__module__]
+INDEX_FUNCTIONS = _indices.INDEX_FUNCTIONS
+INDEX_METADATA = _indices.INDEX_METADATA
+BAND_WAVELENGTHS_NM = _indices.BAND_WAVELENGTHS_NM
+BAND_NATIVE_RESOLUTION_M = _indices.BAND_NATIVE_RESOLUTION_M
+INDEX_SCALE_FACTOR = _indices.SCALE_FACTOR
 
 # --- TEST seasonal baseline (detection/src/baseline.py) ---------------------
 # The whole module, unmodified, under a name that says what it is: season
@@ -139,6 +157,12 @@ get_modis_chlorophyll_history = _data_pipeline_bridge.get_modis_chlorophyll_hist
 get_ndci_history = _data_pipeline_bridge.get_ndci_history
 preprocessing_params = _data_pipeline_bridge.preprocessing_params
 day_of_year_climatology = _data_pipeline_bridge.day_of_year_climatology
+# MODIS product identity (data-pipeline/src/modis.py), for GET /methods.
+MODIS_COLLECTION_ID = _data_pipeline_bridge.MODIS_COLLECTION_ID
+MODIS_CHLOR_A_BAND = _data_pipeline_bridge.MODIS_CHLOR_A_BAND
+MODIS_SST_BAND = _data_pipeline_bridge.MODIS_SST_BAND
+MODIS_GRID_SCALE_M = _data_pipeline_bridge.MODIS_GRID_SCALE_M
+MODIS_ARCHIVE_START = _data_pipeline_bridge.MODIS_ARCHIVE_START
 
 # Image rendering (data-pipeline/src/imagery.py, re-exported through
 # detection/src/_data_pipeline.py) -- true-color and NDCI-heatmap PNG
@@ -225,6 +249,14 @@ __all__ = [
     "load_prediction_config",
     "SIGNAL_ANOMALY_MIN_INDEPENDENT_DATES",
     "SIGNAL_ANOMALY_MAX_OBSERVATION_AGE_DAYS",
+    "SIGNAL_ANOMALY_MAD_SCALE",
+    "SIGNAL_ANOMALY_WATCH_AT_Z",
+    "SIGNAL_ANOMALY_HIGH_AT_Z",
+    "INDEX_FUNCTIONS",
+    "INDEX_METADATA",
+    "BAND_WAVELENGTHS_NM",
+    "BAND_NATIVE_RESOLUTION_M",
+    "INDEX_SCALE_FACTOR",
     "baseline_logic",
     "GEEAuthError",
     "GEEConfigError",
@@ -236,6 +268,11 @@ __all__ = [
     "get_ndci_history",
     "preprocessing_params",
     "day_of_year_climatology",
+    "MODIS_COLLECTION_ID",
+    "MODIS_CHLOR_A_BAND",
+    "MODIS_SST_BAND",
+    "MODIS_GRID_SCALE_M",
+    "MODIS_ARCHIVE_START",
     "z_score",
     "get_true_color_image",
     "get_ndci_heatmap",

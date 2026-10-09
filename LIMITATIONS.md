@@ -7,6 +7,8 @@ Read this before interpreting dashboard or API output.
 - Detection reports real Sentinel-2 spectral index values and each point's
   actual scene date. No valid baseline exists for those indices, so no anomaly
   statistic or presence/absence verdict is computed.
+- `signal_anomaly_level` is a separate nullable statistical-signal field. It is
+  not a synonym for `risk_level`; both remain null in production today.
 - Rule-based escalation depends on that unavailable anomaly statistic and
   therefore cannot currently evaluate bloom risk.
 - `/timeseries` is separate and dimensionally valid: it compares MODIS
@@ -29,10 +31,10 @@ the newest *usable* image on or before the date asked about, up to 14 days old
 by default; past that the system reports no imagery instead of a staler value.
 Cloud makes that limit bite hard in the southwest monsoon. A 2026-09-06
 measurement of the now-retired 501-point sampler found only 74 points with a
-scene that recent, and 221 more only at 19 days. The raster now marks missing
-cells with a grey hatch. Absence of a reading means "no recent usable image
-here", never "no bloom here". Each measured cell carries its own scene date,
-never the requested target date.
+scene that recent, and 221 more only at 19 days. The raster leaves missing cells
+fully transparent. Absence of a reading means "no recent usable image here",
+never "no bloom here". Each measured cell carries its own scene date, never the
+requested target date.
 
 **A clicked cell is one pixel, not an area.** The raster view reports the
 reading stored for the single 10 m pixel that was sampled for that cell, at
@@ -43,15 +45,17 @@ evidence about the water beside it. Each cell carries its own acquisition
 date, and adjacent cells routinely come from different scenes.
 
 **Unmeasured is not zero.** Water inside the study area with no usable
-observation is reported as `not_measured` and drawn as a grey hatch, never as
-a reading. Cloud, land-masking and "no scene covered it" are one state, not
-three: the stored raster cannot tell them apart, and inventing the difference
-would be a claim the data does not support.
+observation is reported as `not_measured` and drawn fully transparent, never as
+a reading or the bottom colour of the ramp. Click lookup uses the same `run_id`,
+stored raster grid, polygon, date-validity mask, and sparse cells as the overlay,
+so transparent locations remain queryable. Cloud, land-masking and "no scene
+covered it" are one state, not three: the stored raster cannot tell them apart,
+and inventing the difference would be a claim the data does not support.
 
 **Turbidity and sediment confound optical indices.** River plumes and shallow
 coastal water can resemble a bloom signal. The indices are not species
-classifiers, and the B2/B3 feature is only a secondary, lower-confidence
-*Noctiluca* signal.
+classifiers. The B2/B3 ratio is exploratory context and has not been validated
+as a *Noctiluca* discriminator.
 
 **Near-shore sampling is fragile.** A fixed 30 m buffer around a pier, jetty, or
 coastline coordinate can contain land or structure. The pipeline does not move
@@ -72,6 +76,86 @@ risk tier, or anomaly cluster. The retired 501-point path is no longer run or
 shown. Numeric threshold entries in
 `detection/src/config.yaml` are inactive placeholders and all `calibrated_*`
 values remain null.
+
+The proposed separate UI field is **ระดับความผิดปกติของสัญญาณดาวเทียม**.
+Its future statistic is
+`robust_z = (current_ndci - median_ndci) / (1.4826 * MAD)`, with provisional
+labels `ปกติ` below 2, `เฝ้าระวัง` from 2 inclusive to below 3, and
+`ผิดปกติสูง` at 3 or above. Missing or invalid input, imagery older than 14
+days, fewer than 30 independent valid acquisition dates, zero MAD, or
+incompatible preprocessing yields `ไม่มีข้อมูลประเมิน`. The values 2, 3, and
+the 30-date minimum are engineering starting points that require sensitivity
+testing. They are not biological thresholds or validated bloom-risk levels.
+
+The repository cannot activate that calculation yet. A valid builder must
+persist history for the same location and seasonal bucket, use only acquisition
+dates strictly before the evaluated observation, and record a preprocessing
+identity covering the same Sentinel-2 product, water/cloud masks, NDCI formula,
+grid, resolution, and aggregation. It must exclude missing pixels and collapse
+repeat samples to independent acquisition dates. The current database has only
+the latest point cache and raster-run files; the existing climatology is MODIS
+`chlor_a`, so it cannot supply this history. A concrete next step is an
+append-only Sentinel-2 baseline table keyed by cell/location, acquisition date,
+season definition, and versioned preprocessing signature, followed by leakage
+tests, minimum-history sensitivity analysis, and retrospective comparison with
+independent field observations before enabling scheduler output.
+
+## Numerical threshold register
+
+These are the scientific, data-quality, and interpretation cutoffs present in
+the current code. None is a calibrated Sentinel-2 bloom threshold.
+
+| Value | Purpose | Status |
+| --- | --- | --- |
+| NDCI `-0.05` to `0.15` | Five-stop raster display domain; values outside clamp to endpoint colours | Active visualization only; never a risk tier |
+| Sentinel-2 scene age `14` days | Latest allowed ordinary point/raster observation; first-install bootstrap uses bounded pages of the same width | Active data-freshness rule |
+| Bootstrap archive floor `2017-03-28` | Earliest date searched for `COPERNICUS/S2_SR_HARMONIZED` | Active stopping condition |
+| SCL classes `0, 1, 3, 7, 8, 9, 10` | No-data, defective, shadow, unclassified, cloud, and cirrus pixels excluded | Active categorical quality mask |
+| Cloud fraction `0.5` | Reject a point-scene candidate above 50% invalid/cloud pixels in its sample | Active point data-quality rule; not a raster risk threshold |
+| JRC occurrence `50%` | Water classification where JRC has data; ETOPO1 `< 0 m` is fallback only where JRC is missing | Active water mask; not a bloom threshold |
+| Point buffer `30 m`, point scale `10 m`, raster scale `200 m` | Sampling geometry defaults | Active engineering settings |
+| True-colour stretch `0` to `1500` DN | Human-legibility stretch for B4/B3/B2 | Active visualization only |
+| MODIS climatology `±7` days, reliability `n=5` | Day-of-year mean/std window and low-sample reliability flag | Active for MODIS `chlor_a` only; `n<5` is flagged, not discarded |
+| MODIS SST age `5` days | Maximum age for contextual SST | Active supporting context only |
+| Rainfall lookback `7` days | CHIRPS contextual accumulation | Active supporting context only |
+| Trend windows `7` and `14` days; rising slope `>0` | MODIS chlorophyll trend/acceleration context | Active context calculation; cannot activate risk while anomaly is null |
+| z `1.5` / `2.0` for NDCI, 2BDA, and 3BDA; escalation z `1.5` / `2.0`, rising trend, SST z `>0` | Old threshold and rule shape | Inactive, uncalibrated legacy placeholders; every `calibrated_*` value is null |
+| Robust-z scale `1.4826`, boundaries `2` / `3`, minimum `30` dates | Proposed satellite-signal classifier | Implemented as a pure guarded contract, provisional and inactive in production |
+| NDCI mathematical input bounds `-1` to `1` | Reject impossible current/history inputs at the provisional robust-z boundary | Provisional validation guard; inactive in production |
+| UI MODIS z colour breaks `0`, `1`, `2` | Colour bucketing for the separate MODIS anomaly strip | Active display convention, not calibrated risk |
+| Numeric-confidence breaks `0.33`, `0.66` | Generic translation of an optional numeric confidence value | Active UI formatting only; current prediction supplies a text caveat |
+| Ensemble probability `0.35` for a positive decision/Watch and `0.65` for Warning | Thresholds in the duplicated `ensemble_service.py` experiment and its training export | Legacy, uncalibrated, and orphaned; nothing in `backend/src/` imports the model or exposes these tiers |
+| Ensemble input guards: chlorophyll-a `0–500`, SST `0–50`, nFLH `-5–10`, POC `0–10,000`, anomaly z `-10–20`, seasonal sine/cosine `-1.01–1.01` | Physical-range rejection in the same model experiment | Legacy orphaned input validation; not detection or risk thresholds |
+| Forecast context: chlorophyll change `>0.4` / `≥1.5`, SST `≥31` or change `≥1`, anomaly z `≥0.8` / `≥1.5` | Explanatory text in `backend/forecast_service.py` | Legacy, uncalibrated, and orphaned; the service has no import path from `backend/src/` |
+| Forecast arrival/risk: 1-day probability `≥0.60` or z `≥2.5` plus chlorophyll change `≥3`; 3-day `≥0.50` or z/change `≥1.5`; 7-day `≥0.50`; 14-day `≥0.40`; 7-day tiers `0.35` / `0.60` | Heuristic arrival windows and risk tiers in `backend/forecast_service.py` | Legacy, uncalibrated, and orphaned; absent from the API and UI |
+
+There are no active calibrated risk thresholds. NDCI and 2BDA also cannot be
+used as two independent confirmations: both are transformations of the same
+B5/B4 ratio, since `NDCI = (r - 1) / (r + 1)` for `r = B5/B4`. Rainfall, SST,
+and MODIS values remain supporting context unless retrospective validation shows
+that they improve detection or reduce false alarms.
+
+The orphaned ensemble and forecast files remain in the working tree because
+removing historical experiments was outside this change. Their tests exercise
+the files directly, but application startup, routers, scheduler, detection
+bridge, database responses, and frontend do not import their outputs.
+
+## Scientific references and transfer limits
+
+Mishra, S. and Mishra, D.R. (2012), “Normalized difference chlorophyll index:
+A novel model for remote estimation of chlorophyll-a concentration in turbid
+productive waters,” DOI: `10.1016/j.rse.2011.10.016`, used water-leaving
+reflectance near 665 and 708 nm. This project uses Sentinel-2 B4/B5 surface
+reflectance. Similar wavelengths and formula do not make fitted values or raw
+thresholds interchangeable.
+
+Luang-on et al. (2023), “MODIS-derived green Noctiluca blooms in the upper Gulf
+of Thailand: Algorithm development and seasonal variation mapping,” DOI:
+`10.3389/fmars.2023.1031901`, treated approximately chlorophyll-a ≥ 10 mg/m³ as
+bloom water and reported green *Noctiluca* examples around 29–30 mg/m³ (weak),
+32–37 mg/m³ (strong), and greater than 1,469 mg/m³ (super bloom). Those are
+chlorophyll-a observations and MODIS/in-situ classifications. They are not
+Sentinel-2 NDCI thresholds and are not inserted into this raster or API.
 
 ## Data-pipeline findings
 

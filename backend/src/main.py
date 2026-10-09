@@ -21,7 +21,7 @@ from .config import SCHEDULER_ENABLED
 from .db import SessionLocal, get_db, init_db  # noqa: F401  (get_db re-exported for routers/tests)
 from .db_models import DetectionCache, MonitoredSite
 from .routers import (
-    alerts, detect, raster_scan, regional_scan, risk_map, satellite,
+    alerts, detect, methods, raster_scan, regional_scan, risk_map, satellite,
     satellite_image, summary, timeseries,
 )
 from .scheduler import create_scheduler, ensure_monitored_sites
@@ -133,6 +133,7 @@ app.include_router(satellite_image.router)
 app.include_router(summary.router)
 app.include_router(regional_scan.router)
 app.include_router(raster_scan.router)
+app.include_router(methods.router)
 
 
 @app.exception_handler(bridge.GEEAuthError)
@@ -218,5 +219,6 @@ def root() -> dict:
             "/summary",
             "/raster-scan",
             "/raster-scan/pixel",
+            "/methods",
         ],
     }

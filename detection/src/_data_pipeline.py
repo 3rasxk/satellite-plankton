@@ -201,6 +201,17 @@ decide = _dp.decide
 # the per-location/per-day-of-year mean+std logic is not duplicated.
 day_of_year_climatology = _dp.modis.day_of_year_climatology
 
+# MODIS product identity (data-pipeline/src/modis.py): collection id, the two
+# bands read, the Level-3 grid it is sampled at (~4.6 km, the figure that
+# module says to state) and the archive start. Plain constants, no GEE call;
+# re-exported so backend's GET /methods describes MODIS from the module that
+# queries it rather than from a second copy.
+MODIS_COLLECTION_ID = _dp.modis.COLLECTION_ID
+MODIS_CHLOR_A_BAND = _dp.modis.CHLOR_A_BAND
+MODIS_SST_BAND = _dp.modis.SST_BAND
+MODIS_GRID_SCALE_M = _dp.modis.DEFAULT_SCALE_M
+MODIS_ARCHIVE_START = _dp.modis.ARCHIVE_START
+
 # Typed "data genuinely unavailable" errors from sentinel2.py, distinct
 # from GEEAuthError. detect()/risk_level() in src/prediction.py catch
 # these (not GEEAuthError, which must always propagate per CLAUDE.md's
@@ -219,6 +230,11 @@ __all__ = [
     "get_modis_sst",
     "get_rainfall_proxy",
     "day_of_year_climatology",
+    "MODIS_COLLECTION_ID",
+    "MODIS_CHLOR_A_BAND",
+    "MODIS_SST_BAND",
+    "MODIS_GRID_SCALE_M",
+    "MODIS_ARCHIVE_START",
     "NoCloudFreeImageryError",
     "NoWaterPixelsError",
     "get_true_color_image",

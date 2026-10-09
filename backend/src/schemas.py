@@ -23,7 +23,7 @@ DISCLAIMER_TEXT = (
     "alone establish neither bloom presence nor absence."
 )
 
-# The variant /risk-map, /summary and /detect carry instead of DISCLAIMER_TEXT
+# The variant /risk-map, /summary, /detect and /methods carry instead of DISCLAIMER_TEXT
 # while BASELINE_MODE=test AND a TEST baseline is valid (src/site_anomaly.py
 # disclaimer_for). DISCLAIMER_TEXT's "anomaly detection is not computed" is
 # false then; this says what is computed and what it is not.
@@ -44,7 +44,7 @@ class DisclaimerMixin(BaseModel):
         description="Truth-boundary caveat. Present on every response — satellite-pixel "
         "resolution, small/scattered blooms may be missed, and Sentinel-2 "
         "index values alone cannot establish bloom presence or absence. /risk-map, "
-        "/summary and /detect carry a TEST-baseline variant instead while "
+        "/summary, /detect and /methods carry a TEST-baseline variant instead while "
         "BASELINE_MODE=test and a TEST baseline is valid: it states that any site "
         "anomaly is provisional, uncalibrated and statistical only.",
     )
@@ -778,3 +778,172 @@ class RasterHighlightsResponse(DisclaimerMixin):
     baseline: dict | None = Field(
         default=None, description="Baseline the pins were compared with. Always null in "
         "'ndci' mode: a ranking by value needs none.")
+
+
+# --------------------------------------------------------------------------
+# /methods
+# --------------------------------------------------------------------------
+
+
+class IndexWorkedExample(BaseModel):
+    """One index evaluated by the server's own function on fixed sample bands."""
+
+    bands: dict[str, float] = Field(
+        description="The sample band values (raw S2_SR_HARMONIZED digital numbers).")
+    value: float | None = Field(
+        description="The registered index function's output on `bands`, computed for this "
+        "response. Null only if that output is not a finite number.")
+    note: str = Field(description="What the example is and is not.")
+
+
+class DisplayDomain(BaseModel):
+    min: float
+    max: float
+
+
+class MethodsIndex(BaseModel):
+    """One spectral index: definition from detection/src/indices.py."""
+
+    key: str = Field(description="detection/'s index key (index_values on /detect, /risk-map).")
+    name: str
+    formula: str = Field(description="Band arithmetic on Sentinel-2 bands; tested to equal "
+                         "what the code computes.")
+    bands: list[str]
+    wavelengths_nm: dict[str, int] = Field(
+        description="Centre wavelength of each band, only where project documentation states "
+        "one; a band without an entry has no documented wavelength (not zero).")
+    role: Literal["primary", "derived", "comparison", "exploratory"] = Field(
+        description="primary: the index readings use. derived: a transformation of another "
+        "index, not an independent signal. comparison: reported beside NDCI, read by no "
+        "decision. exploratory: context only, not a classifier.")
+    note: str
+    raster_band: str = Field(description="The same index's band name in the stored raster "
+                             "(/raster-scan/pixel, /raster-scan/highlights).")
+    display_domain: DisplayDomain | None = Field(
+        description="Value range the raster overlay's colour ramp spans. Null when no display "
+        "domain has been agreed for this index (it is then never rendered).")
+    worked_example: IndexWorkedExample
+
+
+class MethodsSentinel2(BaseModel):
+    """Sentinel-2 settings in force, read from data-pipeline / detection."""
+
+    collection: str
+    bands: list[str] = Field(description="Bands read for every reading.")
+    native_resolution_m: dict[str, int]
+    wavelengths_nm: dict[str, int] = Field(
+        description="Documented centre wavelengths only; see `wavelengths_note`.")
+    wavelengths_note: str
+    revisit_days: int = Field(description="Approximate revisit at this latitude (two satellites).")
+    scale_factor: float = Field(
+        description="Digital number = reflectance x scale_factor. Every index is a band "
+        "ratio, so it cancels; indices are computed on raw digital numbers.")
+    max_scene_age_days: int = Field(
+        description="Effective ceiling on how old a scene a reading may use "
+        "(SENTINEL2_MAX_SCENE_AGE_DAYS or the default), read for this response.")
+    max_cloud_fraction: float = Field(
+        description="Largest cloud fraction a point reading's scene may have.")
+    cloud_mask_scl_classes: list[int] = Field(
+        description="Scene Classification Layer classes masked out of every reading.")
+    min_water_occurrence_pct: float = Field(
+        description="JRC Global Surface Water occurrence at or above which a pixel is water "
+        "(ETOPO1 bathymetry decides only where JRC has no data).")
+
+
+class MethodsModis(BaseModel):
+    """MODIS-Aqua product, read from data-pipeline/src/modis.py."""
+
+    collection: str
+    bands: list[str]
+    grid_resolution_m: int = Field(description="Level-3 mapped grid the product is sampled at.")
+    record_start: str = Field(description="First date of the archive.")
+    note: str
+
+
+class SignalAnomalyFloors(BaseModel):
+    min_independent_dates: int = Field(
+        description="Fewest independent history dates behind one robust z.")
+    max_observation_age_days: int = Field(
+        description="Oldest an observation may be and still be assessed.")
+
+
+class SignalAnomalyStatistic(BaseModel):
+    formula: str
+    mad_scale: float
+    watch_at_z: float
+    high_at_z: float
+    note: str
+
+
+class MethodsGates(BaseModel):
+    """Whether the unvalidated outputs are switched on, and the floors guarding them."""
+
+    risk_evaluation_active: bool = Field(
+        description="src/scientific_status.py risk_evaluation_active(), for this response.")
+    signal_anomaly_active: bool = Field(
+        description="src/scientific_status.py signal_anomaly_active(), for this response.")
+    signal_anomaly_floors: SignalAnomalyFloors
+    signal_anomaly_statistic: SignalAnomalyStatistic
+
+
+class LatestScenePolicy(BaseModel):
+    """When a new acquisition date is used for a raster scan (src/raster_scan/trigger.py)."""
+
+    max_cloud_fraction: float | None = Field(
+        description="Largest cloud fraction over the polygon's water a date may have. Null "
+        "when the environment setting is invalid (no default is guessed).")
+    min_water_pixels: int | None = Field(
+        description="Fewest unmasked water pixels a date needs. Null when the environment "
+        "setting is invalid.")
+    poll_interval_hours: int
+    min_scan_interval_hours: int
+    settle_hours: int = Field(
+        description="A date's assessment is final once made this many hours after the date "
+        "began (UTC); earlier assessments are repeated.")
+
+
+class SeasonWindow(BaseModel):
+    month: int = Field(description="Target calendar month.")
+    key: str = Field(description="Season key a TEST baseline stores for that month.")
+    months: list[int] = Field(description="History months an observation in `month` is "
+                              "compared with.")
+
+
+class MethodsReference(BaseModel):
+    id: str
+    citation: str = Field(description="As LIMITATIONS.md gives it.")
+    doi: str
+    note: str = Field(description="What the reference does not license here (LIMITATIONS.md).")
+
+
+class MethodsBaselineStatus(BaselineInfo):
+    """``baseline_status()``, one key per field, in every mode: ``mode`` 'off' with every
+    other field null, or the TEST description (valid, or invalid with `reason`)."""
+
+    mode: Literal["off", "test"] = Field(description="BASELINE_MODE in force.")
+    valid: bool | None = Field(
+        default=None, description="Null with the mode off. In test mode, false when no "
+        "artefact may be used (`reason` says why).")
+    kind: str | None = Field(default=None, description="'test' in test mode, else null.")
+
+
+class MethodsResponse(DisclaimerMixin):
+    """What the Methods page shows, read from the code that computes it.
+
+    No Earth Engine call and no database read: formulas and roles from
+    detection/src/indices.py, worked examples computed by its functions for
+    this response, sensor settings from data-pipeline, gates from
+    src/scientific_status.py, floors from detection/src/signal_anomaly.py,
+    references from LIMITATIONS.md.
+    """
+
+    api_version: str
+    indices: list[MethodsIndex]
+    sentinel2: MethodsSentinel2
+    modis: MethodsModis
+    gates: MethodsGates
+    latest_scene_policy: LatestScenePolicy
+    season_rule: str = Field(description="detection/src/baseline.py SEASON_RULE.")
+    season_windows: list[SeasonWindow]
+    baseline: MethodsBaselineStatus
+    references: list[MethodsReference]

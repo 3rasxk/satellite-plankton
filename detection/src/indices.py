@@ -11,8 +11,8 @@ fitted model — no coefficients here are learned from data (CLAUDE.md
 "Non-negotiable rules": no supervised ML anywhere). They detect an
 optical chlorophyll/turbidity signature at pixel resolution; they do not
 resolve individual organisms and cannot distinguish bloom species from
-index value alone (see `b2_b3_ratio` below for the one partial exception,
-itself explicitly secondary/lower-confidence).
+index value alone. The exploratory `b2_b3_ratio` is not a validated
+species classifier.
 
 Scale-factor decision (per this module's callers -- documented here since
 `data-pipeline/src/sentinel2.py`'s docstring flags it as a caller
@@ -51,9 +51,10 @@ def ndci(bands: dict) -> float:
 
     NDCI = (B5 - B4) / (B5 + B4)
 
-    B5 (705 nm, red-edge) responds to chlorophyll fluorescence/absorption;
-    B4 (665 nm, red) is the reference. Standard published formulation
-    (Mishra & Mishra 2012) for turbid/coastal chlorophyll retrieval.
+    B5 (705 nm, red-edge) and B4 (665 nm, red) form the project's
+    Sentinel-2 surface-reflectance proxy. Mishra & Mishra (2012) introduced
+    NDCI using water-leaving reflectance near 708 and 665 nm; that study's
+    fitted values are not calibration for this different product.
 
     Raises:
         ZeroDivisionError-safe: returns 0.0 if B5+B4 == 0 (degenerate
@@ -73,9 +74,9 @@ def two_bda(bands: dict) -> float:
 
     2BDA = B5 / B4
 
-    A simpler ratio than NDCI (no normalization), more sensitive to
-    absolute reflectance scale but computationally trivial and widely
-    used as a baseline comparison in ocean-colour literature.
+    This is algebraically tied to NDCI: for r=B5/B4,
+    NDCI=(r-1)/(r+1). It must not be treated as an independent confirming
+    signal.
 
     Raises:
         Returns math.inf if B4 == 0 (rather than raising ZeroDivisionError)
@@ -110,20 +111,11 @@ def three_bda(bands: dict) -> float:
 
 
 def b2_b3_ratio(bands: dict) -> float:
-    """B2/B3 ratio -- green *Noctiluca* discrimination. SECONDARY,
-    LOWER-CONFIDENCE signal (per `.claude/agents/bloom-detection.md` §1
-    and `docs/DETECTION_PLAN.md` §2) -- do not treat this as equally
-    established as NDCI.
+    """Exploratory B2/B3 blue-to-green context ratio.
 
-    Green *Noctiluca scintillans* carries a photosynthetic endosymbiont
-    that shows elevated reflectance across ~440-550 nm (roughly Sentinel-2
-    B2/blue through B3/green) relative to diatom blooms or non-bloom
-    water. This ratio is a coarse proxy for that elevation, not a
-    validated species classifier.
-
-    This feature is *Noctiluca*-specific. It is not expected to behave
-    consistently for other taxa, and must not be presented as a general
-    species classifier.
+    This project has not calibrated this raw Sentinel-2 surface-reflectance
+    ratio against field observations. It is not a *Noctiluca* discriminator,
+    a species classifier, or an independent bloom decision.
 
     Raises:
         Returns math.inf if B3 == 0.
@@ -142,6 +134,75 @@ INDEX_FUNCTIONS = {
     "3bda": three_bda,
     "b2_b3_ratio": b2_b3_ratio,
 }
+
+
+# What each registered index is, for display (backend `GET /methods`). Static
+# text only -- every value is computed by the function above, never from here.
+# Formula strings are tested to evaluate to exactly what the functions return
+# (tests/test_indices_metadata.py); notes restate the functions' docstrings.
+#   role: "primary"     -- config.yaml `indices.primary`, the index readings use
+#         "derived"     -- a transformation of another index, not independent
+#         "comparison"  -- config.yaml `indices.compare`, reported beside NDCI;
+#                          no decision in this repository reads it
+#         "exploratory" -- config.yaml `indices.secondary_discrimination`
+INDEX_ROLES = ("primary", "derived", "comparison", "exploratory")
+
+INDEX_METADATA = {
+    "ndci": {
+        "name": "Normalized Difference Chlorophyll Index",
+        "formula": "(B5 - B4) / (B5 + B4)",
+        "bands": ("B5", "B4"),
+        "role": "primary",
+        "note": (
+            "Primary index. B5 (705 nm, red-edge) and B4 (665 nm, red) form the "
+            "project's Sentinel-2 surface-reflectance proxy. Mishra & Mishra (2012) "
+            "introduced NDCI using water-leaving reflectance near 708 and 665 nm; "
+            "that study's fitted values are not calibration for this different product."
+        ),
+    },
+    "2bda": {
+        "name": "2-Band Algorithm (2BDA)",
+        "formula": "B5 / B4",
+        "bands": ("B5", "B4"),
+        "role": "derived",
+        "note": (
+            "Algebraically tied to NDCI: for r = B5/B4, NDCI = (r - 1)/(r + 1). "
+            "It must not be treated as an independent confirming signal."
+        ),
+    },
+    "3bda": {
+        "name": "3-Band Algorithm (3BDA)",
+        "formula": "(1/B4 - 1/B5) * B6",
+        "bands": ("B4", "B5", "B6"),
+        "role": "comparison",
+        "note": (
+            "Turbid-water variant: adds B6 (740 nm) to correct for backscatter "
+            "dominated by suspended sediment rather than chlorophyll, which may help "
+            "near turbid river mouths. Reported beside NDCI for comparison; no "
+            "decision in this system reads it."
+        ),
+    },
+    "b2_b3_ratio": {
+        "name": "B2/B3 blue-to-green context ratio",
+        "formula": "B2 / B3",
+        "bands": ("B2", "B3"),
+        "role": "exploratory",
+        "note": (
+            "Exploratory context ratio, not calibrated by this project against field "
+            "observations. It is not a Noctiluca discriminator, not a species "
+            "classifier, and not an independent bloom decision."
+        ),
+    },
+}
+
+# Centre wavelengths, only where this module's docstrings already state one
+# (B4 665 nm, B5 705 nm, B6 740 nm). B2 and B3 are omitted on purpose: no
+# centre wavelength for them is stated here, in LIMITATIONS.md or in
+# docs/DETECTION_PLAN.md, and a display table must not supply one.
+BAND_WAVELENGTHS_NM = {"B4": 665, "B5": 705, "B6": 740}
+
+# Native Sentinel-2 resolution per band, as the module docstring states it.
+BAND_NATIVE_RESOLUTION_M = {"B2": 10, "B3": 10, "B4": 10, "B5": 20, "B6": 20}
 
 
 def compute_all_indices(bands: dict) -> dict:
