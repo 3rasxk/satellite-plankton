@@ -116,16 +116,32 @@ def _invalid(reason: str) -> dict:
     return {"mode": "test", "valid": False, "kind": "test", "reason": reason}
 
 
-def _baseline_state() -> tuple[dict, dict | None]:
-    """``(baseline_status() payload, the valid manifest's declaration or None)``.
+def _resolve_baseline(*, with_rows: bool) -> tuple[dict, baseline_store.ActiveBaseline | None]:
+    """ONE resolution of the TEST baseline: ``(status, active or None)``.
 
-    Never raises. Mode off returns before any file is touched.
+    The single internal path behind ``baseline_snapshot``, ``baseline_status``
+    and the TEST half of ``signal_anomaly_active``, so they cannot disagree
+    for the same on-disk state. The artefact is located, read (cached),
+    validated and checked against the gate predicate exactly once; the status
+    is built from that same manifest, so its version is the version of the
+    rows. ``with_rows=False`` skips copying the rows (``active`` is then
+    always None); everything else is identical.
+
+    Never raises. Mode off returns before any file is touched. ``active`` is
+    non-None only when ``status["valid"]`` is True, which in turn requires
+    ``validate_manifest`` AND the unchanged ``_signal_anomaly_active``
+    predicate on the manifest's own declaration.
     """
     global _last_baseline_warning
     try:
         if backend_config.BASELINE_MODE != "test":
             return {"mode": "off"}, None
-        manifest = baseline_store.active_manifest()
+        if with_rows:
+            active = baseline_store.load_active_baseline()
+            manifest = None if active is None else active.manifest
+        else:
+            active = None
+            manifest = baseline_store.active_manifest()
         if manifest is None:
             _warn_baseline(
                 "BASELINE_MODE=test but no complete baseline artefact under "
@@ -138,6 +154,14 @@ def _baseline_state() -> tuple[dict, dict | None]:
         # declaration it rejects does not activate, so it is not "valid".
         if not _signal_anomaly_active({"signal_anomaly": declaration}):
             raise bridge.baseline_logic.BaselineInvalid("inactive_declaration")
+        # Dates behind one robust z in a location's weakest seasonal window
+        # (the builder's min_season_dates). The declared minimum is the
+        # smallest of these (checked by baseline_store), so min, median and
+        # the per-location map all count the same quantity -- not the
+        # location's whole record (n_dates), which spans all twelve months.
+        by_location = {
+            site_id: info["min_season_dates"] for site_id, info in manifest["locations"].items()
+        }
         status = {
             "mode": "test",
             "valid": True,
@@ -148,11 +172,11 @@ def _baseline_state() -> tuple[dict, dict | None]:
             "history_end": manifest["history_end"],
             "season_rule": manifest["season_rule"],
             "min_independent_dates": declaration["minimum_independent_dates"],
-            "median_independent_dates": median(
-                info["n_dates"] for info in manifest["locations"].values()
-            ),
+            "median_independent_dates": median(by_location.values()),
+            "min_season_dates_by_location": by_location,
             "preprocessing_signature": manifest["preprocessing_signature"],
-            "base_rates": manifest["self_check"]["total"],
+            # A copy, so the status never shares a dict with active.manifest.
+            "base_rates": copy.deepcopy(manifest["self_check"]["total"]),
         }
     except bridge.baseline_logic.BaselineInvalid as exc:
         _warn_baseline(f"TEST baseline refused ({exc}); signal anomaly stays off")
@@ -164,7 +188,25 @@ def _baseline_state() -> tuple[dict, dict | None]:
         )
         return _invalid("unreadable"), None
     _last_baseline_warning = None
-    return status, declaration
+    return status, active
+
+
+def baseline_snapshot() -> tuple[dict, baseline_store.ActiveBaseline | None]:
+    """``(baseline_status() payload, the ActiveBaseline it describes or None)``.
+
+    For callers that need the rows (scheduler, live /detect): one resolution,
+    so a rebuild between two separate calls can never pair one version's
+    status with another version's rows. ``active`` is non-None exactly when
+    ``status["valid"]`` is True (validated, and the gate predicate passed);
+    ``({"mode": "off"}, None)`` when the mode is off. Never raises.
+
+    Blocking work: file stats, a JSON parse when the artefact changed, and a
+    deep copy of every history row (about 5 ms for the 2,861-row artefact
+    of 2026-10-09). From an async handler run it in a threadpool
+    (``starlette.concurrency.run_in_threadpool``), or use ``baseline_status``
+    / ``signal_anomaly_active``, which skip the row copy.
+    """
+    return _resolve_baseline(with_rows=True)
 
 
 def baseline_status() -> dict:
@@ -172,27 +214,27 @@ def baseline_status() -> dict:
 
     ``{"mode": "off"}`` unless ``config.BASELINE_MODE`` (read now) is exactly
     ``"test"``. In test mode, either the valid description (version, dates,
-    season rule, declared and median date counts, preprocessing signature,
-    ``base_rates`` = the manifest's self-check totals) or
+    season rule, preprocessing signature, ``base_rates`` = the manifest's
+    self-check totals, and the dates behind one robust z in each location's
+    weakest seasonal window: ``min_independent_dates`` (declared = smallest),
+    ``median_independent_dates`` and ``min_season_dates_by_location``) or
     ``{"mode": "test", "valid": False, "kind": "test", "reason": ...}`` with
     ``no_artifact``, a ``BaselineInvalid`` reason, or ``unreadable``.
-    Each call returns a fresh dict.
+    Each call returns a fresh dict. Same resolution as ``baseline_snapshot``
+    without copying the rows.
     """
-    return _baseline_state()[0]
+    return _resolve_baseline(with_rows=False)[0]
 
 
 def signal_anomaly_active() -> bool:
     """True only after the Sentinel-2 baseline pipeline is activated.
 
     The config path is unchanged. In addition, with BASELINE_MODE == "test",
-    true when the TEST baseline is valid and its own declaration passes the
-    same predicate. The TEST path never raises.
+    true exactly when ``baseline_status()["valid"]`` -- which already
+    requires the TEST baseline's own declaration to pass the same
+    ``_signal_anomaly_active`` predicate. The TEST path never raises.
     """
     config = _load_config()
     if _signal_anomaly_active(config):
         return True
-    # _baseline_state() hands back a declaration only when the artefact
-    # validated AND that declaration passed _signal_anomaly_active (inside
-    # its own try, so this path cannot raise).
-    status, declaration = _baseline_state()
-    return status.get("valid") is True and declaration is not None
+    return _resolve_baseline(with_rows=False)[0].get("valid") is True

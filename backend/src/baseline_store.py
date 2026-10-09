@@ -19,11 +19,12 @@ back whatever was written, including a manifest that would be refused.
 it returns nothing unless ``config.BASELINE_MODE`` is exactly ``"test"``, and
 then only the newest artefact that passes ``detection/src/baseline.py``'s
 ``validate_manifest`` against the live preprocessing signature and today's
-UTC date, plus a structural check that the rows match the manifest. It
-decides nothing itself beyond that structure check; the rules are
-detection's. Parsed files are cached on each file's (mtime_ns, size, inode),
-but validation is re-run on every call, because "today" and the live
-signature are not properties of the files.
+UTC date, plus a structural check that the rows match the manifest and
+that the declared minimum is the weakest location's ``min_season_dates``. It
+decides nothing itself beyond those checks; the rules are detection's.
+Parsed files are cached on each file's (mtime_ns, size, inode), but
+validation is re-run on every call, because "today" and the live signature
+are not properties of the files.
 
 Limitations: the rows are dimensionless NDCI readings from a point-buffer
 mean over clear-sky water pixels, kept only on cloud-free days. They are a
@@ -35,7 +36,6 @@ from __future__ import annotations
 
 import copy
 import json
-import math
 import os
 import shutil
 import tempfile
@@ -167,32 +167,49 @@ def _file_state(path: Path) -> tuple[int, int, int]:
 
 
 def _read_cached(path: Path) -> tuple[dict, dict]:
-    """Parsed ``(manifest, rows_by_location)``, re-read when either file changes."""
+    """Parsed ``(manifest, rows_by_location)``, re-read when either file changes.
+
+    The global is read once into a local, so a concurrent refill between
+    the key check and the return can never hand back another artefact's
+    files under this key.
+    """
     global _artifact_cache
     key = (str(path), _file_state(path / MANIFEST_NAME), _file_state(path / SITES_NAME))
-    if _artifact_cache is None or _artifact_cache[0] != key:
-        _artifact_cache = (key, read_artifact(path))
-    return _artifact_cache[1]
+    entry = _artifact_cache
+    if entry is None or entry[0] != key:
+        entry = (key, read_artifact(path))
+        _artifact_cache = entry
+    return entry[1]
 
 
 def _is_count(value: object) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+    """A date count: a non-negative int (bool, float, str, NaN are not)."""
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
 def _check_structure(manifest: dict, rows_by_location: object) -> None:
-    """Raise ``ValueError`` unless the files have the shape consumers rely on.
+    """Raise unless the files have the shape consumers rely on.
 
     Runs after ``validate_manifest``, which does not look at ``locations``,
     ``self_check`` or the rows. A baseline whose rows describe other sites
     than its manifest, or whose manifest cannot say how much history it has,
-    is not used.
+    is not used (``ValueError``). The declared ``minimum_independent_dates``
+    must be exactly the weakest location's ``min_season_dates`` -- what
+    ``build_manifest`` writes -- or the declaration does not describe this
+    history (``BaselineInvalid("inconsistent_declaration")``).
     """
     locations = manifest.get("locations")
     if not isinstance(locations, dict) or not locations:
         raise ValueError("manifest 'locations' is missing or empty")
     for site_id, info in locations.items():
-        if not isinstance(info, dict) or not _is_count(info.get("n_dates")):
-            raise ValueError(f"manifest location {site_id!r} has no numeric n_dates")
+        if not isinstance(info, dict):
+            raise ValueError(f"manifest location {site_id!r} is not an object")
+        for field in ("n_dates", "min_season_dates"):
+            if not _is_count(info.get(field)):
+                raise ValueError(f"manifest location {site_id!r} has no integer {field}")
+    weakest = min(info["min_season_dates"] for info in locations.values())
+    if manifest["signal_anomaly"]["minimum_independent_dates"] != weakest:
+        raise bridge.baseline_logic.BaselineInvalid("inconsistent_declaration")
     self_check = manifest.get("self_check")
     if not isinstance(self_check, dict) or not isinstance(self_check.get("total"), dict):
         raise ValueError("manifest 'self_check.total' is missing")

@@ -18,6 +18,7 @@ What is pinned:
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import json
 import logging
@@ -44,7 +45,7 @@ _SITE_YEARS = {"alpha": range(2014, 2026), "beta": range(2016, 2026), "gamma": r
 _VALID_KEYS = {
     "mode", "valid", "kind", "version", "built_at", "history_start", "history_end",
     "season_rule", "min_independent_dates", "median_independent_dates",
-    "preprocessing_signature", "base_rates",
+    "min_season_dates_by_location", "preprocessing_signature", "base_rates",
 }
 
 
@@ -290,12 +291,44 @@ def test_valid_artefact_opens_the_signal_gate_and_describes_itself(valid, test_m
     assert status["history_end"] == "2025-12-20"
     assert status["season_rule"] == logic.SEASON_RULE
     assert status["preprocessing_signature"] == _live_signature()
-    # Declared floor = weakest season anywhere (beta: 10 years x 3 months x 2).
+    # All three count dates in each location's weakest seasonal window
+    # (years x 3 months x 2 dates): alpha 72, gamma 66, beta 60 -- never the
+    # whole record (n_dates 288 / 264 / 240).
+    assert status["min_season_dates_by_location"] == {"alpha": 72, "beta": 60, "gamma": 66}
     assert status["min_independent_dates"] == manifest["signal_anomaly"]["minimum_independent_dates"] == 60
-    # Median over the locations' n_dates: alpha 288, gamma 264, beta 240.
-    assert status["median_independent_dates"] == median([288, 264, 240]) == 264
+    assert status["median_independent_dates"] == median([72, 66, 60]) == 66
     assert status["base_rates"] == manifest["self_check"]["total"]
     assert status["base_rates"]["assessed"] + status["base_rates"]["no_assessment"] == 288 + 264 + 240
+
+
+def test_min_and_median_dates_are_weakest_season_counts_not_record_length(root, test_mode):
+    """Shaped like the real 2026-10-09 artefact: records of ~250-290 dates,
+    weakest seasons of 35-50 -- the status must report the latter."""
+    manifest, rows = _artefact()
+    weakest = {"alpha": 50, "beta": 35, "gamma": 42}
+    for site_id, n in weakest.items():
+        manifest["locations"][site_id]["min_season_dates"] = n
+    manifest["signal_anomaly"]["minimum_independent_dates"] = 35
+    baseline_store.write_artifact(root, manifest, rows)
+
+    status = scientific_status.baseline_status()
+    assert status["valid"] is True
+    assert status["min_independent_dates"] == 35
+    assert status["median_independent_dates"] == 42
+    assert status["min_season_dates_by_location"] == weakest
+    assert median(info["n_dates"] for info in manifest["locations"].values()) == 264  # not reported
+    assert scientific_status.signal_anomaly_active() is True
+
+
+@pytest.mark.parametrize("declared", [30, 36, 50])
+def test_declared_minimum_must_be_the_weakest_location(root, test_mode, declared):
+    """30 would understate, 36/50 overstate the weakest season (35)."""
+    manifest, rows = _artefact()
+    for site_id, n in {"alpha": 50, "beta": 35, "gamma": 42}.items():
+        manifest["locations"][site_id]["min_season_dates"] = n
+    manifest["signal_anomaly"]["minimum_independent_dates"] = declared
+    baseline_store.write_artifact(root, manifest, rows)
+    _assert_refused("inconsistent_declaration")
 
 
 def test_risk_evaluation_stays_false_in_test_mode(valid, test_mode, monkeypatch):
@@ -419,16 +452,58 @@ def test_hand_loosened_floors_are_rejected(valid, test_mode, field, value):
     _assert_refused("below_floor")
 
 
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("max_observation_age_days", True),
+        ("max_observation_age_days", 14.5),
+        ("max_observation_age_days", "14"),
+        ("max_observation_age_days", float("inf")),
+        ("max_observation_age_days", float("nan")),
+        ("minimum_independent_dates", True),
+        ("minimum_independent_dates", "30"),
+        ("minimum_independent_dates", 29.9),
+        ("minimum_independent_dates", float("inf")),
+        ("minimum_independent_dates", float("nan")),
+    ],
+)
+def test_odd_floor_types_never_open_the_gate(valid, test_mode, field, value):
+    """Bools, strings, fractions and non-finite values, written by hand.
+
+    The predicate alone would truncate 14.5 to 14 and accept "14"/"30";
+    validate_manifest refuses them first, and this pins the combination.
+    """
+    path, _, _ = valid
+    _edit_manifest(path, lambda m: m["signal_anomaly"].__setitem__(field, value))
+    status = scientific_status.baseline_status()
+    assert status["valid"] is False
+    assert status["reason"] == "below_floor"
+    assert scientific_status.signal_anomaly_active() is False
+    snapshot_status, active = scientific_status.baseline_snapshot()
+    assert snapshot_status == status and active is None
+
+
 def test_the_unchanged_predicate_rejects_loose_floors_even_if_validation_is_bypassed(
     valid, test_mode, monkeypatch,
 ):
     """Defence in depth: the same predicate as the config path, on the declaration."""
-    path, _, _ = valid
+    path, original, _ = valid
     monkeypatch.setattr(logic, "validate_manifest", lambda *_a, **_k: None)
-    for field, value in (("minimum_independent_dates", 5), ("max_observation_age_days", 90)):
-        _edit_manifest(path, lambda m: m["signal_anomaly"].update(minimum_independent_dates=60, max_observation_age_days=14))
+
+    def five_dates(m):
+        # Keep the declaration consistent with the locations, so only the
+        # predicate stands between this manifest and an open gate.
+        m["signal_anomaly"]["minimum_independent_dates"] = 5
+        for info in m["locations"].values():
+            info["min_season_dates"] = 5
+
+    def ninety_days(m):
+        m["signal_anomaly"]["max_observation_age_days"] = 90
+
+    for loosen in (five_dates, ninety_days):
+        _edit_manifest(path, lambda m: (m.clear(), m.update(copy.deepcopy(original))))
         assert scientific_status.signal_anomaly_active() is True
-        _edit_manifest(path, lambda m: m["signal_anomaly"].__setitem__(field, value))
+        _edit_manifest(path, loosen)
         assert scientific_status.signal_anomaly_active() is False
         assert scientific_status.baseline_status() == _invalid("inactive_declaration")
 
@@ -470,6 +545,11 @@ def test_other_validation_reasons_pass_through(valid, test_mode, mutate, reason)
         lambda m: m.pop("locations"),
         lambda m: m.__setitem__("locations", {}),
         lambda m: m["locations"]["alpha"].__setitem__("n_dates", "288"),
+        lambda m: m["locations"]["alpha"].pop("min_season_dates"),
+        lambda m: m["locations"]["alpha"].__setitem__("min_season_dates", 72.5),
+        lambda m: m["locations"]["alpha"].__setitem__("min_season_dates", True),
+        lambda m: m["locations"]["alpha"].__setitem__("min_season_dates", -1),
+        lambda m: m["locations"]["alpha"].__setitem__("min_season_dates", float("nan")),
         lambda m: m.pop("self_check"),
     ],
 )
@@ -570,3 +650,142 @@ def test_validation_is_rechecked_on_every_call_not_cached(valid, test_mode, monk
     assert scientific_status.signal_anomaly_active() is True
     monkeypatch.setattr(baseline_store, "_utc_today", lambda: date(2025, 12, 19))
     _assert_refused("history_in_future")
+
+
+# --------------------------------------------------------------------------
+# baseline_snapshot(): one resolution, consistent with the thin wrappers
+# --------------------------------------------------------------------------
+
+
+def test_snapshot_mode_off_reads_nothing(valid, monkeypatch):
+    def must_not_be_called(*_a, **_k):
+        raise AssertionError("mode off must not look at the baseline artefact")
+
+    monkeypatch.setattr(baseline_store, "latest_artifact_path", must_not_be_called)
+    assert scientific_status.baseline_snapshot() == ({"mode": "off"}, None)
+
+
+def test_snapshot_valid_pairs_the_status_with_its_own_rows(valid, test_mode):
+    _, manifest, rows = valid
+    status, active = scientific_status.baseline_snapshot()
+    assert status == scientific_status.baseline_status()
+    assert status["valid"] is True
+    assert isinstance(active, baseline_store.ActiveBaseline)
+    assert active.version == status["version"] == manifest["baseline_version"]
+    assert active.manifest == manifest
+    assert active.rows_by_location == rows
+    # The status and the active baseline share no mutable state.
+    status["base_rates"]["assessed"] = -1
+    status["min_season_dates_by_location"]["alpha"] = -1
+    assert active.manifest["self_check"]["total"] == manifest["self_check"]["total"]
+    assert active.manifest["locations"]["alpha"]["min_season_dates"] == 72
+
+
+def _corrupt_manifest(path: Path) -> None:
+    (path / baseline_store.MANIFEST_NAME).write_text("{ nope", encoding="utf-8")
+
+
+def _loosen(path: Path) -> None:
+    _edit_manifest(path, lambda m: m["signal_anomaly"].__setitem__("max_observation_age_days", 90))
+
+
+def _predicate_fails(path: Path) -> None:
+    _edit_manifest(path, lambda m: m["signal_anomaly"].__setitem__("location_specific", False))
+
+
+def _remove(path: Path) -> None:
+    for child in path.iterdir():
+        child.unlink()
+    path.rmdir()
+
+
+@pytest.mark.parametrize(
+    "damage,reason",
+    [
+        (_corrupt_manifest, "unreadable"),
+        (_loosen, "below_floor"),
+        (_predicate_fails, "inactive_declaration"),
+        (_remove, "no_artifact"),
+    ],
+)
+def test_snapshot_invalid_states_give_no_active_baseline(valid, test_mode, damage, reason):
+    path, _, _ = valid
+    damage(path)
+    status, active = scientific_status.baseline_snapshot()
+    assert status == _invalid(reason)
+    assert active is None
+    assert scientific_status.baseline_status() == status
+    assert scientific_status.signal_anomaly_active() is False
+
+
+def test_snapshot_signature_mismatch_gives_no_active_baseline(valid, test_mode, monkeypatch):
+    real = bridge.preprocessing_params
+    monkeypatch.setattr(bridge, "preprocessing_params", lambda: {**real(), "buffer_m": 999})
+    assert scientific_status.baseline_snapshot() == (_invalid("signature_mismatch"), None)
+
+
+@pytest.mark.parametrize("mode", ["off", "test"])
+@pytest.mark.parametrize("damage", [None, _corrupt_manifest, _loosen, _predicate_fails, _remove])
+def test_wrappers_agree_with_the_snapshot_for_the_same_disk_state(valid, monkeypatch, mode, damage):
+    monkeypatch.setattr(config, "BASELINE_MODE", mode)
+    if damage is not None:
+        damage(valid[0])
+    status, active = scientific_status.baseline_snapshot()
+    assert scientific_status.baseline_status() == status
+    # Config path inactive in this repository, so the gate is the TEST path.
+    assert scientific_status.signal_anomaly_active() is (active is not None)
+    assert (active is not None) is (status.get("valid") is True)
+
+
+def test_a_rebuild_during_a_snapshot_cannot_mix_versions(root, test_mode, monkeypatch):
+    """A newer artefact landing mid-call is seen by the NEXT snapshot only."""
+    old, rows = _artefact()
+    baseline_store.write_artifact(root, old, rows)
+    newer, _ = _artefact()
+    newer["baseline_version"] = newer["signal_anomaly"]["baseline_version"] = "TEST-20260201-" + _live_signature()[:8]
+
+    real_latest = baseline_store.latest_artifact_path
+    lookups = []
+
+    def latest_then_rebuild(*args, **kwargs):
+        found = real_latest(*args, **kwargs)
+        lookups.append(found)
+        if len(lookups) == 1:
+            baseline_store.write_artifact(root, newer, rows)  # the rebuild lands now
+        return found
+
+    monkeypatch.setattr(baseline_store, "latest_artifact_path", latest_then_rebuild)
+    status, active = scientific_status.baseline_snapshot()
+    assert len(lookups) == 1  # one resolution per snapshot
+    assert status["version"] == active.version == old["baseline_version"]
+
+    status, active = scientific_status.baseline_snapshot()
+    assert status["version"] == active.version == newer["baseline_version"]
+
+
+def test_snapshot_never_raises(valid, test_mode, monkeypatch):
+    def boom(*_a, **_k):
+        raise RuntimeError("disk on fire")
+
+    monkeypatch.setattr(baseline_store, "read_artifact", boom)
+    assert scientific_status.baseline_snapshot() == (_invalid("unreadable"), None)
+
+
+# --------------------------------------------------------------------------
+# backend/.env values reach BASELINE_MODE stripped, quotes kept
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "line,expected",
+    [("BASELINE_MODE=test", "test"), ("BASELINE_MODE=  test  ", "test"), ('BASELINE_MODE="test"', "off")],
+)
+def test_env_file_values_are_stripped_but_not_unquoted(tmp_path, monkeypatch, line, expected):
+    # setenv then delenv makes monkeypatch restore the original value (or
+    # absence) afterwards, so nothing set here leaks into later tests.
+    monkeypatch.setenv("BASELINE_MODE", "placeholder")
+    monkeypatch.delenv("BASELINE_MODE")
+    env_file = tmp_path / ".env"
+    env_file.write_text(line + "\n", encoding="utf-8")
+    config._load_env_file(env_file)
+    assert config._parse_baseline_mode(os.environ.get("BASELINE_MODE")) == expected

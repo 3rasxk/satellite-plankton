@@ -67,9 +67,14 @@ SCHEDULER_INTERVAL_MINUTES: int = int(os.environ.get("SCHEDULER_INTERVAL_MINUTES
 
 
 # TEST seasonal baseline switch (src/baseline_store.py, src/scientific_status.py).
-# Off by default. Only the exact value `test` turns it on -- no trimming, no
-# case folding, no "true"/"1" -- so a typo leaves it off rather than on. The
-# gates read this module attribute at call time (tests monkeypatch it).
+# Off by default. Only the exact value `test` turns it on -- no case folding,
+# no "true"/"1" -- so a typo leaves it off rather than on. The comparison
+# itself does not trim, but where the value comes from matters: a value from
+# backend/.env has already been stripped by _load_env_file above (so
+# `BASELINE_MODE= test ` there DOES enable it), while quotes are kept (so
+# `BASELINE_MODE="test"` there does NOT); a process environment value is
+# compared as given (`export BASELINE_MODE=" test"` is off). The gates read
+# this module attribute at call time (tests monkeypatch it).
 # Turning it on never turns on risk evaluation; see scientific_status.py.
 def _parse_baseline_mode(raw: str | None) -> str:
     return "test" if raw == "test" else "off"
