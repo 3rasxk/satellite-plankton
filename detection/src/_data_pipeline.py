@@ -174,6 +174,16 @@ DEFAULT_RASTER_SCALE_M = _dp.DEFAULT_RASTER_SCALE_M
 FabricatedDateError = _dp.FabricatedDateError
 DateBandPrecisionError = _dp.DateBandPrecisionError
 
+# Per-site NDCI history for the TEST baseline (data-pipeline/src/history.py).
+# Re-exported as a pass-through, same reasoning as the raster names above:
+# detection/src's own prediction path never fetches history, but
+# backend/src/_detection.py reaches data-pipeline only through this one
+# bridge. `preprocessing_params` is pure (no GEE call) and is the single
+# description of how history rows are made, which the baseline hashes into
+# its preprocessing signature.
+get_ndci_history = _dp.get_ndci_history
+preprocessing_params = _dp.preprocessing_params
+
 # `day_of_year_climatology` is a pure function in data-pipeline/src/modis.py
 # whose own docstring says bloom-detection is "expected to build on this
 # rather than reimplement it" — re-exported here for src/climatology.py so
@@ -215,6 +225,8 @@ __all__ = [
     "iter_bootstrap_windows",
     "summarize_raster_cells",
     "valid_cell_mask",
+    "get_ndci_history",
+    "preprocessing_params",
     "RASTER_BAND_REDUCERS",
     "RASTER_BAND_ORDER",
     "RASTER_INDEX_BANDS",

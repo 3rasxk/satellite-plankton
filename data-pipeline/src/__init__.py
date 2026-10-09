@@ -29,9 +29,14 @@ and other downstream consumers:
     download_composite_arrays(composite, scale_m) raster, see raster.py
     summarize_raster_cells(arrays)                (pure, no GEE call)
     valid_cell_mask(date_ms)                      (pure, no GEE call)
+    get_ndci_history(lat, lng, start, end)  -- per-site NDCI history rows for
+                                               the TEST baseline, see
+                                               history.py
+    preprocessing_params()                        (pure, no GEE call)
 """
 
 from .auth import GEEAuthError, GEEConfigError, initialize_ee
+from .history import get_ndci_history, preprocessing_params
 from .imagery import get_ndci_heatmap, get_true_color_image
 from .modis import get_modis_chlorophyll_history, get_modis_sst
 from .rainfall import get_rainfall_proxy
@@ -84,6 +89,8 @@ __all__ = [
     "iter_bootstrap_windows",
     "summarize_raster_cells",
     "valid_cell_mask",
+    "get_ndci_history",
+    "preprocessing_params",
     "RASTER_BAND_REDUCERS",
     "RASTER_BAND_ORDER",
     "RASTER_INDEX_BANDS",
