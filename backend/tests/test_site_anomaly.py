@@ -503,14 +503,17 @@ def test_a_site_with_no_cached_reading_says_why_in_test_mode(
 # Disclaimer: the TEST-baseline variant exactly while an anomaly can be computed
 # --------------------------------------------------------------------------
 
+# Agreed wording (Task 13 fix round 1, 2026-10-09): covers site AND raster-cell
+# anomalies, since /raster-scan/highlights?mode=anomaly and /raster-scan/pixel
+# carry the same text. A wording change must change this golden deliberately.
 _EXPECTED_TEST_DISCLAIMER = (
     "Satellite index values describe water colour at pixel resolution. Small or scattered "
-    "blooms may not be visible. TEST baseline mode: a monitoring site's Sentinel-2 NDCI may "
-    "be compared with that site's own earlier record for the same season. Any resulting "
-    "anomaly is provisional and uncalibrated, has never been checked against recorded bloom "
-    "events, and is a statistical statement only — not a bloom detection, a species "
-    "identification, a risk level or a forecast. Index values alone establish neither bloom "
-    "presence nor absence."
+    "blooms may not be visible. TEST baseline mode: a Sentinel-2 NDCI reading, at a "
+    "monitoring site or at a raster cell, may be compared with that same location's own "
+    "earlier record for the same season. Any resulting anomaly is provisional and "
+    "uncalibrated, has never been checked against recorded bloom events, and is a "
+    "statistical statement only — not a bloom detection, a species identification, a risk "
+    "level or a forecast. Index values alone establish neither bloom presence nor absence."
 )
 
 
@@ -518,6 +521,11 @@ def test_test_baseline_disclaimer_text_is_the_agreed_wording():
     assert DISCLAIMER_TEXT_TEST_BASELINE == _EXPECTED_TEST_DISCLAIMER
     assert DISCLAIMER_TEXT_TEST_BASELINE != DISCLAIMER_TEXT
     assert "not computed" in DISCLAIMER_TEXT  # the mode-off text is unchanged
+    # Its first two sentences are the standard disclaimer's own, verbatim.
+    first_two = ". ".join(DISCLAIMER_TEXT.split(". ")[:2]) + ". "
+    assert DISCLAIMER_TEXT_TEST_BASELINE.startswith(first_two)
+    assert "monitoring site" in DISCLAIMER_TEXT_TEST_BASELINE
+    assert "raster cell" in DISCLAIMER_TEXT_TEST_BASELINE
 
 
 def _all_disclaimers(client, monkeypatch) -> dict[str, list[str]]:

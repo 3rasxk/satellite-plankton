@@ -48,7 +48,8 @@ The rules, in order
    between the cells' own observation coordinates (`cell_lat`/`cell_lng`).
    So five adjacent cells cannot fill the list.
 4. **percentile** = share of the cohort with a STRICTLY lower metric x 100.
-   Ties share a percentile; the top cell of a 4-cell cohort is 75.0.
+   Ties share a percentile; the top cell of a 4-cell cohort is 75.0. It is
+   computed over the FULL cohort, degenerate cells (rule 7) included.
 5. **edge_of_no_data** = true when any of the 8 neighbouring overlay
    pixels whose centre lies INSIDE the study polygon carries no reading
    (unmeasured: cloud, land mask, no pass, masked export, or non-finite
@@ -60,6 +61,16 @@ The rules, in order
 6. **Fewer than n separable cells** -> fewer pins and
    `reason = "only k separable measured cells"`; an empty cohort ->
    `pins == []` and `reason = "no measured cells"`.
+7. **Degenerate readings never pin.** A cell whose NDCI is exactly +/-1
+   (|ndci| >= 1 - 1e-6, `cell_anomaly.DEGENERATE_NDCI_ABS`) has a zero
+   band (B4 = 0 gives +1, B5 = 0 gives -1), which is not a physical
+   water-colour value; in the stored rasters such cells sit mostly at
+   mask edges and would otherwise top every ranking (run 5: 90 cells at
+   exactly 1.0). They stay in the cohort -- the map paints them, a click
+   reports them -- so `cohort_size` and percentiles are unchanged, but
+   they are skipped as pins (and so cannot suppress a neighbour) and
+   counted in `excluded_degenerate`. Applies in both modes; in anomaly
+   mode they are also never assessed (`invalid`).
 
 Limitations -- read before quoting a pin
 -----------------------------------------
@@ -77,6 +88,20 @@ Limitations -- read before quoting a pin
   come from different passes of a most-recent-wins mosaic.
 * No baseline exists for spectral indices (CLAUDE.md §0/§1), so there is
   no "high" in an absolute sense here -- only "highest in this scan".
+
+Anomaly mode (`rank_anomaly_cells`, BASELINE_MODE=test only)
+------------------------------------------------------------
+A second, separately labelled kind of pin: a measured cell whose NDCI is
+at least 2 robust z ABOVE that same cell's own TEST seasonal baseline
+(Level B), assessed by `cell_anomaly.assess` with detection's statistic.
+Same cohort, NMS, edge rule and tie-break discipline as above; the order
+is z (then NDCI, row, column), only assessable cells at watch or high can
+be pins, and the result carries `counts` saying how many measured cells
+were assessable and why the rest were not, so "no pins" can be told apart
+from "nothing assessed". It is a statistical anomaly against one cell's
+own clear-sky record -- uncalibrated, not a bloom detection and not a risk
+level; the same sediment / shallow-bottom / glint / cloud-edge caveats
+apply. `risk_tier` stays None in both modes.
 """
 
 from __future__ import annotations
@@ -88,7 +113,7 @@ import numpy as np
 from .. import _detection as bridge
 from .._study_area import STUDY_AREA_POLYGON_LATLNG
 from ..db_models import RasterScanRun
-from . import render, storage
+from . import cell_anomaly, render, storage
 from .pixel import RasterCellsUnavailableError, _cell_date_fields, grid_for_run
 from .render import OverlayGrid
 
@@ -105,6 +130,9 @@ EARTH_RADIUS_M = 6_371_008.8
 
 NO_MEASURED_CELLS = "no measured cells"
 FEWER_SEPARABLE_TEMPLATE = "only {k} separable measured cells"
+NONE_ELIGIBLE_TEMPLATE = (
+    "no measured cells eligible for pins ({x} excluded: NDCI exactly +/-1, a zero band)"
+)
 
 # The 8 neighbours, as (row, col) offsets.
 _NEIGHBOUR_OFFSETS: tuple[tuple[int, int], ...] = tuple(
@@ -212,21 +240,20 @@ def rank_cells(
         polygon: study-area boundary, as the renderer used it.
 
     Returns:
-        {"cohort_size": int, "pins": [pin, ...], "reason": str | None}.
-        Each pin: rank, cell_lat, cell_lng, pixel_centre_lat,
-        pixel_centre_lng, index_values, percentile, date_ms,
-        acquired_date, acquired_at, edge_of_no_data, metric_value,
-        risk_tier (always None).
+        {"cohort_size": int, "pins": [pin, ...], "reason": str | None,
+        "excluded_degenerate": int}. Each pin: rank, cell_lat, cell_lng,
+        pixel_centre_lat, pixel_centre_lng, index_values, percentile,
+        date_ms, acquired_date, acquired_at, edge_of_no_data, metric_value,
+        risk_tier (always None). Degenerate cells (rule 7) are counted in
+        `cohort_size` and in every percentile but never pinned;
+        `excluded_degenerate` says how many there were.
 
     Raises:
         ValueError: unknown metric, n < 1, or a negative separation.
     """
     if metric not in RANKABLE_METRICS:
         raise ValueError(f"cannot rank by {metric!r}; rankable metrics: {RANKABLE_METRICS}")
-    if int(n) != n or n < 1:
-        raise ValueError(f"n must be a positive integer, got {n!r}")
-    if not np.isfinite(min_separation_m) or min_separation_m < 0:
-        raise ValueError(f"min_separation_m must be >= 0, got {min_separation_m!r}")
+    _validate_arguments(n, min_separation_m)
 
     index, rows, cols = _painted_cells(cells, grid, polygon)
     values = np.asarray(cells[metric], dtype=np.float64)[index]
@@ -235,7 +262,8 @@ def rank_cells(
 
     cohort_size = int(index.size)
     if cohort_size == 0:
-        return {"cohort_size": 0, "pins": [], "reason": NO_MEASURED_CELLS}
+        return {"cohort_size": 0, "pins": [], "reason": NO_MEASURED_CELLS,
+                "excluded_degenerate": 0}
 
     # lexsort: the LAST key is primary. Metric descending, then row, then col.
     order = np.lexsort((cols, rows, -values))
@@ -243,21 +271,13 @@ def rank_cells(
     lat = np.asarray(cells["lat"], dtype=np.float64)[index]
     lng = np.asarray(cells["lng"], dtype=np.float64)[index]
 
-    # Greedy NMS. After each selection every candidate within the radius of
-    # it is struck out, so the next still-alive candidate in order is the
-    # highest-ranked cell at least `min_separation_m` from every pin so far.
-    alive = np.ones(cohort_size, dtype=bool)
-    chosen: list[int] = []
-    start = 0
-    while len(chosen) < n and start < cohort_size:
-        offset = int(np.argmax(alive[start:]))
-        position = start + offset
-        if not alive[position]:
-            break
-        chosen.append(position)
-        alive[position] = False
-        alive &= ~(haversine_m(lat[position], lng[position], lat, lng) < min_separation_m)
-        start = position + 1
+    # Rule 7: a degenerate NDCI (a zero band) stays in the cohort -- the map
+    # paints it -- but can never be a pin, and never suppresses one.
+    eligible = np.flatnonzero(
+        ~cell_anomaly.is_degenerate_ndci(np.asarray(cells["ndci"], dtype=np.float64)[index]))
+    excluded = cohort_size - int(eligible.size)
+    chosen = [int(eligible[p]) for p in _greedy_nms(lat[eligible], lng[eligible],
+                                                    n, min_separation_m)]
 
     ascending = np.sort(values)
     painted = np.zeros((grid.rows, grid.cols), dtype=bool)
@@ -285,8 +305,179 @@ def rank_cells(
             **_cell_date_fields(int(dates[stored])),
         })
 
-    reason = None if len(pins) >= n else FEWER_SEPARABLE_TEMPLATE.format(k=len(pins))
-    return {"cohort_size": cohort_size, "pins": pins, "reason": reason}
+    if len(pins) >= n:
+        reason = None
+    elif eligible.size == 0:
+        reason = NONE_ELIGIBLE_TEMPLATE.format(x=excluded)
+    else:
+        reason = FEWER_SEPARABLE_TEMPLATE.format(k=len(pins))
+    return {"cohort_size": cohort_size, "pins": pins, "reason": reason,
+            "excluded_degenerate": excluded}
+
+
+def _greedy_nms(lat: np.ndarray, lng: np.ndarray, n: int, min_separation_m: float) -> list[int]:
+    """Positions picked by greedy NMS over candidates already in rank order.
+
+    After each selection every candidate within the radius of it is struck
+    out, so the next still-alive candidate in order is the highest-ranked
+    cell at least `min_separation_m` from every pin so far.
+    """
+    count = int(lat.size)
+    alive = np.ones(count, dtype=bool)
+    chosen: list[int] = []
+    start = 0
+    while len(chosen) < n and start < count:
+        offset = int(np.argmax(alive[start:]))
+        position = start + offset
+        if not alive[position]:
+            break
+        chosen.append(position)
+        alive[position] = False
+        alive &= ~(haversine_m(lat[position], lng[position], lat, lng) < min_separation_m)
+        start = position + 1
+    return chosen
+
+
+# --------------------------------------------------------------------------
+# Anomaly mode: pins that meet the condition against the Level B baseline
+# --------------------------------------------------------------------------
+
+# Reasons when an anomaly ranking has fewer than n pins. "No pins" must
+# say whether nothing could be assessed or nothing met the condition.
+NONE_ASSESSABLE_TEMPLATE = (
+    "no measured cells are assessable against the TEST cell baseline "
+    "(0 assessable of {m} measured)"
+)
+NONE_MET_TEMPLATE = "no cells meet the condition ({a} assessable of {m} measured)"
+FEWER_MET_TEMPLATE = (
+    "only {k} separable cells meet the condition ({a} assessable of {m} measured)"
+)
+
+_WATCH_CODE = bridge.baseline_logic.LEVEL_CODE["watch"]
+
+
+def _validate_arguments(n: int, min_separation_m: float) -> None:
+    if int(n) != n or n < 1:
+        raise ValueError(f"n must be a positive integer, got {n!r}")
+    if not np.isfinite(min_separation_m) or min_separation_m < 0:
+        raise ValueError(f"min_separation_m must be >= 0, got {min_separation_m!r}")
+
+
+def rank_anomaly_cells(
+    cells: dict,
+    *,
+    grid: OverlayGrid,
+    context: cell_anomaly.AnomalyContext,
+    n: int,
+    min_separation_m: float,
+    polygon: tuple[tuple[float, float], ...] = STUDY_AREA_POLYGON_LATLNG,
+) -> dict[str, Any]:
+    """Pins where a measured cell meets the TEST anomaly condition. Pure.
+
+    Cohort: exactly `rank_cells`' (the cells the overlay paints), each
+    assessed by `cell_anomaly.assess` against its own season baseline.
+    Candidates: assessable cells with level watch or high, i.e. robust
+    z >= 2 -- positive anomalies only (higher NDCI than this cell's own
+    seasonal record); a negative or normal z is never a pin. Order: z
+    descending, then NDCI descending, then lower row, then lower column.
+    De-duplication and `edge_of_no_data` are `rank_cells`' rules (the
+    painted mask is every measured cell, not only the candidates).
+    `percentile` is the share of the ASSESSABLE cells with a strictly lower
+    z, x 100; `metric_value` is the pin's robust z.
+
+    Returns:
+        {"cohort_size", "pins", "reason", "counts", "excluded_degenerate"}
+        (degenerate cells are in `counts["invalid"]`). Each pin: the ndci-mode
+        fields plus robust_z, median_ndci, mad, n_dates, anomaly_level
+        ("watch" | "high"); risk_tier always None. `counts` is
+        `cell_anomaly.counts` (it partitions the cohort).
+
+    Raises:
+        ValueError: n < 1 or a negative separation.
+    """
+    _validate_arguments(n, min_separation_m)
+    index, rows, cols = _painted_cells(cells, grid, polygon)
+    dates = np.asarray(cells[bridge.RASTER_DATE_BAND])
+    ndci = np.asarray(cells["ndci"], dtype=np.float64)[index]
+    lat_all = np.asarray(cells["lat"], dtype=np.float64)
+    lng_all = np.asarray(cells["lng"], dtype=np.float64)
+
+    assessed = cell_anomaly.assess(
+        ndci, lat_all[index], lng_all[index], dates[index].astype(np.int64), context,
+    )
+    counts = cell_anomaly.counts(assessed)
+    measured, assessable = counts["measured"], counts["assessable"]
+    # Degenerate cells are `invalid` (never assessed, never pins); counted
+    # here as well so both modes report the same exclusion.
+    excluded = int(np.count_nonzero(cell_anomaly.is_degenerate_ndci(ndci)))
+    if measured == 0:
+        return {"cohort_size": 0, "pins": [], "reason": NO_MEASURED_CELLS, "counts": counts,
+                "excluded_degenerate": 0}
+
+    z = assessed["robust_z"]
+    is_assessable = assessed["reason"] == 0
+    candidate = np.flatnonzero(is_assessable & (assessed["level"] >= _WATCH_CODE))
+    # lexsort: the LAST key is primary. z, NDCI descending; row, col ascending.
+    order = candidate[np.lexsort((cols[candidate], rows[candidate],
+                                  -ndci[candidate], -z[candidate]))]
+    chosen = [int(order[p]) for p in _greedy_nms(lat_all[index[order]], lng_all[index[order]],
+                                                 n, min_separation_m)]
+
+    ascending = np.sort(z[is_assessable])
+    painted = np.zeros((grid.rows, grid.cols), dtype=bool)
+    painted[rows, cols] = True
+    centre_lats, centre_lngs = grid.pixel_centres()
+
+    pins: list[dict[str, Any]] = []
+    for rank, position in enumerate(chosen, start=1):
+        stored = int(index[position])
+        row, col = int(rows[position]), int(cols[position])
+        value = float(z[position])
+        strictly_lower = int(np.searchsorted(ascending, value, side="left"))
+        described = cell_anomaly.describe(assessed, position)
+        pins.append({
+            "rank": rank,
+            "cell_lat": float(lat_all[stored]),
+            "cell_lng": float(lng_all[stored]),
+            "pixel_centre_lat": float(centre_lats[row]),
+            "pixel_centre_lng": float(centre_lngs[col]),
+            "index_values": _index_values(cells, stored),
+            "percentile": strictly_lower / assessable * 100.0,
+            "metric_value": value,
+            "edge_of_no_data": _edge_of_no_data(row, col, painted, grid, polygon),
+            "risk_tier": None,
+            "robust_z": described["robust_z"],
+            "median_ndci": described["median_ndci"],
+            "mad": described["mad"],
+            "n_dates": described["n_dates"],
+            "anomaly_level": described["level"],
+            **_cell_date_fields(int(dates[stored])),
+        })
+
+    if len(pins) >= n:
+        reason = None
+    elif assessable == 0:
+        reason = NONE_ASSESSABLE_TEMPLATE.format(m=measured)
+    elif not pins:
+        reason = NONE_MET_TEMPLATE.format(a=assessable, m=measured)
+    else:
+        reason = FEWER_MET_TEMPLATE.format(k=len(pins), a=assessable, m=measured)
+    return {"cohort_size": measured, "pins": pins, "reason": reason, "counts": counts,
+            "excluded_degenerate": excluded}
+
+
+def _read_run_cells(run: RasterScanRun) -> dict:
+    """The run's stored cells, failing exactly as `pixel.inspect_run` does."""
+    if not run.blob_path:
+        raise RasterCellsUnavailableError(
+            f"raster scan {run.id} has no stored cells (blob_deleted_at="
+            f"{run.blob_deleted_at}). Its overlay can still be shown, but no reading "
+            "behind it can be quoted -- the cells it was drawn from are gone."
+        )
+    try:
+        return storage.read_cells(run.blob_path)
+    except FileNotFoundError as exc:
+        raise RasterCellsUnavailableError(str(exc)) from exc
 
 
 def rank_run(
@@ -309,21 +500,33 @@ def rank_run(
             null -- the overlay may still be on screen, but no number
             behind it can be ranked.
     """
-    if not run.blob_path:
-        raise RasterCellsUnavailableError(
-            f"raster scan {run.id} has no stored cells (blob_deleted_at="
-            f"{run.blob_deleted_at}). Its overlay can still be shown, but no reading "
-            "behind it can be quoted -- the cells it was drawn from are gone."
-        )
-    try:
-        cells = storage.read_cells(run.blob_path)
-    except FileNotFoundError as exc:
-        raise RasterCellsUnavailableError(str(exc)) from exc
+    cells = _read_run_cells(run)
     return rank_cells(
         cells,
         grid=grid_for_run(run, cells),
         n=n,
         min_separation_m=min_separation_m,
         metric=metric,
+        polygon=polygon,
+    )
+
+
+def rank_anomaly_run(
+    run: RasterScanRun,
+    *,
+    context: cell_anomaly.AnomalyContext,
+    n: int,
+    min_separation_m: float,
+    polygon: tuple[tuple[float, float], ...] = STUDY_AREA_POLYGON_LATLNG,
+) -> dict[str, Any]:
+    """`rank_anomaly_cells` for a run the caller selected; `rank_run`'s blob
+    read and errors (`RasterCellsUnavailableError`)."""
+    cells = _read_run_cells(run)
+    return rank_anomaly_cells(
+        cells,
+        grid=grid_for_run(run, cells),
+        context=context,
+        n=n,
+        min_separation_m=min_separation_m,
         polygon=polygon,
     )

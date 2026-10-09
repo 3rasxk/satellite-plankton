@@ -19,7 +19,11 @@ Four endpoints, deliberately split:
   - `GET /raster-scan/highlights` ranks the same stored cells by NDCI
     (src/raster_scan/highlights.py): the top-N measured cells of one run
     after spatial de-duplication. A ranking by value inside one scan --
-    no threshold, no baseline, no tier.
+    no threshold, no baseline, no tier. With BASELINE_MODE=test and a
+    usable Level B cell baseline it can instead (`mode=anomaly`, then the
+    default) pin cells whose NDCI is >= 2 robust z above the cell's OWN
+    TEST seasonal baseline (src/raster_scan/cell_anomaly.py) -- a
+    separately labelled statistical anomaly, never a risk level.
 
 Metadata binds the image URL and pixel queries to its run_id. Explicit
 run IDs never fall back to a newer render; callers omitting the ID retain
@@ -41,10 +45,18 @@ new scenes at all". They are metadata about scene selection, served
 whatever BASELINE_MODE is, and a stale or failing poll is reported as such
 -- never as "no newer scene".
 
-Truth boundary, unchanged from every other endpoint here: the raster
-carries index readings with their own per-pixel acquisition dates. No
-anomaly statistic, no risk level, no classification -- no valid
-spectral-index baseline exists (CLAUDE.md §0/§1).
+Truth boundary: the raster carries index readings with their own
+per-pixel acquisition dates. No risk level and no classification
+anywhere. With the mode off (the default) there is no anomaly statistic
+either -- no valid spectral-index baseline exists (CLAUDE.md §0/§1). In
+TEST baseline mode the anomaly fields (highlights `mode=anomaly`, the
+pixel `anomaly` block) are a provisional, uncalibrated comparison of a
+cell with its own record, carried with the TEST-baseline disclaimer and
+never called a risk.
+
+Blocking work: every handler that reads a blob or a baseline file is a
+plain `def` (run in the threadpool), and each request resolves the
+baseline ONCE (`baseline_status()` + one season file, same version).
 """
 
 from __future__ import annotations
@@ -59,14 +71,18 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .. import _detection as bridge
+from .. import scientific_status
 from ..config import as_aware_utc
 from ..db import get_db
 from ..db_models import RasterScanRun, SceneAssessmentRow, ScenePollStatus
+from ..raster_scan import cell_anomaly
 from ..raster_scan import highlights as highlight_ranking
 from ..raster_scan import pixel as pixel_lookup
 from ..raster_scan.trigger import POLL_STATUS_ID, PASSED, is_settled
 from ..schemas import (
+    DISCLAIMER_TEXT,
     LatestSceneInfo,
+    RasterAnomalyHighlightsResponse,
     RasterCoverage,
     RasterHighlightsResponse,
     RasterPixelResponse,
@@ -84,9 +100,21 @@ OVERLAY_BAND = "ndci"
 # endpoint that reads the stored cells so the wording cannot drift apart.
 NO_RASTER_TO_QUERY = "No raster overlay is available to query. Run a raster scan first."
 
-# Answer to `mode=anomaly` until a per-cell (Level B) baseline exists. The
-# parameter is accepted now so the contract does not change when it does.
-ANOMALY_MODE_UNAVAILABLE = "anomaly mode requires the Level B baseline"
+# The 409 message for `mode=anomaly` when no cell anomaly can be computed;
+# the machine-readable `reason`/`cause` travel next to it.
+ANOMALY_MODE_UNAVAILABLE = (
+    "anomaly mode needs BASELINE_MODE=test and a valid Level B (per-cell) TEST baseline "
+    "for this run's season; use mode=ndci for the highest-NDCI ranking"
+)
+
+
+def _anomaly_unavailable(unavailable: cell_anomaly.Unavailable) -> HTTPException:
+    return HTTPException(status_code=409, detail={
+        "reason": unavailable.reason,
+        "cause": unavailable.cause,
+        "season_key": unavailable.season_key,
+        "message": ANOMALY_MODE_UNAVAILABLE,
+    })
 
 
 def _coverage(overlay: dict) -> RasterCoverage | None:
@@ -359,15 +387,29 @@ def get_raster_pixel(
     except pixel_lookup.RasterCellsUnavailableError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+    # One baseline resolution; mode off returns before any file is read
+    # and leaves every existing field (and the disclaimer) as it was.
+    context = cell_anomaly.resolve(scientific_status.baseline_status(), rendered.date_used)
+    anomaly = None
+    disclaimer = DISCLAIMER_TEXT
+    if isinstance(context, cell_anomaly.AnomalyContext):
+        anomaly = cell_anomaly.pixel_anomaly(found, context)
+        disclaimer = context.disclaimer
+
     return RasterPixelResponse(
         run_id=rendered.id,
         date_used=rendered.date_used,
         scale_m=rendered.scale_m,
         **found,
+        anomaly=anomaly,
+        disclaimer=disclaimer,
     )
 
 
-@router.get("/raster-scan/highlights", response_model=RasterHighlightsResponse)
+@router.get(
+    "/raster-scan/highlights",
+    response_model=RasterHighlightsResponse | RasterAnomalyHighlightsResponse,
+)
 def get_raster_highlights(
     run_id: int | None = Query(None, ge=1, le=2**63 - 1,
                                description="Exact rendered run; omit for the latest available."),
@@ -376,38 +418,77 @@ def get_raster_highlights(
         3000, ge=1000, le=10000,
         description="De-duplication radius in metres: a cell closer than this to a "
         "higher-ranked pin is skipped."),
-    mode: Literal["ndci", "anomaly"] = Query(
-        "ndci", description="'ndci' ranks by NDCI. 'anomaly' needs a per-cell baseline "
-        "that does not exist yet and answers 501."),
+    mode: Literal["ndci", "anomaly"] | None = Query(
+        None, description="'ndci' ranks by NDCI. 'anomaly' pins cells at least 2 robust z "
+        "above their own TEST seasonal baseline (BASELINE_MODE=test and a usable Level B "
+        "baseline, else 409 with the reason). Omitted: 'anomaly' when it can be "
+        "computed for this run, else 'ndci'."),
     db: Session = Depends(get_db),
-) -> RasterHighlightsResponse:
-    """The highest-NDCI measured cells of one stored run, de-duplicated.
+) -> RasterHighlightsResponse | RasterAnomalyHighlightsResponse:
+    """Highlight pins for one stored run, de-duplicated.
 
     Reads the blob the overlay was drawn from, like `/raster-scan/pixel`
-    (sync, so the read runs in the threadpool) -- never Earth Engine. The
-    same run always yields the same pins. A ranking by value inside one
-    scan: high NDCI can also come from suspended sediment, shallow bottom,
-    sun glint or cloud edges, and does not by itself identify a bloom.
+    (sync, so the read and the baseline file reads run in the threadpool)
+    -- never Earth Engine. The same run and baseline always yield the same
+    pins.
+
+    'ndci': the highest-NDCI measured cells -- a ranking by value inside
+    one scan: high NDCI can also come from suspended sediment, shallow
+    bottom, sun glint or cloud edges, and does not by itself identify a
+    bloom. Never consults the baseline; standard disclaimer.
+
+    'anomaly': measured cells whose NDCI is >= 2 robust z above the cell's
+    own TEST seasonal baseline (src/raster_scan/cell_anomaly.py), with the
+    counts of how many cells were assessable and why the rest were not,
+    the baseline block and the TEST disclaimer. A statistical anomaly,
+    uncalibrated; never a risk level.
 
     Run resolution and 404s are the pixel endpoint's: no rendered run, an
     explicit run that is not servable, or a run whose cells are gone.
+    `mode=anomaly` answers 409 (`detail.reason`: mode_off,
+    no_cell_baseline, invalid:<code>, run_date_unusable) -- checked for
+    mode_off before the run, since no run could change that answer.
     """
-    if mode == "anomaly":
-        raise HTTPException(status_code=501, detail=ANOMALY_MODE_UNAVAILABLE)
-    metric = "ndci"  # the band the overlay draws; the only rankable metric so far
+    status = None if mode == "ndci" else scientific_status.baseline_status()
+    if mode == "anomaly" and status.get("mode") != "test":
+        raise _anomaly_unavailable(
+            cell_anomaly.Unavailable(reason=cell_anomaly.MODE_OFF, cause=None, season_key=None))
     rendered = _rendered_run(db, run_id)
     if rendered is None:
         raise HTTPException(status_code=404, detail=NO_RASTER_TO_QUERY)
+
+    context = None if status is None else cell_anomaly.resolve(status, rendered.date_used)
+    if isinstance(context, cell_anomaly.Unavailable) and mode == "anomaly":
+        raise _anomaly_unavailable(context)
+
+    anomaly_mode = isinstance(context, cell_anomaly.AnomalyContext)
+    metric = "ndci"  # ndci mode: the band the overlay draws
     try:
-        ranked = highlight_ranking.rank_run(
-            rendered, n=n, min_separation_m=min_separation_m, metric=metric,
-        )
+        if anomaly_mode:
+            ranked = highlight_ranking.rank_anomaly_run(
+                rendered, context=context, n=n, min_separation_m=min_separation_m,
+            )
+        else:
+            ranked = highlight_ranking.rank_run(
+                rendered, n=n, min_separation_m=min_separation_m, metric=metric,
+            )
     except pixel_lookup.RasterCellsUnavailableError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+    if anomaly_mode:
+        return RasterAnomalyHighlightsResponse(
+            run_id=rendered.id,
+            mode="anomaly",
+            metric="robust_z",
+            n_requested=n,
+            min_separation_m=min_separation_m,
+            baseline=context.baseline(),
+            disclaimer=context.disclaimer,
+            **ranked,
+        )
     return RasterHighlightsResponse(
         run_id=rendered.id,
-        mode=mode,
+        mode="ndci",
         metric=metric,
         n_requested=n,
         min_separation_m=min_separation_m,

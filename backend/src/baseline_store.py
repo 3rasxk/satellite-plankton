@@ -53,16 +53,20 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import math
 import os
 import re
 import shutil
 import tempfile
 import threading
 from collections import OrderedDict
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from functools import cached_property
 from pathlib import Path
+from types import MappingProxyType
+from typing import Any
 
 import numpy as np
 
@@ -449,6 +453,14 @@ class CellBaseline:
     ``key_index`` match cells by ``baseline.cell_key``, never by position.
     ``history_end`` is the leakage cutoff: only a cell acquired strictly
     after it may be assessed against this baseline.
+
+    ``min_independent_dates`` is the floor the ``level_b`` block DECLARES
+    (validated >= signal_anomaly's 30; rounded up if a hand edit made it
+    fractional, so it can never be loosened by truncation). ``summary`` is
+    a read-only view of this season's manifest description (counts, MAD
+    percentiles, history span) for the API's ``baseline.level_b`` block;
+    it is read from the same manifest as everything else here, so the
+    numbers it shows describe exactly these arrays.
     """
 
     season_key: str
@@ -462,6 +474,10 @@ class CellBaseline:
     median: np.ndarray = field(repr=False)
     mad: np.ndarray = field(repr=False)
     n: np.ndarray = field(repr=False)
+    min_independent_dates: int = field(
+        default_factory=lambda: bridge.SIGNAL_ANOMALY_MIN_INDEPENDENT_DATES
+    )
+    summary: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}), repr=False)
 
     @cached_property
     def _sorted_keys(self) -> tuple[np.ndarray, np.ndarray]:
@@ -532,6 +548,8 @@ def _load_season(path: Path, season_key: str, manifest: dict) -> CellBaseline:
 
     for value in arrays.values():
         value.setflags(write=False)
+    # validate_level_b has checked it is a finite number >= the floor.
+    floor = int(math.ceil(level_b["min_independent_dates"]))
     return CellBaseline(
         season_key=season_key,
         months=tuple(info["months"]),
@@ -540,7 +558,42 @@ def _load_season(path: Path, season_key: str, manifest: dict) -> CellBaseline:
         scale_m=scale_m,
         file=info["file"],
         **arrays,
+        min_independent_dates=floor,
+        summary=MappingProxyType(_season_summary(level_b, season_key, info, floor)),
     )
+
+
+# Season-file statistics copied into ``CellBaseline.summary`` when the
+# manifest has them (builder extras are optional; absent means None).
+_SUMMARY_SEASON_FIELDS = (
+    "cells", "cells_n_ge_floor", "share_n_ge_floor", "n_median", "n_min", "n_max",
+    "mad_p05", "mad_p50", "mad_p95", "n_dates", "first_date", "last_date",
+)
+
+
+def _season_summary(level_b: dict, season_key: str, info: dict, floor: int) -> dict:
+    """A plain-JSON description of one season of the Level B baseline.
+
+    Scalars only (``months`` as a tuple), copied, so the read-only view on
+    the cached ``CellBaseline`` shares nothing mutable with the manifest.
+    """
+    summary: dict[str, Any] = {
+        "season_key": season_key,
+        "months": tuple(info["months"]),
+        "file": info["file"],
+        "scale_m": level_b["scale_m"],
+        "history_start": level_b["history_start"],
+        "history_end": level_b["history_end"],
+        "history_end_rule": level_b.get("history_end_rule"),
+        "season_rule": level_b.get("season_rule"),
+        "min_independent_dates": floor,
+        "cell_preprocessing_signature": level_b["cell_preprocessing_signature"],
+        "built_at": level_b.get("built_at"),
+    }
+    for name in _SUMMARY_SEASON_FIELDS:
+        value = info.get(name)
+        summary[name] = value if value is None or isinstance(value, (int, float, str)) else None
+    return summary
 
 
 def _cached_season(path: Path, season_key: str, manifest: dict) -> CellBaseline:

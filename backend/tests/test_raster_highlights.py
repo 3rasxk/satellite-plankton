@@ -413,7 +413,8 @@ def test_an_empty_cohort_gives_no_pins_and_says_why(case):
     else:
         cells = build_cells(grid, field)
     result = rank(cells, grid, n=5, sep=3000)
-    assert result == {"cohort_size": 0, "pins": [], "reason": "no measured cells"}
+    assert result == {"cohort_size": 0, "pins": [], "reason": "no measured cells",
+                      "excluded_degenerate": 0}
 
 
 def test_an_unreadable_secondary_index_is_null_not_a_number():
@@ -428,6 +429,48 @@ def test_an_unreadable_secondary_index_is_null_not_a_number():
     assert pin["index_values"] == {
         "ndci": f32(0.1), "bda2": f32(1.1), "bda3": None, "b2_b3": None,
     }
+
+
+# --------------------------------------------------------------------------
+# Degenerate readings: NDCI exactly +/-1 (a zero band) never pins
+# --------------------------------------------------------------------------
+
+
+def test_degenerate_readings_stay_in_the_cohort_but_never_pin():
+    grid = synthetic_grid()
+    field = np.zeros((ROWS, COLS))
+    placed = {(1, 1): 1.0, (1, 18): 0.9999995, (18, 1): -1.0,
+              (5, 5): 0.999998, (18, 18): 0.3, (10, 10): 0.2}
+    for rc, v in placed.items():
+        field[rc] = v
+    absent = [(r, c) for r in range(ROWS) for c in range(COLS) if (r, c) not in placed]
+    result = rank(build_cells(grid, field, absent=absent), grid, n=5, sep=1000)
+
+    assert result["cohort_size"] == 6, "degenerate cells are measured cells the map paints"
+    assert result["excluded_degenerate"] == 3
+    assert [pin_pixel(grid, p) for p in result["pins"]] == [(5, 5), (18, 18), (10, 10)]
+    # Percentile is over the FULL cohort: 1.0 and 0.9999995 are above the
+    # top pin, -1.0 is below every pin.
+    assert [p["percentile"] for p in result["pins"]] == [50.0, 2 / 6 * 100.0, 1 / 6 * 100.0]
+    assert result["reason"] == "only 3 separable measured cells"
+
+
+def test_a_degenerate_cell_never_suppresses_a_real_neighbour():
+    grid = synthetic_grid()
+    field = np.full((ROWS, COLS), -0.05)
+    field[5, 5], field[5, 6] = 1.0, 0.12  # ~1 km apart, inside the 3 km radius
+    pins = rank(build_cells(grid, field), grid, n=3, sep=3000)["pins"]
+    assert pin_pixel(grid, pins[0]) == (5, 6)
+    assert all(p["metric_value"] < 1.0 for p in pins)
+
+
+def test_an_all_degenerate_cohort_says_so():
+    grid = synthetic_grid()
+    result = rank(build_cells(grid, np.ones((ROWS, COLS))), grid, n=5, sep=3000)
+    assert result["pins"] == [] and result["cohort_size"] == ROWS * COLS
+    assert result["excluded_degenerate"] == ROWS * COLS
+    assert result["reason"] == (f"no measured cells eligible for pins ({ROWS * COLS} excluded: "
+                                "NDCI exactly +/-1, a zero band)")
 
 
 # --------------------------------------------------------------------------
@@ -502,7 +545,8 @@ def test_no_source_line_assigns_a_tier_other_than_none():
     assert assignment.search('pin["risk_tier"] = "watch"')
     assert assignment.search("risk_tier=level")
     assert not assignment.search('"risk_tier": None,')
-    for relative in ("src/raster_scan/highlights.py", "src/routers/raster_scan.py"):
+    for relative in ("src/raster_scan/highlights.py", "src/routers/raster_scan.py",
+                     "src/raster_scan/cell_anomaly.py", "src/schemas.py"):
         source = (backend / relative).read_text()
         offenders = [line for line in source.splitlines() if assignment.search(line)]
         assert not offenders, f"{relative} sets risk_tier: {offenders}"
@@ -524,3 +568,296 @@ def test_the_module_docstring_states_source_and_limits():
     for phrase in ("Data source", "no GEE", "not a risk level", "not an anomaly",
                    "sediment", "shallow bottom", "glint", "cloud edges"):
         assert phrase in doc, phrase
+
+
+# --------------------------------------------------------------------------
+# Anomaly mode (Level B TEST cell baseline; baseline spec §6)
+#
+# The same cohort, NMS and edge rule as above; the order is robust z
+# against each cell's OWN seasonal baseline, and only cells meeting the
+# condition (assessable, z >= 2) can be pins. Fixture artefacts and the
+# lattice-aligned synthetic raster come from test_raster_pixel_anomaly.
+# --------------------------------------------------------------------------
+
+from src import baseline_store  # noqa: E402
+from tests import test_raster_pixel_anomaly as afx  # noqa: E402
+
+ANOMALY_PIN_FIELDS = PIN_FIELDS | {"robust_z", "median_ndci", "mad", "n_dates", "anomaly_level"}
+COUNT_KEYS = ["measured", "assessable", "no_baseline", "insufficient_dates", "zero_mad",
+              "not_after_history", "too_old", "invalid", "watch", "high", "flagged_share"]
+A_ROWS, A_COLS = afx.ROWS, afx.COLS
+
+
+@pytest.fixture()
+def anomaly_root(tmp_path, monkeypatch):
+    root = tmp_path / "baselines"
+    afx.isolate_baselines(root, monkeypatch)
+    yield root
+    baseline_store.clear_cell_cache()
+
+
+def rank_anomalies(cells, *, n=5, sep=1000, date_used=afx.DATE_USED, polygon=None):
+    grid = afx.lattice_grid()
+    return highlights.rank_anomaly_cells(
+        cells, grid=grid, context=afx.context_for(date_used), n=n, min_separation_m=sep,
+        polygon=polygon if polygon is not None else afx.whole_grid_polygon(grid),
+    )
+
+
+def a_pixel(pin):
+    return afx.lattice_grid().locate(pin["pixel_centre_lat"], pin["pixel_centre_lng"])
+
+
+def test_anomaly_pins_rank_by_robust_z_against_each_cells_own_baseline(anomaly_root):
+    stats = {(5, 5): (0.08, 0.02, 40),     # NDCI 0.12 here is only z = 1.35
+             (20, 20): (0.02, 0.01, 40), (20, 5): (0.02, 0.01, 40), (5, 20): (0.02, 0.01, 40)}
+    afx.write_cell_artefact(anomaly_root, afx.baseline_stats(overrides=stats))
+    field = np.full((A_ROWS, A_COLS), 0.02)
+    peaks = {(5, 5): 0.12, (20, 20): 0.07, (20, 5): 0.065, (5, 20): 0.06}
+    for rc, v in peaks.items():
+        field[rc] = v
+    result = rank_anomalies(afx.raster_cells(afx.lattice_grid(), field))
+
+    pins = result["pins"]
+    assert [a_pixel(p) for p in pins] == [(20, 20), (20, 5), (5, 20)]
+    assert (5, 5) not in [a_pixel(p) for p in pins], "highest NDCI, but not anomalous for itself"
+    assert [p["rank"] for p in pins] == [1, 2, 3]
+    assert [p["anomaly_level"] for p in pins] == ["high", "high", "watch"]
+    for pin in pins:
+        median, mad, n_dates = stats[a_pixel(pin)]
+        assert pin["robust_z"] == afx.expected_z(peaks[a_pixel(pin)], median, mad)
+        assert pin["metric_value"] == pin["robust_z"]
+        assert (pin["median_ndci"], pin["mad"], pin["n_dates"]) == (f32(median), f32(mad), n_dates)
+        assert pin["risk_tier"] is None
+    assert pins[0]["robust_z"] == pytest.approx(0.05 / (1.4826 * 0.01), rel=1e-6)
+    assert result["cohort_size"] == A_ROWS * A_COLS == result["counts"]["measured"]
+    assert result["counts"]["watch"] == 1 and result["counts"]["high"] == 2
+    assert result["reason"] == "only 3 separable cells meet the condition (900 assessable of 900 measured)"
+
+
+def test_every_anomaly_pin_carries_the_ndci_fields_plus_the_anomaly_fields(anomaly_root):
+    afx.write_cell_artefact(anomaly_root, afx.baseline_stats())
+    field = np.full((A_ROWS, A_COLS), 0.02)
+    field[7, 7] = 0.09
+    pin = rank_anomalies(afx.raster_cells(afx.lattice_grid(), field))["pins"][0]
+    assert set(pin) == ANOMALY_PIN_FIELDS
+    assert set(pin["index_values"]) == set(INDEX_BANDS)
+    assert pin["index_values"]["ndci"] == f32(0.09)
+    assert pin["date_ms"] == afx.NEW_MS and pin["acquired_date"] == "2026-09-04"
+    assert pin["cell_lat"] != pin["pixel_centre_lat"]
+
+
+@pytest.mark.parametrize("z, pinned, level", [(2.0, True, "watch"), (3.0, True, "high")])
+def test_anomaly_boundary_z_exactly_on_the_threshold_pins(anomaly_root, z, pinned, level):
+    ndci, median, mad = afx.exact_z_case(z)
+    afx.write_cell_artefact(anomaly_root, afx.baseline_stats(overrides={(3, 3): (median, mad, 40)}))
+    field = np.full((A_ROWS, A_COLS), 0.02)
+    field[3, 3] = ndci
+    pins = rank_anomalies(afx.raster_cells(afx.lattice_grid(), field))["pins"]
+    assert [a_pixel(p) for p in pins] == [(3, 3)]
+    assert pins[0]["robust_z"] == z and pins[0]["anomaly_level"] == level
+
+
+def test_anomaly_z_just_under_two_is_not_a_pin(anomaly_root):
+    afx.write_cell_artefact(anomaly_root, afx.baseline_stats())
+    field = np.full((A_ROWS, A_COLS), 0.02)
+    field[3, 3] = 0.02 + 1.999 * 1.4826 * 0.01  # z ~ 1.999
+    result = rank_anomalies(afx.raster_cells(afx.lattice_grid(), field))
+    assert result["pins"] == []
+    assert result["counts"]["watch"] == result["counts"]["high"] == 0
+    assert result["reason"] == "no cells meet the condition (900 assessable of 900 measured)"
+
+
+def test_a_negative_anomaly_never_pins_however_large(anomaly_root):
+    afx.write_cell_artefact(anomaly_root, afx.baseline_stats())
+    field = np.full((A_ROWS, A_COLS), 0.02)
+    field[4, 4] = -0.5  # z ~ -35
+    result = rank_anomalies(afx.raster_cells(afx.lattice_grid(), field))
+    assert result["pins"] == []
+    assert result["counts"]["assessable"] == A_ROWS * A_COLS
+
+
+def test_anomaly_ties_break_by_ndci_then_row_then_column(anomaly_root):
+    # Dyadic values: z of (0.125, mad 2m) equals z of (0.0625, mad m) exactly.
+    m = 0.0078125
+    stats = {(2, 2): (0.0, m, 40), (2, 20): (0.0, 2 * m, 40),
+             (20, 2): (0.0, m, 40), (12, 12): (0.0, m, 40)}
+    afx.write_cell_artefact(anomaly_root, afx.baseline_stats(overrides=stats))
+    field = np.full((A_ROWS, A_COLS), 0.0)
+    field[2, 2], field[2, 20], field[20, 2], field[12, 12] = 0.0625, 0.125, 0.0625, 0.0625
+    cells = afx.raster_cells(afx.lattice_grid(), field)
+    expected = [(2, 20), (2, 2), (12, 12), (20, 2)]
+    pins = rank_anomalies(cells, n=4)["pins"]
+    assert len({p["robust_z"] for p in pins}) == 1, "a genuine four-way tie in z"
+    assert [a_pixel(p) for p in pins] == expected
+    rng = np.random.default_rng(3)
+    for _ in range(3):
+        order = rng.permutation(cells["lat"].size)
+        shuffled = {k: v[order] for k, v in cells.items()}
+        assert [a_pixel(p) for p in rank_anomalies(shuffled, n=4)["pins"]] == expected
+
+
+def test_anomaly_nms_uses_the_same_great_circle_separation(anomaly_root):
+    afx.write_cell_artefact(anomaly_root, afx.baseline_stats())
+    field = np.full((A_ROWS, A_COLS), 0.02)
+    field[10, 10] = 0.12   # highest z
+    field[10, 11] = 0.11   # 1 px east (~195 m): suppressed
+    field[10, 15] = 0.10   # 5 px east (~973 m): suppressed at 1000 m
+    field[10, 16] = 0.09   # 6 px east (~1168 m): kept
+    pins = rank_anomalies(afx.raster_cells(afx.lattice_grid(), field), n=5, sep=1000)["pins"]
+    assert [a_pixel(p) for p in pins] == [(10, 10), (10, 16)]
+    gap = haversine_m_reference(pins[0]["cell_lat"], pins[0]["cell_lng"],
+                                pins[1]["cell_lat"], pins[1]["cell_lng"])
+    assert gap >= 1000
+
+
+def test_anomaly_ranking_matches_a_brute_force_reference(anomaly_root):
+    afx.write_cell_artefact(anomaly_root, afx.baseline_stats())
+    grid = afx.lattice_grid()
+    rng = np.random.default_rng(21)
+    field = np.round(rng.uniform(0.0, 0.09, size=(A_ROWS, A_COLS)), 3)
+    cells = afx.raster_cells(grid, field)
+    pins = rank_anomalies(cells, n=10, sep=1500)["pins"]
+
+    centre_lats, centre_lngs = grid.pixel_centres()
+    candidates = []
+    for r in range(A_ROWS):
+        for c in range(A_COLS):
+            z = afx.expected_z(field[r, c], 0.02, 0.01)
+            if z >= 2.0:
+                candidates.append((-z, -f32(field[r, c]), r, c))
+    kept = []
+    for _z, _v, r, c in sorted(candidates):
+        lat, lng = centre_lats[r] + 0.1 * afx.D, centre_lngs[c] + 0.1 * afx.D
+        if all(haversine_m_reference(lat, lng, klat, klng) >= 1500 for _, _, klat, klng in kept):
+            kept.append((r, c, lat, lng))
+        if len(kept) == 10:
+            break
+    assert [a_pixel(p) for p in pins] == [(r, c) for r, c, _, _ in kept]
+
+
+def test_anomaly_percentile_is_over_the_assessable_cells(anomaly_root):
+    afx.write_cell_artefact(anomaly_root, afx.baseline_stats(missing=[(0, 0)]))
+    field = np.full((A_ROWS, A_COLS), 0.02)
+    field[5, 5], field[15, 15] = 0.09, 0.07
+    field[0, 0] = 0.5  # no baseline: measured, not assessable, never in the percentile
+    result = rank_anomalies(afx.raster_cells(afx.lattice_grid(), field))
+    assessable = result["counts"]["assessable"]
+    assert assessable == A_ROWS * A_COLS - 1
+    assert [p["percentile"] for p in result["pins"]] == [
+        (assessable - 1) / assessable * 100.0, (assessable - 2) / assessable * 100.0]
+
+
+def test_anomaly_counts_partition_the_cohort_with_the_specified_keys(anomaly_root):
+    overrides = {(0, c): (0.02, 0.01, afx.FLOOR - 1) for c in range(3)}
+    overrides.update({(1, c): (0.02, 0.0, 50) for c in range(4)})
+    afx.write_cell_artefact(anomaly_root, afx.baseline_stats(overrides=overrides,
+                                                             missing=[(2, 0), (2, 1)]))
+    field = np.full((A_ROWS, A_COLS), 0.02)
+    field[3, 0] = -1.5
+    field[25, 25] = 0.09
+    # On history_end (14 days before date_used, so not too old): leakage
+    # guard. Sixteen days before date_used: too old (checked first).
+    dates = {(4, 0): afx.ms_on(afx.HISTORY_END), (4, 1): afx.ms_on(afx.HISTORY_END, 10, 0),
+             (5, 0): afx.ms_on("2026-08-29")}
+    result = rank_anomalies(afx.raster_cells(afx.lattice_grid(), field, dates=dates,
+                                             masked=[(6, 6)]))
+    counts = result["counts"]
+    assert list(counts) == COUNT_KEYS
+    assert counts == {
+        "measured": 899, "assessable": 899 - 3 - 4 - 2 - 1 - 2 - 1,
+        "no_baseline": 2, "insufficient_dates": 3, "zero_mad": 4,
+        "not_after_history": 2, "too_old": 1, "invalid": 1, "watch": 0, "high": 1,
+        "flagged_share": 1 / 886,
+    }
+    reasons = sum(counts[k] for k in COUNT_KEYS[2:8])
+    assert counts["assessable"] + reasons == counts["measured"] == result["cohort_size"]
+
+
+def test_empty_anomaly_pins_say_whether_anything_was_assessable(anomaly_root):
+    afx.write_cell_artefact(anomaly_root, afx.baseline_stats())
+    grid = afx.lattice_grid()
+    on_history = {(r, c): afx.ms_on(afx.HISTORY_END) for r in range(A_ROWS) for c in range(A_COLS)}
+    stale = rank_anomalies(afx.raster_cells(grid, np.full((A_ROWS, A_COLS), 0.2), dates=on_history))
+    assert stale["pins"] == []
+    assert stale["counts"]["assessable"] == 0
+    assert stale["reason"] == ("no measured cells are assessable against the TEST cell baseline "
+                               "(0 assessable of 900 measured)")
+    assert stale["counts"]["flagged_share"] is None
+
+    calm = rank_anomalies(afx.raster_cells(grid, np.full((A_ROWS, A_COLS), 0.02)))
+    assert calm["pins"] == []
+    assert calm["reason"] == "no cells meet the condition (900 assessable of 900 measured)"
+    assert calm["counts"]["flagged_share"] == 0.0
+    assert stale["reason"] != calm["reason"]
+
+    everything = [(r, c) for r in range(A_ROWS) for c in range(A_COLS)]
+    empty = rank_anomalies(afx.raster_cells(grid, np.zeros((A_ROWS, A_COLS)), masked=everything))
+    assert empty["pins"] == [] and empty["reason"] == "no measured cells"
+    assert empty["cohort_size"] == 0 and empty["counts"]["measured"] == 0
+
+
+def test_anomaly_cohort_is_the_painted_cells_only(anomaly_root):
+    """A masked export or a cell outside the polygon never ranks, however
+    anomalous its stored value would be."""
+    afx.write_cell_artefact(anomaly_root, afx.baseline_stats())
+    grid = afx.lattice_grid()
+    polygon = ((grid.south, grid.west), (grid.north, grid.west),
+               (grid.north, grid.west + 15 * afx.D), (grid.south, grid.west + 15 * afx.D))
+    field = np.full((A_ROWS, A_COLS), 0.02)
+    field[5, 20] = 0.3   # outside the polygon
+    field[8, 8] = 0.07
+    result = rank_anomalies(afx.raster_cells(grid, field, masked=[(9, 9)]), polygon=polygon)
+    assert [a_pixel(p) for p in result["pins"]] == [(8, 8)]
+    assert result["counts"]["measured"] == A_ROWS * 15 - 1
+
+
+def test_degenerate_cells_are_never_anomaly_pins(anomaly_root):
+    afx.write_cell_artefact(anomaly_root, afx.baseline_stats())
+    field = np.full((A_ROWS, A_COLS), 0.02)
+    field[3, 3], field[3, 20], field[8, 8] = 1.0, 0.9999995, 0.08
+    result = rank_anomalies(afx.raster_cells(afx.lattice_grid(), field))
+    assert [a_pixel(p) for p in result["pins"]] == [(8, 8)]
+    assert result["counts"]["invalid"] == 2
+    assert result["excluded_degenerate"] == 2
+    assert result["counts"]["measured"] == result["cohort_size"] == A_ROWS * A_COLS
+
+
+def test_anomaly_pins_keep_the_edge_of_no_data_rule(anomaly_root):
+    afx.write_cell_artefact(anomaly_root, afx.baseline_stats())
+    field = np.full((A_ROWS, A_COLS), 0.02)
+    field[10, 11] = 0.09  # east of a hole
+    field[20, 20] = 0.08  # interior
+    pins = {a_pixel(p): p for p in rank_anomalies(
+        afx.raster_cells(afx.lattice_grid(), field, absent=[(10, 10)]))["pins"]}
+    assert pins[(10, 11)]["edge_of_no_data"] is True
+    assert pins[(20, 20)]["edge_of_no_data"] is False
+
+
+def test_anomaly_pins_and_ndci_pins_share_the_click_answer(anomaly_root):
+    """An anomaly pin's cell is the cell a click on its square reports."""
+    afx.write_cell_artefact(anomaly_root, afx.baseline_stats())
+    grid = afx.lattice_grid()
+    polygon = afx.whole_grid_polygon(grid)
+    rng = np.random.default_rng(13)
+    field = rng.uniform(0.0, 0.09, size=(A_ROWS, A_COLS))
+    cells = afx.raster_cells(grid, field, absent=[(3, 3)])
+    for pin in rank_anomalies(cells, n=10)["pins"]:
+        found = pixel.inspect_cell(cells, pin["cell_lat"], pin["cell_lng"], grid, polygon)
+        assert found["index_values"] == pin["index_values"]
+        assert found["date_ms"] == pin["date_ms"]
+        assert (found["pixel_centre_lat"], found["pixel_centre_lng"]) == (
+            pin["pixel_centre_lat"], pin["pixel_centre_lng"])
+
+
+def test_ndci_ranking_is_unchanged_when_a_cell_baseline_is_active(anomaly_root):
+    """Mode ndci never looks at the baseline: same pins, same keys."""
+    grid = synthetic_grid()
+    field = np.full((ROWS, COLS), 0.02)
+    field[5, 5] = 0.08
+    before = rank(build_cells(grid, field), grid, n=3)
+    afx.write_cell_artefact(anomaly_root, afx.baseline_stats())
+    after = rank(build_cells(grid, field), grid, n=3)
+    assert before == after
+    assert set(after["pins"][0]) == PIN_FIELDS
+    assert set(after) == {"cohort_size", "pins", "reason", "excluded_degenerate"}

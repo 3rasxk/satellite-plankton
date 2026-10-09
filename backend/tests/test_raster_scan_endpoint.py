@@ -895,13 +895,16 @@ def test_highlights_404_when_the_overlay_survives_but_its_cells_do_not(client, t
     assert "no stored cells" in highlight.json()["detail"]
 
 
-def test_anomaly_mode_is_501_until_the_level_b_baseline_exists(client, tmp_path):
+def test_anomaly_mode_with_the_mode_off_is_409_mode_off(client, tmp_path):
     _clear()
     with SessionLocal() as db:
         _rendered_cells(db, tmp_path, _four_cells())
     response = client.get("/raster-scan/highlights", params={"mode": "anomaly"})
-    assert response.status_code == 501
-    assert response.json()["detail"] == "anomaly mode requires the Level B baseline"
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["reason"] == "mode_off"
+    assert detail["cause"] is None
+    assert "mode=ndci" in detail["message"]
 
 
 @pytest.mark.parametrize("params", [
@@ -944,3 +947,274 @@ def test_highlight_pin_schema_refuses_a_tier():
     assert RasterHighlightPin(**fields).risk_tier is None
     with pytest.raises(ValidationError):
         RasterHighlightPin(**fields, risk_tier="watch")
+
+
+# --------------------------------------------------------------------------
+# GET /raster-scan/highlights?mode=anomaly (baseline spec §6, Level B):
+# pins where a measured cell's NDCI is at least 2 robust z above that
+# cell's own TEST seasonal baseline. Fixture artefact and lattice-aligned
+# cells from test_raster_pixel_anomaly (the real builder helpers, tmp_path).
+# --------------------------------------------------------------------------
+
+from src import baseline_store, scientific_status  # noqa: E402
+from src.schemas import (  # noqa: E402
+    DISCLAIMER_TEXT, DISCLAIMER_TEXT_TEST_BASELINE, RasterAnomalyHighlightsResponse,
+)
+from tests import test_raster_pixel_anomaly as afx  # noqa: E402
+
+_ANOMALY_RANKING = ("descending robust z against this location's own TEST seasonal baseline; "
+                    "not a risk level")
+# Every key of the ndci-mode response and pin before anomaly mode existed,
+# plus `excluded_degenerate` (fix round 1, 2026-10-09: added deliberately --
+# degenerate NDCI cells are counted but never pinned).
+_NDCI_RESPONSE_KEYS = {"run_id", "mode", "metric", "ranking", "n_requested", "min_separation_m",
+                       "cohort_size", "pins", "reason", "baseline", "disclaimer",
+                       "excluded_degenerate"}
+_NDCI_PIN_KEYS = {"rank", "cell_lat", "cell_lng", "pixel_centre_lat", "pixel_centre_lng",
+                  "index_values", "percentile", "metric_value", "date_ms", "acquired_date",
+                  "acquired_at", "edge_of_no_data", "risk_tier"}
+_COUNT_KEYS = ["measured", "assessable", "no_baseline", "insufficient_dates", "zero_mad",
+               "not_after_history", "too_old", "invalid", "watch", "high", "flagged_share"]
+_STATUS_KEYS = {"mode", "valid", "kind", "version", "built_at", "history_start", "history_end",
+                "season_rule", "min_independent_dates", "median_independent_dates",
+                "min_season_dates_by_location", "preprocessing_signature", "base_rates", "reason"}
+_PEAKS = {(1, 1): 0.11, (1, 10): 0.07, (9, 2): 0.055, (10, 10): 0.09}
+
+
+@pytest.fixture()
+def cell_root(tmp_path, monkeypatch):
+    root = tmp_path / "baselines"
+    afx.isolate_baselines(root, monkeypatch)
+    yield root
+    baseline_store.clear_cell_cache()
+
+
+def _anomaly_run(tmp_path, cell_root, *, peaks=None, stats=None, dates=None):
+    afx.write_cell_artefact(cell_root, stats if stats is not None else afx.endpoint_stats())
+    afx.clear_runs()
+    return afx.store_run(tmp_path, afx.endpoint_cells(_PEAKS if peaks is None else peaks,
+                                                      dates=dates))
+
+
+def test_default_mode_is_ndci_with_the_mode_off_and_byte_identical(client, tmp_path, monkeypatch):
+    afx.isolate_baselines(tmp_path / "baselines", monkeypatch, mode="off")
+    _clear()
+    with SessionLocal() as db:
+        _rendered_cells(db, tmp_path, _four_cells())
+    default = client.get("/raster-scan/highlights", params={"n": 3})
+    explicit = client.get("/raster-scan/highlights", params={"n": 3, "mode": "ndci"})
+    assert default.status_code == explicit.status_code == 200
+    assert default.content == explicit.content
+    body = default.json()
+    assert set(body) == _NDCI_RESPONSE_KEYS
+    assert all(set(pin) == _NDCI_PIN_KEYS for pin in body["pins"])
+    assert body["mode"] == "ndci" and body["ranking"] == _RANKING and body["baseline"] is None
+    assert body["disclaimer"] == DISCLAIMER_TEXT
+
+
+def test_ndci_mode_counts_but_never_pins_a_degenerate_reading(client, tmp_path):
+    _clear()
+    cells = _four_cells()
+    extra = {"lat": np.array([13.05]), "lng": np.array([100.45]),
+             "ndci": np.array([1.0], dtype=np.float32),
+             "bda2": np.array([2.0], dtype=np.float32), "bda3": np.array([0.3], dtype=np.float32),
+             "b2_b3": np.array([0.8], dtype=np.float32),
+             bridge.RASTER_DATE_BAND: np.array([1788492600000], dtype=np.int64)}
+    merged = {k: np.concatenate([cells[k], extra[k]]) for k in cells}
+    with SessionLocal() as db:
+        _rendered_cells(db, tmp_path, merged)
+    body = client.get("/raster-scan/highlights", params={"n": 3}).json()
+    assert body["mode"] == "ndci" and set(body) == _NDCI_RESPONSE_KEYS
+    assert body["cohort_size"] == 5 and body["excluded_degenerate"] == 1
+    assert [p["metric_value"] for p in body["pins"]] == [0.125, float(np.float32(0.09)),
+                                                         float(np.float32(0.07))]
+    assert body["pins"][0]["percentile"] == 60.0  # 3 of 5 below; the 1.0 cell is above
+
+
+def test_default_mode_is_anomaly_when_the_cell_baseline_is_usable(client, tmp_path, cell_root):
+    _anomaly_run(tmp_path, cell_root)
+    body = client.get("/raster-scan/highlights").json()
+    assert body["mode"] == "anomaly"
+    assert body["metric"] == "robust_z"
+    assert body["ranking"] == _ANOMALY_RANKING
+
+
+def test_default_mode_falls_back_to_ndci_without_a_level_b_baseline(client, tmp_path, cell_root):
+    afx.clear_runs()
+    afx.store_run(tmp_path, afx.endpoint_cells(_PEAKS))
+    body = client.get("/raster-scan/highlights").json()  # test mode, no artefact at all
+    assert body["mode"] == "ndci" and set(body) == _NDCI_RESPONSE_KEYS
+    assert body["disclaimer"] == DISCLAIMER_TEXT and body["baseline"] is None
+
+
+def test_explicit_ndci_in_test_mode_keeps_the_standard_disclaimer(client, tmp_path, cell_root):
+    _anomaly_run(tmp_path, cell_root)
+    body = client.get("/raster-scan/highlights", params={"mode": "ndci"}).json()
+    assert body["mode"] == "ndci" and set(body) == _NDCI_RESPONSE_KEYS
+    assert body["disclaimer"] == DISCLAIMER_TEXT
+    assert body["baseline"] is None
+    assert all(set(pin) == _NDCI_PIN_KEYS for pin in body["pins"])
+
+
+def test_anomaly_response_carries_counts_baseline_and_the_test_disclaimer(client, tmp_path,
+                                                                        cell_root):
+    run_id = _anomaly_run(tmp_path, cell_root)
+    response = client.get("/raster-scan/highlights",
+                          params={"mode": "anomaly", "min_separation_m": 1000})
+    assert response.status_code == 200
+    body = response.json()
+    RasterAnomalyHighlightsResponse.model_validate(body)
+    assert set(body) == _NDCI_RESPONSE_KEYS | {"counts"}
+    assert body["run_id"] == run_id and body["mode"] == "anomaly"
+    assert body["disclaimer"] == DISCLAIMER_TEXT_TEST_BASELINE
+
+    counts = body["counts"]
+    assert list(counts) == _COUNT_KEYS
+    measured = afx.EP_ROWS * afx.EP_COLS
+    assert counts["measured"] == body["cohort_size"] == measured
+    assert counts["assessable"] + sum(counts[k] for k in _COUNT_KEYS[2:8]) == measured
+    assert counts["high"] == 3 and counts["watch"] == 1
+    assert counts["flagged_share"] == 4 / measured
+    assert body["excluded_degenerate"] == 0
+
+    pins = body["pins"]
+    assert [p["anomaly_level"] for p in pins] == ["high", "high", "high", "watch"]
+    assert [p["robust_z"] for p in pins] == sorted((p["robust_z"] for p in pins), reverse=True)
+    assert pins[0]["robust_z"] == afx.expected_z(0.11, 0.02, 0.01)
+    assert all(p["risk_tier"] is None for p in pins)
+    assert body["reason"] == (f"only 4 separable cells meet the condition "
+                              f"({measured} assessable of {measured} measured)")
+
+    baseline = body["baseline"]
+    assert set(baseline) == _STATUS_KEYS | {"level_b"}
+    assert baseline["mode"] == "test" and baseline["valid"] is True
+    status = scientific_status.baseline_status()
+    assert {k: baseline[k] for k in status} == status
+    level_b = baseline["level_b"]
+    assert level_b["season_key"] == "m09+-1"
+    assert level_b["months"] == [8, 9, 10]
+    assert level_b["history_end"] == afx.HISTORY_END
+    assert level_b["min_independent_dates"] == afx.FLOOR
+    assert level_b["scale_m"] == afx.SCALE_M
+    assert level_b["cells"] == measured
+    assert level_b["max_observation_age_days"] == 14
+    assert level_b["cell_preprocessing_signature"] == baseline_store.live_cell_signature()
+
+
+def test_anomaly_response_says_risk_only_to_deny_it(client, tmp_path, cell_root):
+    _anomaly_run(tmp_path, cell_root)
+    body = client.get("/raster-scan/highlights", params={"mode": "anomaly"}).json()
+    # The ranking and the TEST disclaimer use the word only to say "not a risk level".
+    assert "not a risk level" in body["ranking"]
+    assert "not a bloom detection, a species identification, a risk level" in body["disclaimer"]
+    rest = {k: v for k, v in body.items() if k not in ("ranking", "disclaimer")}
+    assert "risk" not in str(rest).replace("risk_tier", "").lower()
+    for forbidden in ("risk_level", "anomaly_z", "spatial_anomaly_z", "threshold_tier"):
+        assert forbidden not in body
+
+
+def test_anomaly_mode_409_names_a_missing_cell_baseline(client, tmp_path, cell_root):
+    afx.clear_runs()
+    afx.store_run(tmp_path, afx.endpoint_cells(_PEAKS))
+    response = client.get("/raster-scan/highlights", params={"mode": "anomaly"})
+    assert response.status_code == 409
+    assert response.json()["detail"]["reason"] == "no_cell_baseline"
+    assert response.json()["detail"]["cause"] == "no_artifact"
+    assert response.json()["detail"]["season_key"] == "m09+-1"
+
+
+def test_anomaly_mode_409_names_an_invalid_cell_baseline(client, tmp_path, cell_root,
+                                                        monkeypatch):
+    _anomaly_run(tmp_path, cell_root)
+    monkeypatch.setattr(config, "RASTER_SCAN_SCALE_M", 100)
+    response = client.get("/raster-scan/highlights", params={"mode": "anomaly"})
+    assert response.status_code == 409
+    assert response.json()["detail"]["reason"] == "invalid:cell_signature_mismatch"
+    # ... and the default falls back to the NDCI ranking, never a 500.
+    assert client.get("/raster-scan/highlights").json()["mode"] == "ndci"
+
+
+def test_anomaly_mode_409_for_an_unreadable_season_file(client, tmp_path, cell_root):
+    manifest = afx.write_cell_artefact(cell_root, afx.endpoint_stats())
+    afx.clear_runs()
+    afx.store_run(tmp_path, afx.endpoint_cells(_PEAKS))
+    (cell_root / manifest["baseline_version"] / "cells_m09.npz").write_bytes(b"garbage")
+    response = client.get("/raster-scan/highlights", params={"mode": "anomaly"})
+    assert response.status_code == 409
+    assert response.json()["detail"] == {
+        "reason": "no_cell_baseline", "cause": "unreadable", "season_key": "m09+-1",
+        "message": response.json()["detail"]["message"],
+    }
+
+
+def test_anomaly_mode_with_the_mode_off_is_409_even_without_a_run(client, tmp_path, monkeypatch):
+    """No run could make anomaly mode available while the mode is off, so
+    that answer comes first (and no baseline file is read)."""
+    afx.isolate_baselines(tmp_path / "baselines", monkeypatch, mode="off")
+    _clear()
+    response = client.get("/raster-scan/highlights", params={"mode": "anomaly"})
+    assert response.status_code == 409
+    assert response.json()["detail"]["reason"] == "mode_off"
+    assert client.get("/raster-scan/highlights").status_code == 404
+
+
+def test_anomaly_mode_404_when_there_is_no_run_in_test_mode(client, cell_root):
+    afx.clear_runs()
+    response = client.get("/raster-scan/highlights", params={"mode": "anomaly"})
+    assert response.status_code == 404
+    assert response.json()["detail"] == _PIXEL_404
+
+
+def test_anomaly_mode_says_nothing_was_assessable_when_every_cell_predates_history(
+        client, tmp_path, cell_root):
+    measured = afx.EP_ROWS * afx.EP_COLS
+    old = {(r, c): afx.ms_on(afx.HISTORY_END) for r in range(afx.EP_ROWS) for c in range(afx.EP_COLS)}
+    _anomaly_run(tmp_path, cell_root, dates=old)
+    body = client.get("/raster-scan/highlights", params={"mode": "anomaly"}).json()
+    assert body["pins"] == []
+    assert body["counts"]["not_after_history"] == measured
+    assert body["reason"] == ("no measured cells are assessable against the TEST cell baseline "
+                              f"(0 assessable of {measured} measured)")
+
+
+def test_one_baseline_resolution_per_request(client, tmp_path, cell_root, monkeypatch):
+    run_id = _anomaly_run(tmp_path, cell_root)
+    calls = {"status": 0, "cells": 0}
+    real_status = scientific_status.baseline_status
+    real_cells = baseline_store.cell_baseline_or_reason
+
+    def counting_status():
+        calls["status"] += 1
+        return real_status()
+
+    def counting_cells(season):
+        calls["cells"] += 1
+        return real_cells(season)
+
+    monkeypatch.setattr(scientific_status, "baseline_status", counting_status)
+    monkeypatch.setattr(baseline_store, "cell_baseline_or_reason", counting_cells)
+    client.get("/raster-scan/highlights")
+    assert calls == {"status": 1, "cells": 1}
+    lat, lng = afx.lattice_centre((afx.EP_ROW0 - 1, afx.EP_COL0 + 1))
+    client.get("/raster-scan/pixel", params={"lat": lat, "lng": lng, "run_id": run_id})
+    assert calls == {"status": 2, "cells": 2}
+    client.get("/raster-scan/highlights", params={"mode": "ndci"})
+    assert calls == {"status": 2, "cells": 2}, "mode=ndci never consults the baseline"
+
+
+def test_anomaly_schema_refuses_a_tier_and_a_negative_level():
+    from pydantic import ValidationError
+    from src.schemas import RasterAnomalyPin
+
+    fields = {
+        "rank": 1, "cell_lat": 13.0, "cell_lng": 100.0, "pixel_centre_lat": 13.0,
+        "pixel_centre_lng": 100.0, "index_values": {"ndci": 0.1}, "percentile": 50.0,
+        "date_ms": 1788492600000, "acquired_date": "2026-09-04",
+        "acquired_at": "2026-09-04T03:30:00Z", "edge_of_no_data": False, "metric_value": 2.5,
+        "robust_z": 2.5, "median_ndci": 0.02, "mad": 0.01, "n_dates": 40, "anomaly_level": "watch",
+    }
+    assert RasterAnomalyPin(**fields).risk_tier is None
+    with pytest.raises(ValidationError):
+        RasterAnomalyPin(**fields, risk_tier="watch")
+    with pytest.raises(ValidationError):
+        RasterAnomalyPin(**{**fields, "anomaly_level": "normal"})

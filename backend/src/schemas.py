@@ -25,17 +25,20 @@ DISCLAIMER_TEXT = (
 
 # The variant /risk-map, /summary, /detect and /methods carry instead of DISCLAIMER_TEXT
 # while BASELINE_MODE=test AND a TEST baseline is valid (src/site_anomaly.py
-# disclaimer_for). DISCLAIMER_TEXT's "anomaly detection is not computed" is
-# false then; this says what is computed and what it is not.
+# disclaimer_for); so do /raster-scan/highlights in 'anomaly' mode and
+# /raster-scan/pixel while a Level B cell baseline is in use. DISCLAIMER_TEXT's
+# "anomaly detection is not computed" is false then; this says what is
+# computed (at a monitoring site or a raster cell) and what it is not. The
+# first two sentences are DISCLAIMER_TEXT's own.
 DISCLAIMER_TEXT_TEST_BASELINE = (
     "Satellite index values describe water colour at pixel resolution. "
     "Small or scattered blooms may not be visible. TEST baseline mode: a "
-    "monitoring site's Sentinel-2 NDCI may be compared with that site's own "
-    "earlier record for the same season. Any resulting anomaly is provisional "
-    "and uncalibrated, has never been checked against recorded bloom events, "
-    "and is a statistical statement only — not a bloom detection, a species "
-    "identification, a risk level or a forecast. Index values alone establish "
-    "neither bloom presence nor absence."
+    "Sentinel-2 NDCI reading, at a monitoring site or at a raster cell, may be "
+    "compared with that same location's own earlier record for the same season. "
+    "Any resulting anomaly is provisional and uncalibrated, has never been "
+    "checked against recorded bloom events, and is a statistical statement "
+    "only — not a bloom detection, a species identification, a risk level or a "
+    "forecast. Index values alone establish neither bloom presence nor absence."
 )
 
 class DisclaimerMixin(BaseModel):
@@ -46,7 +49,9 @@ class DisclaimerMixin(BaseModel):
         "index values alone cannot establish bloom presence or absence. /risk-map, "
         "/summary, /detect and /methods carry a TEST-baseline variant instead while "
         "BASELINE_MODE=test and a TEST baseline is valid: it states that any site "
-        "anomaly is provisional, uncalibrated and statistical only.",
+        "anomaly is provisional, uncalibrated and statistical only. So do "
+        "/raster-scan/highlights in 'anomaly' mode and /raster-scan/pixel while a "
+        "Level B cell baseline is in use ('ndci'-mode highlights keep this text).",
     )
 
 
@@ -603,6 +608,35 @@ class RasterScanResponse(DisclaimerMixin):
         "this system has not checked -- never 'no newer scene'.")
 
 
+class RasterPixelAnomaly(BaseModel):
+    """One raster cell against its own TEST seasonal cell baseline.
+
+    Computed by src/raster_scan/cell_anomaly.py with detection's robust z
+    (baseline.assess_cells): z = (ndci - median) / (1.4826 * mad), watch at
+    z >= 2, high at z >= 3 (provisional engineering boundaries). Assessed
+    only when the cell is acquired strictly after the baseline's
+    history_end, at most 14 days before the run's date_used, with a
+    baseline cell of n >= the declared floor and MAD > 0; otherwise
+    `reason` says which rule failed first and z/level are null.
+    """
+
+    robust_z: float | None = Field(description="Robust z; null unless assessed.")
+    median_ndci: float | None = Field(
+        description="The cell's baseline median NDCI for this season window; null when the "
+        "baseline has no cell at this location.")
+    mad: float | None = Field(description="The cell's baseline MAD (unscaled).")
+    n_dates: int | None = Field(
+        description="Independent clear-sky dates behind the cell's baseline statistics.")
+    level: Literal["normal", "watch", "high"] | None = Field(
+        description="Anomaly level against the cell's own history (TEST); null unless "
+        "assessed. 'normal' does not mean safe water.")
+    reason: Literal["invalid", "too_old", "not_after_history", "no_baseline",
+                    "insufficient_dates", "zero_mad"] | None = Field(
+        description="Why the cell was not assessed (first failing rule); null when it was.")
+    baseline_version: str = Field(description="The TEST baseline version used.")
+    season_key: str = Field(description="Season window of the run's date_used, e.g. 'm09+-1'.")
+
+
 class RasterPixelResponse(DisclaimerMixin):
     """One cell of the served raster, looked up by coordinate.
 
@@ -689,6 +723,12 @@ class RasterPixelResponse(DisclaimerMixin):
         "other way round.")
     acquired_at: str | None = Field(
         default=None, description="`date_ms` as a full UTC timestamp.")
+    anomaly: RasterPixelAnomaly | None = Field(
+        default=None, description="This cell's NDCI against the cell's OWN TEST seasonal "
+        "baseline (Level B). Present only with BASELINE_MODE=test, a valid baseline whose "
+        "cell file for the run's season can be used, and state == 'reading'; null "
+        "otherwise. A statistical anomaly, uncalibrated -- not a bloom detection and not "
+        "a risk level. Its numbers equal the anomaly highlight pin for the same cell.")
 
 
 # --------------------------------------------------------------------------
@@ -755,16 +795,19 @@ class RasterHighlightsResponse(DisclaimerMixin):
             "acquired_date": "2026-09-04", "acquired_at": "2026-09-04T03:30:00Z",
             "edge_of_no_data": False, "risk_tier": None,
         }],
-        "reason": None, "baseline": None, "disclaimer": DISCLAIMER_TEXT,
+        "reason": None, "baseline": None, "excluded_degenerate": 0,
+        "disclaimer": DISCLAIMER_TEXT,
     }})
 
     run_id: int = Field(description="The run whose stored cells were ranked.")
     mode: Literal["ndci", "anomaly"] = Field(
-        description="'ndci': rank by NDCI. 'anomaly' is reserved for a per-cell baseline "
-        "that does not exist yet (the endpoint answers 501).")
+        description="'ndci': rank by NDCI (this model). 'anomaly': pins that meet the TEST "
+        "cell-baseline condition (RasterAnomalyHighlightsResponse).")
     metric: str = Field(description="The stored band the pins are ranked by.")
     ranking: Literal["descending value within this run; not a risk level"] = Field(
-        default=HIGHLIGHT_RANKING_TEXT, description="What the order means.")
+        default=HIGHLIGHT_RANKING_TEXT, description="What the order means. Cells whose NDCI "
+        "is exactly ±1 are excluded from pins: a band is zero, which is not a physical "
+        "water-colour value (see `excluded_degenerate`).")
     n_requested: int = Field(description="Pins asked for (3-10).")
     min_separation_m: int = Field(
         description="De-duplication radius: a cell closer than this (great-circle, between "
@@ -778,6 +821,160 @@ class RasterHighlightsResponse(DisclaimerMixin):
     baseline: dict | None = Field(
         default=None, description="Baseline the pins were compared with. Always null in "
         "'ndci' mode: a ranking by value needs none.")
+    excluded_degenerate: int = Field(
+        description="Measured cells excluded from pins because their NDCI is exactly ±1 "
+        "(|ndci| >= 1 - 1e-6): a band is zero, which is not a physical water-colour value "
+        "(mostly mask-edge artefacts). They stay in `cohort_size` and in every percentile "
+        "-- the map paints them -- but are never pinned. In 'anomaly' mode they are also "
+        "counted in `counts.invalid`.")
+
+
+# --------------------------------------------------------------------------
+# /raster-scan/highlights?mode=anomaly (Level B TEST cell baseline)
+# --------------------------------------------------------------------------
+
+ANOMALY_RANKING_TEXT = (
+    "descending robust z against this location's own TEST seasonal baseline; not a risk level"
+)
+
+
+class RasterAnomalyPin(RasterHighlightPin):
+    """A measured cell meeting the TEST anomaly condition: robust z >= 2 against
+    the cell's own seasonal baseline (positive anomalies only).
+
+    The ndci-mode pin fields keep their meaning, except `metric_value` (the
+    robust z) and `percentile` (share of the ASSESSABLE cells with a strictly
+    lower z). A statistical anomaly of one sampled pixel against its own
+    clear-sky record -- uncalibrated, not a bloom detection, not a risk level;
+    sediment, shallow bottom, glint and cloud edges can also raise NDCI.
+    """
+
+    robust_z: float = Field(description="(ndci - median_ndci) / (1.4826 * mad); >= 2.")
+    median_ndci: float = Field(description="The cell's baseline median NDCI (season window).")
+    mad: float = Field(description="The cell's baseline MAD (unscaled), > 0.")
+    n_dates: int = Field(description="Independent clear-sky dates behind the baseline.")
+    anomaly_level: Literal["watch", "high"] = Field(
+        description="'watch' at z >= 2, 'high' at z >= 3 -- provisional engineering "
+        "boundaries against the cell's own history (TEST), not a risk level.")
+
+
+class RasterAnomalyCounts(BaseModel):
+    """How the measured cells of the run were assessed. `assessable` plus the SIX
+    reason counts equals `measured`; each unassessable cell is counted once, in
+    the first rule it fails (invalid, too_old, not_after_history, no_baseline,
+    insufficient_dates, zero_mad). `watch` and `high` count assessable cells."""
+
+    measured: int = Field(description="Cells the overlay paints (the cohort).")
+    assessable: int = Field(description="Cells with a robust z.")
+    no_baseline: int = Field(description="No baseline cell with this cell_key in the season.")
+    insufficient_dates: int = Field(description="Baseline n below the declared floor.")
+    zero_mad: int = Field(description="Baseline MAD == 0.")
+    not_after_history: int = Field(
+        description="Acquired on or before the baseline's history_end (leakage guard).")
+    too_old: int = Field(description="Acquired more than 14 days before date_used.")
+    invalid: int = Field(
+        description="NDCI non-finite, outside [-1, 1] or degenerate (exactly ±1: a zero "
+        "band), or acquired after date_used.")
+    watch: int = Field(description="Assessable cells with 2 <= z < 3.")
+    high: int = Field(description="Assessable cells with z >= 3.")
+    flagged_share: float | None = Field(
+        description="(watch + high) / assessable: the share of assessable measured cells "
+        "at or over the thresholds in THIS scan; null when none is assessable. Level B has "
+        "no historical false-alarm rate (its self-check is not available for cells; the "
+        "Level A site rates are on /methods). A large share means the criterion fires "
+        "often, not that blooms are widespread.")
+
+
+class CellBaselineSummary(BaseModel):
+    """The season of the Level B (per-cell) TEST baseline used, from its manifest."""
+
+    season_key: str
+    months: list[int] = Field(description="Calendar months of the season window.")
+    file: str | None = None
+    scale_m: int = Field(description="Raster scale the baseline cells were read at.")
+    history_start: str | None = None
+    history_end: str = Field(
+        description="Last day the history could contain. Only cells acquired strictly "
+        "later are assessed.")
+    history_end_rule: str | None = None
+    season_rule: str | None = None
+    min_independent_dates: int = Field(description="Declared floor on a cell's n.")
+    max_observation_age_days: int = Field(
+        description="Oldest acquisition (days before date_used) that may be assessed.")
+    cell_preprocessing_signature: str
+    built_at: str | None = None
+    cells: int | None = None
+    cells_n_ge_floor: int | None = None
+    share_n_ge_floor: float | None = None
+    n_median: float | None = None
+    n_min: int | None = None
+    n_max: int | None = None
+    mad_p05: float | None = None
+    mad_p50: float | None = None
+    mad_p95: float | None = None
+    n_dates: int | None = None
+    first_date: str | None = None
+    last_date: str | None = None
+
+
+class RasterAnomalyBaseline(BaselineInfo):
+    """`baseline_status()` (the TEST baseline in force) plus the Level B season used."""
+
+    level_b: CellBaselineSummary
+
+
+class RasterAnomalyHighlightsResponse(RasterHighlightsResponse):
+    """Pins where measured cells of one stored run meet the TEST anomaly condition.
+
+    Only with BASELINE_MODE=test and a usable Level B baseline for the run's
+    season (otherwise `mode=anomaly` answers 409 with the reason). Carries
+    the TEST-baseline disclaimer. Not a risk level and not a bloom detection.
+    """
+
+    model_config = ConfigDict(json_schema_extra={"example": {
+        "run_id": 6, "mode": "anomaly", "metric": "robust_z", "ranking": ANOMALY_RANKING_TEXT,
+        "n_requested": 5, "min_separation_m": 3000, "cohort_size": 187560,
+        "pins": [{
+            "rank": 1, "cell_lat": 13.049944, "cell_lng": 100.620321,
+            "pixel_centre_lat": 13.050137, "pixel_centre_lng": 100.620126,
+            "index_values": {"ndci": 0.112, "bda2": 1.25, "bda3": 0.41, "b2_b3": 0.83},
+            "percentile": 99.99, "metric_value": 3.4, "date_ms": 1791082200000,
+            "acquired_date": "2026-10-04", "acquired_at": "2026-10-04T03:30:00Z",
+            "edge_of_no_data": False, "risk_tier": None, "robust_z": 3.4,
+            "median_ndci": 0.043, "mad": 0.0137, "n_dates": 44, "anomaly_level": "high",
+        }],
+        "counts": {"measured": 187560, "assessable": 180001, "no_baseline": 512,
+                   "insufficient_dates": 1047, "zero_mad": 0, "not_after_history": 0,
+                   "too_old": 6000, "invalid": 0, "watch": 2210, "high": 640,
+                   "flagged_share": 0.01583},
+        "reason": None, "baseline": {"mode": "test", "valid": True, "...": "..."},
+        "excluded_degenerate": 0,
+        "disclaimer": DISCLAIMER_TEXT_TEST_BASELINE,
+    }})
+
+    mode: Literal["anomaly"] = Field(description="'anomaly'.")
+    metric: Literal["robust_z"] = Field(description="Pins are ranked by robust z.")
+    ranking: Literal[
+        "descending robust z against this location's own TEST seasonal baseline; "
+        "not a risk level"
+    ] = Field(default=ANOMALY_RANKING_TEXT, description="What the order means. Cells whose "
+              "NDCI is exactly ±1 are never assessed and never pins: a band is zero, which "
+              "is not a physical water-colour value (counted in `counts.invalid` and "
+              "`excluded_degenerate`).")
+    cohort_size: int = Field(description="Measured cells (the overlay squares carrying a "
+                             "reading); equals counts.measured.")
+    pins: list[RasterAnomalyPin] = Field(
+        description="Highest robust z first (tie: NDCI, then lower row, then lower column), "
+        "de-duplicated; may be fewer than n.")
+    reason: str | None = Field(
+        default=None, description="Why there are fewer pins than requested: 'no measured "
+        "cells', 'no measured cells are assessable against the TEST cell baseline (0 "
+        "assessable of m measured)', 'no cells meet the condition (k assessable of m "
+        "measured)' or 'only j separable cells meet the condition (...)'.")
+    counts: RasterAnomalyCounts
+    baseline: RasterAnomalyBaseline = Field(
+        description="The TEST baseline in force (baseline_status()) and the Level B season "
+        "the cells were compared with.")
 
 
 # --------------------------------------------------------------------------
