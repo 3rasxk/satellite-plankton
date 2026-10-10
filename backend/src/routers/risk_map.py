@@ -58,9 +58,9 @@ async def get_risk_map(db: Session = Depends(get_db)) -> RiskMapResponse:
     # history rows, which this route does not need). It stats and may parse
     # files, so it runs off the event loop.
     status = await run_in_threadpool(baseline_status)
-    # Pydantic's default is the mode-off text; the TEST-baseline variant must
-    # be passed explicitly, from the same status, to the response and to
-    # every feature.
+    # Passed explicitly, from this same status, to the response and to every
+    # feature: DisclaimerMixin's default would give the same text but resolve
+    # the baseline again for each model, and could straddle a rebuild.
     disclaimer = site_anomaly.disclaimer_for(status)
     rows = db.execute(
         select(MonitoredSite, DetectionCache)

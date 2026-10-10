@@ -51,12 +51,17 @@ anywhere. With the mode off (the default) there is no anomaly statistic
 either -- no valid spectral-index baseline exists (CLAUDE.md §0/§1). In
 TEST baseline mode the anomaly fields (highlights `mode=anomaly`, the
 pixel `anomaly` block) are a provisional, uncalibrated comparison of a
-cell with its own record, carried with the TEST-baseline disclaimer and
-never called a risk.
+cell with its own record, never called a risk. While a TEST baseline is
+valid every response here carries the TEST-baseline disclaimer, with or
+without an anomaly in it (the standard text says no anomaly is computed,
+which is false then); otherwise every response carries the standard text.
 
 Blocking work: every handler that reads a blob or a baseline file is a
 plain `def` (run in the threadpool), and each request resolves the
-baseline ONCE (`baseline_status()` + one season file, same version).
+baseline ONCE (`baseline_status()` + one season file, same version). The
+one exception is `GET /raster-scan` (async), whose disclaimer comes from
+DisclaimerMixin's default: one stat-cached `baseline_status()` on the
+event loop in test mode (no file touched with the mode off).
 """
 
 from __future__ import annotations
@@ -80,7 +85,6 @@ from ..raster_scan import highlights as highlight_ranking
 from ..raster_scan import pixel as pixel_lookup
 from ..raster_scan.trigger import POLL_STATUS_ID, PASSED, is_settled
 from ..schemas import (
-    DISCLAIMER_TEXT,
     LatestSceneInfo,
     RasterAnomalyHighlightsResponse,
     RasterCoverage,
@@ -89,6 +93,7 @@ from ..schemas import (
     RasterScanResponse,
     ScenePollInfo,
 )
+from ..site_anomaly import disclaimer_for
 
 logger = logging.getLogger("backend.routers.raster_scan")
 
@@ -391,14 +396,15 @@ def get_raster_pixel(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     found = pixel_lookup.inspect_cell(cells, lat, lng, pixel_lookup.grid_for_run(rendered, cells))
 
-    # One baseline resolution; mode off returns before any file is read
-    # and leaves every existing field (and the disclaimer) as it was.
-    context = cell_anomaly.resolve(scientific_status.baseline_status(), rendered.date_used)
+    # One baseline resolution for the anomaly block AND the disclaimer; mode
+    # off returns before any file is read and leaves every existing field as
+    # it was. The disclaimer follows the baseline in force even when this
+    # cell gets no anomaly (no usable Level B season, say).
+    status = scientific_status.baseline_status()
+    context = cell_anomaly.resolve(status, rendered.date_used)
     anomaly = None
-    disclaimer = DISCLAIMER_TEXT
     if isinstance(context, cell_anomaly.AnomalyContext):
         anomaly = cell_anomaly.pixel_anomaly(found, context, cells)
-        disclaimer = context.disclaimer
 
     return RasterPixelResponse(
         run_id=rendered.id,
@@ -406,7 +412,7 @@ def get_raster_pixel(
         scale_m=rendered.scale_m,
         **found,
         anomaly=anomaly,
-        disclaimer=disclaimer,
+        disclaimer=disclaimer_for(status),
     )
 
 
@@ -439,7 +445,9 @@ def get_raster_highlights(
     'ndci': the highest-NDCI measured cells -- a ranking by value inside
     one scan: high NDCI can also come from suspended sediment, shallow
     bottom, sun glint or cloud edges, and does not by itself identify a
-    bloom. Never consults the baseline; standard disclaimer.
+    bloom. Never ranks against the baseline and never loads a cell
+    baseline; its disclaimer, like every response's, is the one for the
+    TEST baseline in force (one ``baseline_status()``).
 
     'anomaly': measured cells whose NDCI is >= 2 robust z above the cell's
     own TEST seasonal baseline (src/raster_scan/cell_anomaly.py), with the
@@ -456,7 +464,9 @@ def get_raster_highlights(
     screens (src/raster_scan/cell_anomaly.py): degenerate NDCI and low
     visible signal never pin.
     """
-    status = None if mode == "ndci" else scientific_status.baseline_status()
+    # One resolution per request in every mode: 'ndci' needs it only for the
+    # disclaimer, the other modes also for the cell season below.
+    status = scientific_status.baseline_status()
     if mode == "anomaly" and status.get("mode") != "test":
         raise _anomaly_unavailable(
             cell_anomaly.Unavailable(reason=cell_anomaly.MODE_OFF, cause=None, season_key=None))
@@ -464,7 +474,7 @@ def get_raster_highlights(
     if rendered is None:
         raise HTTPException(status_code=404, detail=NO_RASTER_TO_QUERY)
 
-    context = None if status is None else cell_anomaly.resolve(status, rendered.date_used)
+    context = None if mode == "ndci" else cell_anomaly.resolve(status, rendered.date_used)
     if isinstance(context, cell_anomaly.Unavailable) and mode == "anomaly":
         raise _anomaly_unavailable(context)
 
@@ -511,5 +521,6 @@ def get_raster_highlights(
         metric=metric,
         n_requested=n,
         min_separation_m=min_separation_m,
+        disclaimer=disclaimer_for(status),
         **ranked,
     )

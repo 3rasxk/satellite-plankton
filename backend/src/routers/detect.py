@@ -100,7 +100,8 @@ async def get_detect(
 
     return DetectResponse(
         # From the same snapshot as `baseline`: the TEST-baseline variant only
-        # while that baseline is valid (pydantic's default is the mode-off text).
+        # while that baseline is valid. DisclaimerMixin's default would resolve
+        # the baseline a second time; this keeps the two from one snapshot.
         disclaimer=site_anomaly.disclaimer_for(baseline or {"mode": "off"}),
         lat=lat,
         lng=lng,

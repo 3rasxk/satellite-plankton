@@ -12,9 +12,12 @@ separation (CLAUDE.md truth boundary / .claude/agents/backend-api.md
 
 from __future__ import annotations
 
+import logging
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+logger = logging.getLogger(__name__)
 
 DISCLAIMER_TEXT = (
     "Satellite index values describe water colour at pixel resolution. "
@@ -23,13 +26,12 @@ DISCLAIMER_TEXT = (
     "alone establish neither bloom presence nor absence."
 )
 
-# The variant /risk-map, /summary, /detect and /methods carry instead of DISCLAIMER_TEXT
-# while BASELINE_MODE=test AND a TEST baseline is valid (src/site_anomaly.py
-# disclaimer_for); so do /raster-scan/highlights in 'anomaly' mode and
-# /raster-scan/pixel while a Level B cell baseline is in use. DISCLAIMER_TEXT's
-# "anomaly detection is not computed" is false then; this says what is
-# computed (at a monitoring site or a raster cell) and what it is not. The
-# first two sentences are DISCLAIMER_TEXT's own.
+# The variant EVERY response carries instead of DISCLAIMER_TEXT while
+# BASELINE_MODE=test AND a TEST baseline is valid (src/site_anomaly.py
+# disclaimer_for) -- whether or not that response itself holds an anomaly.
+# DISCLAIMER_TEXT's "anomaly detection is not computed" is false then; this
+# says what is computed (at a monitoring site or a raster cell) and what it
+# is not. The first two sentences are DISCLAIMER_TEXT's own.
 DISCLAIMER_TEXT_TEST_BASELINE = (
     "Satellite index values describe water colour at pixel resolution. "
     "Small or scattered blooms may not be visible. TEST baseline mode: a "
@@ -41,17 +43,60 @@ DISCLAIMER_TEXT_TEST_BASELINE = (
     "forecast. Index values alone establish neither bloom presence nor absence."
 )
 
+_last_disclaimer_warning: str | None = None
+
+
+def disclaimer_in_force() -> str:
+    """The truth-boundary text for a response built now; never raises.
+
+    ``DisclaimerMixin.disclaimer``'s default factory, so a model built per
+    request without an explicit ``disclaimer=`` carries the text for the TEST
+    baseline in force: ``site_anomaly.disclaimer_for(baseline_status())`` --
+    ``DISCLAIMER_TEXT_TEST_BASELINE`` while BASELINE_MODE=test AND the
+    baseline is valid, else ``DISCLAIMER_TEXT``. A route that already holds
+    one resolution passes ``disclaimer=disclaimer_for(status)`` from it
+    instead, so its baseline block and its disclaimer cannot disagree.
+
+    Cost per call: mode off -- one attribute read, no file touched. Test
+    mode -- one ``baseline_status()``: the stats and directory listing
+    ``baseline_store`` already does to find the newest artefact, a JSON
+    parse only when a file changed (cached on mtime/size/inode), the
+    manifest checks and a copy of the manifest; the history rows are never
+    copied.
+
+    The imports are local because ``site_anomaly`` imports this module. Any
+    failure (the never-raising ``baseline_status`` replaced or broken) gives
+    ``DISCLAIMER_TEXT``, the answer ``disclaimer_for`` gives a baseline that
+    cannot be read; logged once per distinct failure.
+    """
+    global _last_disclaimer_warning
+    try:
+        from . import scientific_status, site_anomaly
+
+        text = site_anomaly.disclaimer_for(scientific_status.baseline_status())
+    except Exception as exc:  # noqa: BLE001 -- a response must never fail over its caveat
+        message = f"disclaimer: baseline status unavailable ({type(exc).__name__}: {exc}); standard text used"
+        if message != _last_disclaimer_warning:
+            logger.warning(message, exc_info=True)
+            _last_disclaimer_warning = message
+        return DISCLAIMER_TEXT
+    _last_disclaimer_warning = None
+    return text
+
+
 class DisclaimerMixin(BaseModel):
     disclaimer: str = Field(
-        default=DISCLAIMER_TEXT,
+        default_factory=disclaimer_in_force,
         description="Truth-boundary caveat. Present on every response — satellite-pixel "
         "resolution, small/scattered blooms may be missed, and Sentinel-2 "
-        "index values alone cannot establish bloom presence or absence. /risk-map, "
-        "/summary, /detect and /methods carry a TEST-baseline variant instead while "
-        "BASELINE_MODE=test and a TEST baseline is valid: it states that any site "
-        "anomaly is provisional, uncalibrated and statistical only. So do "
-        "/raster-scan/highlights in 'anomaly' mode and /raster-scan/pixel while a "
-        "Level B cell baseline is in use ('ndci'-mode highlights keep this text).",
+        "index values alone cannot establish bloom presence or absence. Which text "
+        "depends on the TEST baseline in force when the response is built, and is "
+        "the same on every endpoint: while BASELINE_MODE=test and a TEST baseline is "
+        "valid, every response carries the TEST-baseline variant (any site or cell "
+        "anomaly is provisional, uncalibrated and statistical only), whether or not "
+        "that response holds an anomaly; otherwise (mode off, or a refused baseline) "
+        "every response carries the standard text, which says no anomaly is computed.",
+        examples=[DISCLAIMER_TEXT, DISCLAIMER_TEXT_TEST_BASELINE],
     )
 
 
