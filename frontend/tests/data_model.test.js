@@ -44,7 +44,7 @@ import {
   buildRunTable, buildSceneSummary, modisTargets, runModisExport,
 } from '../src/lib/dataModel.js'
 import {
-  LIMITATIONS_FILE, LIMITATIONS_KEYS, LIMITATIONS_SECTIONS, TEST_BASELINE_SPEC,
+  LIMITATIONS_FILE, LIMITATIONS_KEYS, LIMITATIONS_SECTIONS,
 } from '../src/lib/limitationsMap.js'
 import { HIGHLIGHTS_ANOMALY, HIGHLIGHTS_NDCI, RASTER } from './fixtures/map_payloads.js'
 
@@ -143,8 +143,8 @@ test('every key of the limitations map exists in Thai and English, non-empty', (
 })
 
 test('the TEST-baseline limits of test-baseline spec §8 are all stated', () => {
-  const s = LIMITATIONS_SECTIONS.find((x) => x.source === TEST_BASELINE_SPEC)
-  assert.ok(s, 'a TEST-baseline section exists and is marked as not from LIMITATIONS.md')
+  const s = LIMITATIONS_SECTIONS.find((x) => x.id === 'test_baseline')
+  assert.ok(s, 'a TEST-baseline section exists and summarises LIMITATIONS.md')
   const body = (dict) => s.pointKeys.map((k) => dict.get(k)).join('\n')
   const e = body(EN)
   assert.match(e, /own record for the same season/)

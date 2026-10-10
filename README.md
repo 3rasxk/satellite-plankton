@@ -81,7 +81,44 @@ Once running:
 - API: http://localhost:8000 (interactive docs at `/docs`)
 - Dashboard: http://localhost:5173 (watch `scripts/dev.sh`'s own log output for the actual port Vite picked)
 
-The dashboard opens on the full-area raster. Its selector has three exclusive
+The dashboard has five pages (dashboard spec:
+`docs/superpowers/specs/2026-10-09-academic-dashboard-design.md`), all with a
+TH | EN toggle and the truth-boundary footer:
+
+| Route | Page |
+| --- | --- |
+| `/` | Overview: status, latest scene, map preview, MODIS context |
+| `/map` | Full-area raster with provenance inspector, highlight pins, permalink (`/raster` redirects here) |
+| `/sites`, `/sites/:siteId` | The seven fixed monitoring sites and their detail |
+| `/methods` | Methods, rendered from `GET /methods` |
+| `/data` | Data and limits: run provenance, pins table, exports, API reference |
+
+**TEST baseline mode (off by default).** `BASELINE_MODE=test` in
+`backend/.env` (exactly `test`; anything else is off) enables a provisional,
+uncalibrated seasonal baseline: robust z of the current NDCI against the same
+site's (Level A) or cell's (Level B) own history in the same calendar month +/- 1.
+It adds anomaly fields and a TEST label to responses and the UI. It is a
+statistical anomaly against the area's own past, not a bloom detection, and
+`risk_level` stays null in either mode. Build the baseline (needs Earth Engine
+credentials; roughly 6-8 minutes):
+
+```bash
+cd backend
+./venv/bin/python ../scripts/build_test_baseline.py --level AB          # Level A (sites) + Level B (cells)
+./venv/bin/python ../scripts/build_test_baseline.py --level B --replace # rebuild Level B only
+```
+
+Artefacts are written under `backend/data/baselines/` (gitignored); the backend
+uses the newest one only if it validates against today's preprocessing settings.
+
+New or notable endpoints: `GET /methods` (methods, disclaimer, baseline status),
+`GET /raster-scan/highlights` (numbered pins: `mode=ndci` ranks by highest NDCI;
+`mode=anomaly` needs TEST mode and a usable Level B baseline), and anomaly fields
+on `/detect`, `/risk-map`, `/raster-scan` and `/raster-scan/pixel` (null unless
+TEST mode is on and the baseline qualifies). Pins are "highest NDCI" or
+"anomaly vs own history", never risk.
+
+The `/map` page opens on the full-area raster. Its selector has three exclusive
 modes: `True Color` for the selected run's stored Sentinel-2 B4/B3/B2 companion,
 `Light Map` for Esri World Light Gray Canvas alone, and `NDCI Raster` for the
 stored NDCI image over that same Light Map. Historical runs without a stored,
@@ -99,9 +136,18 @@ cd backend
 ./venv/bin/python scripts/run_raster_scan.py --date 2026-09-08 --scale-m 200
 ```
 
-The scheduler polls for new Sentinel-2 candidates without scanning at startup.
-It starts a new raster only after both a new acquisition and the configured
-cooldown. Full raster blobs and overlay PNGs are retained for 30 days by default;
+**Latest-scene policy.** The scheduler polls hourly (without scanning at
+startup). Each poll assesses every new Sentinel-2 acquisition date for cloud over
+the polygon's water: a date passes when at least `RASTER_SCENE_MIN_WATER_PIXELS`
+water pixels were observed and the cloud-flagged share is at most
+`RASTER_SCENE_MAX_CLOUD_FRACTION` (0.5). The newest passing date newer than the
+newest date already used starts a raster scan immediately, then refreshes the
+seven sites; a cloudy date starts nothing and the previous raster keeps serving.
+An assessment made less than 36 h after a date began (UTC) is marked not yet
+settled and may change. Scans are spaced by at least
+`RASTER_SCAN_MIN_INTERVAL_HOURS` (1). Poll status is recorded and exposed with
+`/raster-scan`. The old 20 h cooldown now gates only the first-install
+bootstrap. Full raster blobs and overlay PNGs are retained for 30 days by default;
 their run metadata and summaries remain after expiry. The fixed seven named
 stations continue to refresh separately for `/risk-map` and time-series use.
 

@@ -522,10 +522,6 @@ test('shell: the TEST strip and the /methods disclaimer appear on every page onc
 
 // ------------------------------------------------- risk tokens unused
 
-// Unrouted legacy pages that predate the dashboard and still read the risk
-// ramp. They are not reachable (asserted below) and are audited/removed in
-// plan Task 8; drop each entry when its file goes.
-const LEGACY_UNROUTED_PAGES = new Set(['AnomalyPage.jsx', 'NdciPage.jsx', 'AquaculturePage.jsx'])
 const FORBIDDEN = ['risk-normal', 'risk-elevated', 'risk-watch', 'risk-warning', 'RISK_COLOR']
 
 async function sourceFiles(dir) {
@@ -545,7 +541,6 @@ test('src/components/ui, src/pages and dashboard.css never reference the risk to
   const checked = []
   for (const file of files) {
     const name = fileURLToPath(file).split('/').pop()
-    if (LEGACY_UNROUTED_PAGES.has(name)) continue
     const source = await readFile(file, 'utf8')
     for (const word of FORBIDDEN) assert.ok(!source.includes(word), `${name} references ${word}`)
     checked.push(name)
@@ -554,9 +549,4 @@ test('src/components/ui, src/pages and dashboard.css never reference the risk to
   const css = await readFile(new URL('../src/styles/dashboard.css', import.meta.url), 'utf8')
   assert.doesNotMatch(css, /--risk-/, 'dashboard.css uses a risk token')
 
-  // The exempted legacy pages must stay unrouted.
-  const main = await readFile(new URL('../src/main.jsx', import.meta.url), 'utf8')
-  for (const legacy of LEGACY_UNROUTED_PAGES) {
-    assert.ok(!main.includes(legacy.replace('.jsx', '')), `${legacy} is routed but uses risk tokens`)
-  }
 })

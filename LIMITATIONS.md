@@ -19,6 +19,11 @@ remain structurally separate.
 
 ## Sensor and interpretation limits
 
+**MODIS resolution.** The MODIS `chlor_a` series is a Level-3 mapped product
+sampled on its ~4.6 km grid (the API reports 4638 m), not the instrument's ~1 km
+native pixel. A MODIS reading describes an area of that size, so it says little
+about features near the coast or smaller than a grid cell.
+
 **Small blooms may be invisible.** A bloom smaller than, dispersed within, or
 below a sensor pixel can produce no detectable surface signal. Absence of an
 index signal is not evidence that no bloom exists.
@@ -99,6 +104,45 @@ append-only Sentinel-2 baseline table keyed by cell/location, acquisition date,
 season definition, and versioned preprocessing signature, followed by leakage
 tests, minimum-history sensitivity analysis, and retrospective comparison with
 independent field observations before enabling scheduler output.
+
+## TEST baseline (provisional)
+
+An optional mode, `BASELINE_MODE=test`, is off by default. When on, the backend
+computes `robust_z = (current_ndci - median) / (1.4826 * MAD)` of a Sentinel-2
+NDCI reading against that same site's (Level A) or 200 m cell's (Level B) own
+history, taken from the same calendar month +/- 1 (cyclic) and only from dates
+before the evaluated one. Everything it produces is labelled TEST and
+`risk_level` stays null.
+
+- **Provisional, uncalibrated.** The boundaries 2 (watch) and 3 (high) are
+  engineering starting points, never checked against recorded bloom events. They
+  are not biological thresholds.
+- **Level A self-check is circular.** The base rates in the build manifest are
+  measured on the baseline's own past. For the artefact built 2026-10-09
+  (`backend/data/baselines/TEST-20261009-9fc9a022/manifest.json`,
+  `self_check.total`): of 2,861 site-date evaluations, 1,706 were assessable
+  (60 flagged watch, 123 high, i.e. about 3.5% and 7.2% of the assessable ones)
+  and 1,155 had no assessment (`insufficient_independent_dates`). This says how
+  often the statistic exceeds 2 and 3 on its own history, not how often it
+  coincides with a bloom. See `/methods` for the current artefact.
+- **Level B has no self-check.** The per-cell baseline has no equivalent
+  base-rate measurement. Cells with too few independent dates get no assessment.
+- **Quality screens are developer-chosen, not validated.** Pins exclude cells
+  whose NDCI is exactly +/-1 (`|NDCI| >= 1 - 1e-6`, a zero band) and cells where
+  a visible band (B4, B3 or B2) is below 50 DN (near-black pixels, where NDCI is
+  a ratio of noise).
+- **Anomaly is not bloom.** A high z means the value is unusual against that
+  location's own history. Suspended sediment and river-mouth plumes, shallow
+  bottom, sun glint and cloud edges can all produce it. A bloom can also sit
+  inside the normal range.
+- **No assessment is not "normal".** The reasons `zero_mad`,
+  `insufficient_independent_dates` and `incompatible_preprocessing` mean no
+  statistic was computed and are reported as reasons, never as a normal result.
+  A wide MAD (river-mouth and shallow sites) lowers z for the same departure.
+- **No validation.** No TEST anomaly has been compared with recorded bloom
+  events or independent field observations.
+- **Pins are descriptive.** The highlight pins are either "highest NDCI" within
+  one scan or "anomaly vs own history", never risk. The word "risk" is not used for baseline output.
 
 ## Numerical threshold register
 

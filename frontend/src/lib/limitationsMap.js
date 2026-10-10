@@ -39,7 +39,7 @@ export const LIMITATIONS_SECTIONS = Object.freeze([
   section('references', 'Scientific references and transfer limits', LIMITATIONS_FILE, 2),
   section('pipeline', 'Data-pipeline findings', LIMITATIONS_FILE, 3),
   section('interpretation', 'Plain interpretation', LIMITATIONS_FILE, 4),
-  section('test_baseline', 'TEST baseline limits', TEST_BASELINE_SPEC, 8),
+  section('test_baseline', 'TEST baseline (provisional)', LIMITATIONS_FILE, 8),
 ])
 
 /** Every i18n key the limitations block uses. */

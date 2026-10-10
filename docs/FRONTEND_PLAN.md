@@ -4,6 +4,26 @@ Detailed plan for the Vite + React web app. Read alongside `.claude/agents/front
 
 ---
 
+## 2026-10 redesign (supersedes the two-page scope below)
+
+The frontend was rebuilt as an academic dashboard; the authoritative design is
+`docs/superpowers/specs/2026-10-09-academic-dashboard-design.md` (with
+`2026-10-09-test-baseline-and-latest-scene-design.md` for the TEST label and
+latest-scene messaging). Routes: `/` Overview, `/map` raster (`/raster`
+redirects), `/sites` and `/sites/:siteId`, `/methods` (rendered from
+`GET /methods`), `/data`. It has a TH | EN toggle, a TEST-baseline strip shown
+only when the backend reports TEST mode, and a persistent truth-boundary footer.
+
+Superseded by this redesign and removed from the code: the `/summary` page, the
+Sidebar, the anomaly strip signature component, the risk-ramp legend and the
+risk-coloured map markers, the regional trend chart, and the Anomaly, NDCI,
+Aquaculture and Reports pages. Sections 1, 3-5 and 7 below describe that
+earlier design and are kept as history; where they conflict with the spec, the
+spec wins. Risk wording and risk colours are forbidden in `src/components/ui`
+and `src/pages` (enforced by a source-grep test).
+
+---
+
 ## 1. Scope
 
 Two pages, no authentication, no image upload (there is no underwater imagery in this project — detection is satellite-only).

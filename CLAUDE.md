@@ -7,16 +7,17 @@
 
 Software-only early-warning system for harmful algal blooms (green *Noctiluca* / red tide) in the upper Gulf of Thailand, targeting SDG 14. **Physics-based, not machine learning.** Two layers + a web app:
 
-1. **Satellite layer** Sentinel-2 (10 m, current detail) + MODIS (~1 km, 2002–present, climatology baseline) via Google Earth Engine.
-2. **Detection & prediction layer** Spectral indices (NDCI / 2BDA / 3BDA), reading status and actual scene dates. Anomaly scoring and rule-based risk evaluation are disabled: no valid baseline exists for the indices. MODIS `chlor_a` climatology is valid for `chlor_a` only. No trained model.
-3. **Web dashboard** for viewing/inspection — no LINE, no push. Risk shown as colours on a map.
+1. **Satellite layer** Sentinel-2 (10 m, current detail) + MODIS (Level-3 mapped grid ~4.6 km, 2002–present, climatology baseline) via Google Earth Engine.
+2. **Detection & prediction layer** Spectral indices (NDCI / 2BDA / 3BDA), reading status and actual scene dates. Anomaly scoring and rule-based risk evaluation are disabled by default: no valid baseline exists for the indices. The one exception is an explicitly gated **TEST baseline** mode (`BASELINE_MODE=test`, off by default): a provisional, uncalibrated seasonal robust-z of NDCI against a location's own history, always labelled TEST, never producing `risk_level` and never a bloom detection. MODIS `chlor_a` climatology is valid for `chlor_a` only. No trained model.
+3. **Web dashboard** for viewing index readings and nullable scientific status — no LINE, no push.
 
 ### Why no ML
 No suitable local labelled dataset is active in this repository. Florida *Karenia brevis* does not transfer to green *Noctiluca* (different optical mechanism), and self-labelling from a satellite threshold is circular. See `docs/DETECTION_PLAN.md`.
 
 ### Truth boundary (mandatory in every output — no overclaiming)
-- Detection is at **satellite pixel resolution** (Sentinel-2 ~10 m, MODIS ~1 km) — water colour signatures only, never individual organisms.
+- Detection is at **satellite pixel resolution** (Sentinel-2 ~10 m, MODIS Level-3 grid ~4.6 km) — water colour signatures only, never individual organisms.
 - Small or dispersed blooms may be **missed**; state this.
+- **TEST baseline mode is not a validated detector.** When `BASELINE_MODE=test` is on, any anomaly output is labelled TEST, is a statistic against the location's own seasonal history (uncalibrated, boundaries 2/3 provisional), and `risk_level` stays null.
 - **Detection and prediction are separate claims.** Detection currently returns index readings only, with no valid anomaly statistic or verdict. Prediction cannot evaluate risk while that input is unavailable; it is never a validated forecast. The independent MODIS `/timeseries` calculation compares `chlor_a` with a `chlor_a` baseline and is unaffected.
 
 ## 1. Locked decisions (do not propose alternatives unless the human asks)
@@ -24,13 +25,14 @@ No suitable local labelled dataset is active in this repository. Florida *Kareni
 | Topic | Decided | Rejected |
 |-------|---------|----------|
 | Approach | Physics: spectral index readings; anomaly scoring and escalation currently disabled | ❌ supervised ML / trained classifier |
-| Indices | NDCI, 2BDA, 3BDA, B2/B3 *Noctiluca* discrimination — compare, don't assume | |
+| Indices | NDCI, 2BDA, 3BDA, B2/B3 exploratory readings — compare, don't assume | |
 | Baseline | MODIS `chlor_a` climatology for `chlor_a` only; no valid spectral-index baseline exists | ❌ comparing dimensionless indices with concentration baselines |
 | Primary satellite | Sentinel-2 (10 m) via GEE | |
 | Secondary satellite | MODIS via GEE — climatology + SST | |
 | Frontend | React (Vite) + Leaflet/MapLibre | |
 | Backend | FastAPI (Python) | |
 | Alerting | Colours on the map in the web app | ❌ LINE/email push |
+| TEST baseline | Optional, gated by env flag `BASELINE_MODE=test`, off by default, uncalibrated, labelled TEST, `risk_level` always null | ❌ presenting it as validated or as risk |
 
 ## 2. Agents (full detail in `.claude/agents/<name>.md`)
 
@@ -98,14 +100,16 @@ cd backend  && source venv/bin/activate && uvicorn src.main:app --reload
 cd frontend && npm run dev
 ```
 
-Tests — three separate pytest suites, each with its own venv. Most GEE calls are mocked at typed boundaries; two backend satellite-image tests make live GEE calls and require credentials/network access:
+Tests — three separate pytest suites, each with its own venv. Ordinary backend tests disable scheduling and mock GEE at typed boundaries. Two satellite-image tests are opt-in with `--live-gee` and require credentials/network access:
 
 ```bash
-cd data-pipeline && ./venv/bin/python -m pytest tests/ -q   # 118 tests
-cd detection      && ./venv/bin/python -m pytest tests/ -q   # 60 tests
-cd backend        && ./venv/bin/python -m pytest tests/ -q   # 207 tests (2 live GEE)
-cd frontend       && npm test                                # 45 tests
+cd data-pipeline && ./venv/bin/python -m pytest tests/ -q
+cd detection      && ./venv/bin/python -m pytest tests/ -q
+cd backend        && ./venv/bin/python -m pytest tests/ -q   # live GEE tests remain opt-in
+cd frontend       && npm test
 ```
+
+Live backend checks: `cd backend && ./venv/bin/python -m pytest tests/test_satellite_image.py --live-gee -m live_gee -q`.
 
 Single test: `./venv/bin/python -m pytest tests/test_climatology.py::test_name -q` (run from the relevant subproject directory, with its venv active).
 
