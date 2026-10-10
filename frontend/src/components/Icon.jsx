@@ -12,6 +12,30 @@ const ICON_PATHS = {
   alert: <><path d="M12 3 2.7 20h18.6L12 3Z" /><path d="M12 9v5M12 17h.01" /></>,
   refresh: <><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /></>,
   chevronDown: <path d="m6 9 6 6 6-6" />,
+
+  // Status-chip glyphs (src/lib/statusChip.js `icon` names). A second
+  // carrier beside the chip's text, never the only one.
+  check: <path d="m5 12.5 4.5 4.5L19 7.5" />,
+  dash: <path d="M7 12h10" />,
+  boundary: <path d="M4 9 11 4l9 4-2 9-9 3z" strokeDasharray="2.6 2.6" />,
+  slash: <><circle cx="12" cy="12" r="8" /><path d="m6.5 17.5 11-11" /></>,
+  clock: <><circle cx="12" cy="12" r="8" /><path d="M12 8v4.5l3 1.5" /></>,
+  minus: <><circle cx="12" cy="12" r="8" /><path d="M8 12h8" /></>,
+  history: <><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3L4.5 9" /><path d="M4.5 4.5V9H9" /><path d="M12 8.5v3.75l2.5 2" /></>,
+  baseline: <><path d="M4 12h16" /><path d="M4 7.5h16M4 16.5h16" strokeDasharray="2 3" /></>,
+  'arrow-up': <><path d="M12 19V6" /><path d="m6.5 11.5 5.5-5.5 5.5 5.5" /></>,
+  'arrow-up-double': <><path d="m6.5 12 5.5-5.5 5.5 5.5" /><path d="m6.5 18 5.5-5.5 5.5 5.5" /></>,
+
+  // Dashboard chrome (src/components/ui).
+  source: <><circle cx="12" cy="12" r="8.5" /><path d="M12 11v5.5" /><path d="M12 7.75h.01" /></>,
+  quote: <><path d="M10 7H7a2 2 0 0 0-2 2v2.5a1.5 1.5 0 0 0 1.5 1.5H9v.5a3.5 3.5 0 0 1-3 3.46" /><path d="M19 7h-3a2 2 0 0 0-2 2v2.5a1.5 1.5 0 0 0 1.5 1.5H18v.5a3.5 3.5 0 0 1-3 3.46" /></>,
+  menu: <path d="M4 7h16M4 12h16M4 17h16" />,
+  close: <path d="M6 6l12 12M18 6 6 18" />,
+  download: <><path d="M12 4v11" /><path d="m7 10.5 5 5 5-5" /><path d="M5 19.5h14" /></>,
+  table: <><rect x="4" y="5" width="16" height="14" rx="1.5" /><path d="M4 10h16M4 14.5h16M10 10v9" /></>,
+  external: <><path d="M14 5h5v5" /><path d="m19 5-8 8" /><path d="M17 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-10A1.5 1.5 0 0 1 4 18.5v-10A1.5 1.5 0 0 1 5.5 7H10" /></>,
+  grid: <><rect x="4" y="4" width="16" height="16" rx="2" /><path d="M4 12h16M12 4v16" /></>,
+  'arrow-right': <><path d="M5 12h14" /><path d="m13 6 6 6-6 6" /></>,
 }
 
 export default function Icon({ name, size = 18, strokeWidth = 1.8, className = '' }) {

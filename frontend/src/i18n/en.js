@@ -26,6 +26,16 @@ export default {
     cite: 'Cite',
     language: 'Language',
     skip_to_content: 'Skip to main content',
+    menu: 'Menu',
+    home: 'Plankton Watch: overview',
+    // Language names are written in their own language (autonyms) in both
+    // dictionaries, so a reader can find their language whatever is shown.
+    lang_th: 'ไทย',
+    lang_en: 'English',
+  },
+
+  page: {
+    title: '{page} · Plankton Watch',
   },
 
   common: {
@@ -103,6 +113,24 @@ export default {
     null_rule: '"—" means unknown, with the reason stated; it is never a zero or a low reading.',
     test_banner: "TEST baseline: anomalies are relative to the same location's own history; not yet calibrated against recorded events; not a bloom-risk assessment.",
     server_disclaimer: 'Server disclaimer (verbatim)',
+    disclaimer_source: 'Received with {endpoint}',
+    no_server_disclaimer: 'No server disclaimer has been received yet, so none is shown; the points above still apply.',
+  },
+
+  // Page footer (TruthFooter) beyond the truth-boundary points.
+  footer: {
+    version: 'App version',
+    commit: 'commit',
+    reproduce: 'Methods, data sources and limitations',
+  },
+
+  // TEST-baseline strip under the header (BaselineBanner).
+  baseline: {
+    badge: 'TEST',
+    label: 'Baseline status',
+    version: 'Version',
+    methods_link: 'How the TEST baseline is built',
+    unknown: 'The baseline mode could not be read (GET /methods failed), so whether a TEST baseline is in force is unknown here.',
   },
 
   // Why a value is "—" (src/lib/format.js NULL_REASONS).
@@ -146,6 +174,49 @@ export default {
     run_id: 'Raster run',
     scene_id: 'Scene ID',
     formula: 'Formula',
+    show: 'Show the source of {field}',
+    unknown_field: 'this value',
+  },
+
+  // Value: the accessible text beside a "—".
+  value: {
+    unknown: 'Unknown: {reason}',
+  },
+
+  // FigureFrame.
+  figure: {
+    label: 'Fig. {n}',
+    view_table: 'View the data table',
+  },
+
+  // CiteButton confirmation (aria-live).
+  cite: {
+    copied: 'Citation copied to the clipboard.',
+    failed: 'The citation could not be copied automatically. Select the text below and copy it.',
+    text_label: 'Citation text',
+  },
+
+  // ErrorState.
+  error: {
+    http: 'HTTP {status}',
+    no_response: 'No response from the server: it may be stopped or unreachable.',
+    request: 'Request',
+    server_detail: 'Server message (verbatim)',
+  },
+
+  // Temporary pages for routes later tasks build (EmptyState).
+  placeholder: {
+    eyebrow: 'Not built yet',
+    title: 'This page is a temporary placeholder',
+    body: 'It belongs to a later step of the dashboard plan. Nothing on it is data, and its absence says nothing about the water.',
+    site_label: 'Requested site ID',
+    go_map: 'Open the raster map',
+  },
+
+  notfound: {
+    title: 'Page not found',
+    body: 'No page exists at {path}. The navigation above lists every page.',
+    home: 'Go to the overview',
   },
 
   unit: {

@@ -1,0 +1,1558 @@
+/* Dashboard system: shell, type, grid, cards, figures, tables, chips,
+   values, source popovers, states, footer, responsive, print.
+   Academic dashboard spec §7 ("a calm, high-density, printable scientific
+   atlas"). Tokens in tokens.css (dashboard block).
+
+   Scope rules
+   - Every class here is prefixed `pw-` (or is `.prose`), so nothing in
+     global.css -- the raster map, its glass panels, the legacy pages -- is
+     restyled. Type sizes and line heights are set on the dashboard's own
+     regions (header, strip, page, footer), never on `main`, because the map
+     panels inherit theirs from body.
+   - Colour: ink on paper. --accent marks interaction only (links, current
+     nav item, focus). The four risk-ramp tokens are never used here
+     (tests/ui_components.test.js greps this file for them).
+   - Glass is for panels floating over the map only (global .glass); cards
+     here are paper with a 1 px hairline. */
+
+/* ------------------------------------------------------------------ */
+/* Shell                                                              */
+/* ------------------------------------------------------------------ */
+
+.pw-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  min-height: 100svh;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.pw-viewport {
+  display: flex;
+  flex-direction: column;
+  flex: 1 0 auto;
+  min-width: 0;
+}
+
+.pw-main {
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  /* Leaflet panes use z-index up to 1000 without a stacking context of
+     their own; isolating main keeps the map (and popovers on the page)
+     under the sticky header and the open mobile menu. */
+  isolation: isolate;
+}
+
+.pw-main:focus {
+  outline: none; /* programmatic focus target of the skip link */
+}
+
+/* /map: header + strip + map fill exactly one viewport; footer follows. */
+.pw-shell[data-layout='map'] .pw-viewport {
+  flex: 0 0 auto;
+  height: 100vh;
+  height: 100svh;
+}
+
+.pw-shell[data-layout='map'] .pw-main {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden; /* a short window must not push the map over the footer */
+}
+
+.pw-shell[data-layout='map'] .pw-main > .overview-page {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* Below 681 px the raster page puts its panels in document flow under a
+   50vh map (global.css); let the page grow and scroll as a whole. */
+@media (max-width: 680px) {
+  .pw-shell[data-layout='map'] .pw-viewport {
+    height: auto;
+  }
+
+  .pw-shell[data-layout='map'] .pw-main {
+    overflow: visible;
+  }
+
+  .pw-shell[data-layout='map'] .pw-main > .overview-page {
+    height: auto;
+  }
+}
+
+.pw-container {
+  width: 100%;
+  max-width: var(--container-max);
+  margin-inline: auto;
+  padding-inline: var(--container-pad);
+}
+
+.pw-header,
+.pw-baseline,
+.pw-page,
+.pw-footer {
+  font-family: var(--font-body);
+  line-height: var(--lh);
+  -webkit-text-size-adjust: 100%;
+}
+
+.pw-header:lang(th),
+.pw-baseline:lang(th),
+.pw-page:lang(th),
+.pw-footer:lang(th) {
+  line-height: var(--lh-th);
+}
+
+.pw-sr-only {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.pw-skip {
+  position: absolute;
+  top: 8px;
+  left: 16px;
+  z-index: 2000;
+  padding: 10px 16px;
+  border-radius: var(--radius);
+  background: var(--ink);
+  color: #fff;
+  font: 600 var(--type-14) / 1.2 var(--font-body);
+  text-decoration: none;
+  transform: translateY(calc(-100% - 16px));
+  transition: transform var(--motion-fast);
+}
+
+.pw-skip:focus {
+  transform: none;
+}
+
+.pw-mono,
+.pw-num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+/* ------------------------------------------------------------------ */
+/* Header: masthead + nav tier                                        */
+/* ------------------------------------------------------------------ */
+
+.pw-header {
+  position: relative;
+  z-index: 1100;
+  background: var(--paper);
+  border-bottom: 1px solid var(--line);
+  font-size: var(--type-14);
+  color: var(--ink);
+}
+
+.pw-shell[data-layout='page'] .pw-header {
+  position: sticky;
+  top: 0;
+}
+
+.pw-header-top {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 56px;
+  padding-block: var(--space-1);
+}
+
+.pw-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.pw-brand-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+  border-radius: 6px;
+  color: var(--ink);
+  font-size: var(--type-16);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.pw-brand-mark {
+  display: block;
+  flex: 0 0 auto;
+}
+
+.pw-brand-tagline {
+  margin: 0;
+  min-width: 0;
+  padding-left: var(--space-2);
+  border-left: 1px solid var(--line);
+  color: var(--ink-3);
+  font-size: var(--type-12);
+  line-height: 1.45;
+}
+
+.pw-header-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: 0 0 auto;
+}
+
+/* TH | EN segmented control */
+.pw-lang {
+  display: inline-flex;
+  padding: 2px;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--paper-2);
+}
+
+.pw-lang-btn {
+  min-width: 40px;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-3);
+  font: 600 var(--type-12) / 1 var(--font-body);
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: background-color var(--motion-fast), color var(--motion-fast);
+}
+
+.pw-lang-btn:hover {
+  color: var(--ink);
+}
+
+.pw-lang-btn[aria-pressed='true'] {
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: 0 0 0 1px var(--line), 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.pw-menu-btn {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--paper);
+  color: var(--ink);
+  font: 500 var(--type-14) / 1 var(--font-body);
+  cursor: pointer;
+}
+
+.pw-nav {
+  border-top: 1px solid var(--line-soft);
+}
+
+.pw-nav-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--space-3);
+  margin: 0 auto;
+  list-style: none;
+}
+
+.pw-nav-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  margin-bottom: -1px; /* sit the indicator on the header hairline */
+  border-bottom: 2px solid transparent;
+  color: var(--ink-3);
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color var(--motion-fast), border-color var(--motion-fast);
+}
+
+.pw-nav-link:hover {
+  color: var(--ink);
+  border-bottom-color: var(--line-strong);
+}
+
+.pw-nav-link[aria-current='page'] {
+  color: var(--ink);
+  border-bottom-color: var(--accent);
+}
+
+/* ------------------------------------------------------------------ */
+/* TEST-baseline strip                                                */
+/* ------------------------------------------------------------------ */
+
+.pw-baseline {
+  position: relative;
+  z-index: 1;
+  background: var(--sand);
+  border-bottom: 1px solid var(--sand-line);
+  color: var(--ink);
+  font-size: var(--type-14);
+}
+
+.pw-baseline-inner {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-0) var(--space-2);
+  padding-block: 10px;
+  padding-left: calc(var(--container-pad) + 22px);
+}
+
+/* The hatched edge: present on every page, unmistakable, not alarming. */
+.pw-baseline-inner::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--container-pad);
+  width: 10px;
+  background: var(--hatch-ink);
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.pw-baseline-badge {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border: 1.5px solid var(--ink);
+  border-radius: 4px;
+  background: var(--paper);
+  color: var(--ink);
+  font: 600 11px / 1 var(--font-mono);
+  letter-spacing: 0.08em;
+}
+
+.pw-baseline-text {
+  flex: 1 1 28rem;
+  min-width: 0;
+  margin: 0;
+  font-weight: 500;
+}
+
+.pw-baseline-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-0) var(--space-2);
+  margin: 0;
+  color: var(--ink-3);
+  font-size: var(--type-12);
+}
+
+.pw-baseline[data-state='invalid'] .pw-baseline-inner::before {
+  background: var(--hatch-soft);
+}
+
+.pw-baseline[data-state='unknown'] {
+  background: var(--paper-2);
+  border-bottom-color: var(--line);
+  color: var(--ink-2);
+}
+
+.pw-baseline[data-state='unknown'] .pw-baseline-inner::before {
+  background: none;
+  border-left: 3px solid var(--line-strong);
+  width: 0;
+}
+
+.pw-baseline[data-state='unknown'] .pw-baseline-text {
+  font-weight: 400;
+}
+
+/* ------------------------------------------------------------------ */
+/* Page                                                               */
+/* ------------------------------------------------------------------ */
+
+.pw-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  width: 100%;
+  max-width: var(--container-max);
+  margin-inline: auto;
+  padding: var(--space-4) var(--container-pad) var(--space-8);
+  color: var(--ink);
+  font-size: var(--type-16);
+}
+
+/* Anchor targets clear the sticky header. */
+.pw-page [id] {
+  scroll-margin-top: 120px;
+}
+
+.pw-page-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--line);
+}
+
+.pw-page-head-text {
+  flex: 1 1 36rem;
+  min-width: 0;
+}
+
+.pw-page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-1);
+}
+
+.pw-eyebrow {
+  margin: 0 0 var(--space-1);
+  color: var(--ink-3);
+  font-size: var(--type-12);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.pw-eyebrow:lang(th) {
+  letter-spacing: 0;
+}
+
+.pw-page-title {
+  font-size: var(--type-28);
+  line-height: var(--lh-tight);
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+}
+
+.pw-page-title:lang(th) {
+  line-height: 1.45;
+  letter-spacing: 0;
+}
+
+.pw-lede {
+  max-width: 72ch;
+  margin: var(--space-1) 0 0;
+  color: var(--ink-3);
+  font-size: var(--type-16);
+  text-wrap: pretty;
+}
+
+.pw-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.pw-section-title {
+  font-size: var(--type-20);
+  line-height: 1.3;
+}
+
+.pw-section-title:lang(th) {
+  line-height: 1.5;
+}
+
+.pw-label {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: var(--type-12);
+  font-weight: 500;
+}
+
+/* Long-form prose (Methods, limitations): serif for reading, sans for
+   headings, mono for symbols and codes. */
+.prose {
+  max-width: 68ch;
+  color: var(--ink);
+  font-family: var(--font-serif);
+  font-size: var(--type-16);
+  font-optical-sizing: auto;
+  line-height: 1.6;
+  text-wrap: pretty;
+}
+
+.prose:lang(th) {
+  line-height: 1.85;
+}
+
+.prose p,
+.prose ul,
+.prose ol {
+  margin: 0 0 1em;
+}
+
+.prose li + li {
+  margin-top: 0.35em;
+}
+
+.prose h2,
+.prose h3 {
+  font-family: var(--font-body);
+  line-height: 1.3;
+}
+
+.prose h2 {
+  margin: 1.75em 0 0.5em;
+  font-size: var(--type-20);
+}
+
+.prose h3 {
+  margin: 1.5em 0 0.4em;
+  font-size: var(--type-16);
+}
+
+.prose code,
+.prose .pw-mono {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+}
+
+.prose a {
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.prose blockquote {
+  margin: 0 0 1em;
+  padding-left: 1em;
+  border-left: 2px solid var(--line-strong);
+  color: var(--ink-2);
+}
+
+/* ------------------------------------------------------------------ */
+/* Grid                                                               */
+/* ------------------------------------------------------------------ */
+
+.pw-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: var(--grid-gap);
+}
+
+/* Single column until 1024 px, except small cards, which pair up from
+   640 px. */
+.pw-grid > * {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+@media (min-width: 640px) {
+  .pw-grid > .pw-span-3 { grid-column: span 6; }
+}
+
+@media (min-width: 1024px) {
+  .pw-grid > .pw-span-3 { grid-column: span 3; }
+  .pw-grid > .pw-span-4 { grid-column: span 4; }
+  .pw-grid > .pw-span-5 { grid-column: span 5; }
+  .pw-grid > .pw-span-6 { grid-column: span 6; }
+  .pw-grid > .pw-span-7 { grid-column: span 7; }
+  .pw-grid > .pw-span-8 { grid-column: span 8; }
+  .pw-grid > .pw-span-9 { grid-column: span 9; }
+}
+
+.pw-cols-2,
+.pw-cols-aside {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--grid-gap);
+}
+
+@media (min-width: 1024px) {
+  .pw-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pw-cols-aside { grid-template-columns: minmax(0, 8fr) minmax(0, 4fr); }
+}
+
+/* ------------------------------------------------------------------ */
+/* Cards and key facts                                                */
+/* ------------------------------------------------------------------ */
+
+.pw-card {
+  min-width: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--paper);
+}
+
+.pw-card--flush {
+  padding: 0;
+  overflow: hidden;
+}
+
+.pw-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+}
+
+.pw-card-title {
+  color: var(--ink-2);
+  font-size: var(--type-14);
+  font-weight: 600;
+}
+
+.pw-stat-value {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-0);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: var(--type-28);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+
+.pw-stat-note {
+  margin: var(--space-1) 0 0;
+  color: var(--ink-3);
+  font-size: var(--type-12);
+}
+
+/* ------------------------------------------------------------------ */
+/* Figures and disclosures                                            */
+/* ------------------------------------------------------------------ */
+
+.pw-figure {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  margin: 0;
+}
+
+.pw-figure-body {
+  min-width: 0;
+  padding: var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--paper);
+}
+
+.pw-figure--flush .pw-figure-body {
+  padding: 0;
+  overflow: hidden;
+}
+
+.pw-figcaption {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-0) var(--space-1);
+  color: var(--ink-2);
+  font-size: var(--type-14);
+  line-height: 1.5;
+}
+
+.pw-fig-no {
+  color: var(--ink);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.pw-fig-caption {
+  flex: 1 1 20rem;
+  min-width: 0;
+}
+
+.pw-figure-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-0);
+  margin-left: auto;
+}
+
+.pw-disclosure > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  border-radius: 6px;
+  color: var(--accent);
+  font-size: var(--type-14);
+  font-weight: 500;
+  list-style: none;
+  cursor: pointer;
+}
+
+.pw-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.pw-disclosure > summary::after {
+  content: '';
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid currentColor;
+  transition: transform var(--motion-fast);
+}
+
+.pw-disclosure[open] > summary::after {
+  transform: rotate(180deg);
+}
+
+.pw-disclosure-body {
+  margin-top: var(--space-1);
+  overflow-x: auto;
+}
+
+/* ------------------------------------------------------------------ */
+/* Tables                                                             */
+/* ------------------------------------------------------------------ */
+
+.pw-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--paper);
+}
+
+.pw-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--type-14);
+  line-height: 1.4;
+}
+
+.pw-table caption {
+  padding: var(--space-1) 12px;
+  caption-side: top;
+  color: var(--ink-2);
+  font-weight: 600;
+  text-align: left;
+}
+
+.pw-table th,
+.pw-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line-soft);
+  text-align: left;
+  vertical-align: top;
+}
+
+.pw-table thead th {
+  border-bottom-color: var(--line);
+  background: var(--paper-2);
+  color: var(--ink-3);
+  font-size: var(--type-12);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.pw-table tbody tr:last-child > * {
+  border-bottom: 0;
+}
+
+.pw-table tbody tr:hover {
+  background: var(--paper-2);
+}
+
+.pw-table .num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* Below 640 px a `.pw-table--stack` becomes a list of cards; each cell
+   needs `data-label` with its column name. */
+@media (max-width: 639px) {
+  .pw-table--stack thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .pw-table--stack tr {
+    display: block;
+    padding: var(--space-1) 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .pw-table--stack td {
+    display: grid;
+    grid-template-columns: minmax(7rem, 40%) minmax(0, 1fr);
+    gap: var(--space-1);
+    padding: 4px 12px;
+    border: 0;
+    text-align: left;
+  }
+
+  .pw-table--stack td::before {
+    content: attr(data-label);
+    color: var(--ink-3);
+    font-family: var(--font-body);
+    font-size: var(--type-12);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Status chips: text + icon; tone = emphasis in ink; hatch = TEST     */
+/* anomaly. Never red/green, never the accent.                        */
+/* ------------------------------------------------------------------ */
+
+.pw-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 24px;
+  padding: 2px 9px 2px 7px;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--paper);
+  color: var(--ink);
+  font: 500 var(--type-12) / 1.35 var(--font-body);
+  vertical-align: middle;
+}
+
+.pw-chip:lang(th) {
+  line-height: 1.5;
+}
+
+.pw-chip-icon {
+  flex: 0 0 auto;
+}
+
+.pw-chip-text {
+  min-width: 0;
+}
+
+.pw-chip[data-tone='attention'] {
+  border-color: var(--ink-3);
+  background: #f0f0f2;
+  font-weight: 600;
+}
+
+.pw-chip[data-tone='strong'] {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: #fff;
+  font-weight: 600;
+}
+
+.pw-chip[data-tone='muted'] {
+  border-style: dashed;
+  background: transparent;
+  color: var(--ink-3);
+}
+
+/* A hatched tab at the chip's leading edge: the same mark as the TEST
+   strip, so "anomaly vs own history" reads as one family. */
+.pw-chip[data-hatch='true']::before {
+  content: '';
+  align-self: stretch;
+  flex: 0 0 8px;
+  margin: -2px 0 -2px -7px;
+  border-right: 1px solid currentColor;
+  background: var(--hatch-soft);
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.pw-chip[data-hatch='true'][data-tone='strong']::before {
+  background: var(--hatch-inverse);
+}
+
+.pw-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-0);
+}
+
+/* ------------------------------------------------------------------ */
+/* Values and source popovers                                         */
+/* ------------------------------------------------------------------ */
+
+.pw-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 100%;
+}
+
+.pw-null {
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+}
+
+.pw-null-reason {
+  margin-left: var(--space-0);
+  color: var(--ink-3);
+  font-size: var(--type-12);
+}
+
+.pw-source {
+  position: relative;
+  display: inline-flex;
+  vertical-align: middle;
+}
+
+.pw-source-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+  transition: background-color var(--motion-fast), color var(--motion-fast);
+}
+
+.pw-source-btn:hover,
+.pw-source-btn[aria-expanded='true'] {
+  background: rgba(var(--accent-rgb), 0.08);
+  color: var(--accent);
+}
+
+/* Fixed to the viewport at coordinates SourceChip computes from its
+   button, so scrolling table wrappers and clipped cards cannot cut it. */
+.pw-source-pop {
+  position: fixed;
+  top: var(--pw-pop-top, auto);
+  bottom: var(--pw-pop-bottom, auto);
+  left: var(--pw-pop-left, 16px);
+  z-index: 1300;
+  width: var(--pw-pop-w, min(360px, calc(100vw - 32px)));
+  max-height: var(--pw-pop-max-h, 70vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 12px 14px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+  box-shadow: var(--shadow-pop);
+  color: var(--ink);
+  font: 400 var(--type-12) / 1.45 var(--font-body);
+  text-align: left;
+  white-space: normal;
+  animation: pw-pop var(--motion-fast);
+}
+
+.pw-source-pop:focus {
+  outline: none;
+}
+
+.pw-source-pop:focus-visible {
+  outline: var(--focus-ring);
+}
+
+.pw-source-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1);
+  margin-bottom: var(--space-1);
+}
+
+.pw-source-title {
+  color: var(--ink-3);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.pw-source-title:lang(th) {
+  font-size: var(--type-12);
+  letter-spacing: 0;
+}
+
+.pw-source-rows {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 5px 14px;
+  margin: 0;
+}
+
+.pw-source-row {
+  display: contents;
+}
+
+.pw-source-row dt {
+  color: var(--ink-3);
+}
+
+.pw-source-row dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.pw-source-row dd.is-null {
+  color: var(--ink-3);
+}
+
+.pw-source-raw {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 12px;
+  font-weight: 500;
+}
+
+@keyframes pw-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Buttons                                                            */
+/* ------------------------------------------------------------------ */
+
+.pw-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--paper);
+  color: var(--ink);
+  font: 500 var(--type-14) / 1.2 var(--font-body);
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color var(--motion-fast), border-color var(--motion-fast);
+}
+
+.pw-btn:hover {
+  border-color: var(--ink-3);
+  background: var(--paper-2);
+}
+
+.pw-btn--primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.pw-btn--primary:hover {
+  border-color: var(--accent-hover);
+  background: var(--accent-hover);
+}
+
+.pw-btn--quiet {
+  padding-inline: 8px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--accent);
+}
+
+.pw-btn--quiet:hover {
+  border-color: transparent;
+  background: rgba(var(--accent-rgb), 0.08);
+}
+
+.pw-btn--small {
+  min-height: 28px;
+  gap: 6px;
+  font-size: var(--type-12);
+}
+
+.pw-icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+
+.pw-icon-btn:hover {
+  background: var(--paper-2);
+  color: var(--ink);
+}
+
+/* ------------------------------------------------------------------ */
+/* Citation                                                           */
+/* ------------------------------------------------------------------ */
+
+.pw-cite {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.pw-cite-status {
+  color: var(--ink-3);
+  font-size: var(--type-12);
+}
+
+.pw-cite-status:empty {
+  display: block;
+  height: 0;
+}
+
+.pw-cite-fallback {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: min(520px, 100%);
+  color: var(--ink-3);
+  font-size: var(--type-12);
+}
+
+.pw-cite-fallback textarea {
+  padding: 8px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  color: var(--ink);
+  font: 12px / 1.5 var(--font-mono);
+  resize: vertical;
+}
+
+/* ------------------------------------------------------------------ */
+/* Empty, placeholder, not-found and error states                     */
+/* ------------------------------------------------------------------ */
+
+.pw-state {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  max-width: 76ch;
+  padding: var(--space-3);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-card);
+  background: var(--paper-2);
+  color: var(--ink-2);
+  font-size: var(--type-14);
+}
+
+.pw-state[data-kind='error'] {
+  border-style: solid;
+  border-color: var(--ink-3);
+  background: var(--paper);
+}
+
+.pw-state-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--paper);
+  color: var(--ink-3);
+}
+
+/* Hatching is reserved for the TEST-baseline family; a placeholder is
+   marked by a dashed frame instead. */
+.pw-state[data-kind='placeholder'] .pw-state-icon {
+  border-style: dashed;
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+
+.pw-state-body {
+  min-width: 0;
+}
+
+.pw-state-title {
+  margin: 0 0 var(--space-0);
+  color: var(--ink);
+  font-size: var(--type-16);
+  line-height: 1.4;
+}
+
+.pw-state-body p {
+  margin: 0 0 var(--space-1);
+}
+
+.pw-state-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-0) var(--space-2);
+  color: var(--ink-3);
+  font-size: var(--type-12);
+}
+
+.pw-state-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+}
+
+/* Server text quoted verbatim (disclaimers, error details): serif, with a
+   rule, so it reads as a quotation rather than as this UI's own words. */
+.pw-server-text {
+  margin: var(--space-0) 0 0;
+  padding: 10px 14px;
+  border-left: 2px solid var(--line-strong);
+  background: var(--paper-2);
+  color: var(--ink-2);
+  font-family: var(--font-serif);
+  font-size: var(--type-14);
+  line-height: 1.6;
+}
+
+/* ------------------------------------------------------------------ */
+/* Footer                                                             */
+/* ------------------------------------------------------------------ */
+
+.pw-footer {
+  border-top: 1px solid var(--line);
+  background: var(--paper-2);
+  color: var(--ink-2);
+  font-size: var(--type-14);
+}
+
+.pw-footer-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+  padding-block: var(--space-5) var(--space-3);
+}
+
+@media (min-width: 1024px) {
+  .pw-footer-grid {
+    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+    gap: var(--space-4) var(--space-6);
+  }
+}
+
+.pw-footer-heading {
+  margin-bottom: var(--space-2);
+  color: var(--ink-3);
+  font-size: var(--type-12);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.pw-footer-heading:lang(th) {
+  letter-spacing: 0;
+}
+
+.pw-truth-list {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: truth;
+}
+
+.pw-truth-list li {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 10px;
+  counter-increment: truth;
+}
+
+.pw-truth-list li::before {
+  content: counter(truth);
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin-top: 1px;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  color: var(--ink-3);
+  font: 500 11px / 1 var(--font-mono);
+}
+
+.pw-truth-null {
+  margin: var(--space-2) 0 0;
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--line);
+  color: var(--ink-3);
+}
+
+.pw-footer-server .pw-server-text {
+  margin: 0;
+  background: var(--paper);
+}
+
+.pw-footer-note {
+  margin: var(--space-1) 0 0;
+  color: var(--ink-3);
+  font-size: var(--type-12);
+}
+
+.pw-footer-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+  grid-column: 1 / -1;
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--line);
+  color: var(--ink-3);
+  font-size: var(--type-12);
+}
+
+.pw-footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  font-size: var(--type-14);
+  font-weight: 500;
+}
+
+/* ------------------------------------------------------------------ */
+/* Responsive                                                         */
+/* ------------------------------------------------------------------ */
+
+/* 640-1023: single column; the subtitle drops under the product name,
+   aligned with it (past the mark), without the divider rule. */
+@media (max-width: 1023px) {
+  .pw-brand {
+    flex-wrap: wrap;
+    row-gap: 0;
+  }
+
+  .pw-brand-tagline {
+    flex: 1 1 100%;
+    padding-left: 34px; /* 24 px mark + 10 px gap */
+    border-left: 0;
+  }
+}
+
+/* < 640: compact masthead; the nav collapses behind the Menu button. */
+@media (max-width: 639px) {
+  .pw-shell {
+    --container-pad: 16px;
+    --grid-gap: 16px;
+  }
+
+  .pw-header-top {
+    min-height: 52px;
+  }
+
+  .pw-brand-tagline {
+    display: none;
+  }
+
+  .pw-menu-btn {
+    display: inline-flex;
+  }
+
+  .pw-nav {
+    display: none;
+  }
+
+  .pw-nav[data-open='true'] {
+    display: block;
+    position: absolute;
+    top: 100%;
+    right: 0;
+    left: 0;
+    border-bottom: 1px solid var(--line);
+    background: var(--paper);
+    box-shadow: var(--shadow-pop);
+    animation: pw-pop var(--motion-fast);
+  }
+
+  .pw-nav-list {
+    flex-direction: column;
+    padding-block: var(--space-0);
+  }
+
+  .pw-nav-link {
+    display: flex;
+    width: 100%;
+    min-height: 48px;
+    margin: 0;
+    padding-left: 12px;
+    border-bottom: 1px solid var(--line-soft);
+    border-left: 3px solid transparent;
+  }
+
+  .pw-nav-link:hover {
+    border-bottom-color: var(--line-soft);
+  }
+
+  .pw-nav-link[aria-current='page'] {
+    border-bottom-color: var(--line-soft);
+    border-left-color: var(--accent);
+  }
+
+  .pw-page {
+    gap: var(--space-3);
+    padding-top: var(--space-3);
+  }
+
+  .pw-page-title {
+    font-size: 24px;
+  }
+
+  .pw-state {
+    flex-direction: column;
+    padding: var(--space-2);
+  }
+
+  /* Bottom sheet: ignores the computed coordinates. */
+  .pw-source-pop {
+    top: auto;
+    right: 16px;
+    bottom: 16px;
+    left: 16px;
+    width: auto;
+    max-height: 70vh;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Reduced motion                                                     */
+/* ------------------------------------------------------------------ */
+
+@media (prefers-reduced-motion: reduce) {
+  .pw-shell *,
+  .pw-shell *::before,
+  .pw-shell *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Print (Methods and Data & limits export to PDF)                    */
+/* Hides navigation and every control; keeps the TEST strip and the    */
+/* truth footer, which are statements, not controls.                   */
+/* ------------------------------------------------------------------ */
+
+@media print {
+  @page {
+    margin: 16mm 14mm;
+  }
+
+  html,
+  body,
+  #root {
+    height: auto;
+  }
+
+  .pw-shell,
+  .pw-viewport {
+    display: block;
+    height: auto !important;
+    min-height: 0;
+    background: #fff;
+  }
+
+  .pw-header {
+    position: static !important;
+    border-bottom: 1px solid #000;
+  }
+
+  .pw-skip,
+  .pw-nav,
+  .pw-header-tools,
+  .pw-source,
+  .pw-figure-actions,
+  .pw-page-actions,
+  .pw-state-actions,
+  .pw-cite,
+  .pw-baseline button,
+  .pw-shell button {
+    display: none !important;
+  }
+
+  .pw-baseline {
+    border: 1px solid #000;
+    background: #fff;
+  }
+
+  .pw-page {
+    max-width: none;
+    padding: var(--space-3) 0;
+    gap: var(--space-3);
+  }
+
+  .pw-figure,
+  .pw-table-wrap,
+  .pw-table tr,
+  .pw-card,
+  .pw-state,
+  .pw-server-text,
+  .pw-footer-grid > * {
+    break-inside: avoid;
+  }
+
+  .pw-page h1,
+  .pw-page h2,
+  .pw-page h3 {
+    break-after: avoid;
+  }
+
+  .pw-table-wrap,
+  .pw-disclosure-body {
+    overflow: visible;
+  }
+
+  .pw-table thead {
+    display: table-header-group; /* repeat column heads on each page */
+  }
+
+  /* Printed links show where they go. */
+  .pw-page a[href]:not([href^='#'])::after,
+  .pw-footer a[href]:not([href^='#'])::after {
+    content: ' (' attr(href) ')';
+    color: var(--ink-3);
+    font-family: var(--font-mono);
+    font-size: 0.85em;
+    overflow-wrap: anywhere;
+  }
+
+  .pw-footer {
+    background: #fff;
+    border-top: 1px solid #000;
+  }
+
+  .pw-shell[data-layout='map'] .leaflet-control-container {
+    display: none;
+  }
+}

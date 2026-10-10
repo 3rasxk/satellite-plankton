@@ -7,7 +7,9 @@
    buttons, focus ring, primary chart trace) and must never be used to
    express a risk reading. */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+Thai:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+/* Source Serif 4 + Noto Serif Thai: long-form prose only (.prose, quoted
+   server text) -- dashboard spec §7. */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+Thai:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=Noto+Serif+Thai:wght@400;600&display=swap');
 
 :root {
   /* ---- surfaces & text --------------------------------------------- */
@@ -118,4 +120,64 @@
     --motion-fast: 0ms;
     --motion-panel: 0ms;
   }
+}
+
+/* ---- dashboard system (academic dashboard spec §7, 2026-10) -----------
+   Additive: every token above keeps its value, so the raster map and its
+   panels render exactly as before. These feed src/styles/dashboard.css.
+   The rules above still bind: colour on the page is the NDCI ramp (data)
+   and --accent (interaction); everything else is ink on paper. The four
+   --risk-* tokens stay unused. */
+:root {
+  --font-serif: 'Source Serif 4', 'Noto Serif Thai', 'Iowan Old Style', Georgia, serif;
+
+  /* The spec's type scale, 12/14/16/20/28/40 px. (--fs-* above is the
+     map's larger scale and is left alone.) */
+  --type-12: 12px;
+  --type-14: 14px;
+  --type-16: 16px;
+  --type-20: 20px;
+  --type-28: 28px;
+  --type-40: 40px;
+  --lh: 1.5;
+  --lh-th: 1.7; /* Thai stacks tone marks above and vowels below the line */
+  --lh-tight: 1.25;
+
+  /* 8 px spacing unit; --space-0 is the half step for tight inline gaps. */
+  --space-0: 4px;
+  --space-1: 8px;
+  --space-2: 16px;
+  --space-3: 24px;
+  --space-4: 32px;
+  --space-5: 40px;
+  --space-6: 48px;
+  --space-8: 64px;
+
+  --container-max: 1280px;
+  --container-pad: 24px;
+  --grid-gap: 24px;
+
+  /* Ink and paper. --ink-3 keeps >= 4.5:1 on --paper, --paper-2 and --sand. */
+  --ink: #1d1d1f;
+  --ink-2: #3a3a3c;
+  --ink-3: #636369;
+  --paper: #ffffff;
+  --paper-2: #f7f7f8;
+  --line: #dcdce1; /* card, table and section hairlines */
+  --line-soft: #ececef; /* rows inside a table */
+  --line-strong: #a9a9b0; /* control borders, dashed empty states */
+
+  /* TEST-baseline strip: warm neutral paper with an ink hatch. Deliberately
+     not amber or red, which would read as a warning or a risk colour. */
+  --sand: #f5f2ea;
+  --sand-line: #ddd5c3;
+
+  /* Hatching = "relative to a TEST baseline" (anomaly chips, the strip).
+     Never colour: ink stripes on paper, or paper stripes on ink. */
+  --hatch-ink: repeating-linear-gradient(135deg, var(--ink) 0 2px, transparent 2px 5px);
+  --hatch-soft: repeating-linear-gradient(135deg, rgba(29, 29, 31, 0.45) 0 1.5px, transparent 1.5px 4px);
+  --hatch-inverse: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.7) 0 1.5px, transparent 1.5px 4px);
+
+  --radius-card: 8px;
+  --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.06);
 }
