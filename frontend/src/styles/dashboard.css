@@ -3455,3 +3455,252 @@ th[aria-sort='descending'] .pw-sort-icon {
     display: none;
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Methods page (/methods)                                            */
+/* Ink on paper: role tags and gate states are words in a hairline     */
+/* frame, never a colour. Long-form text uses .prose (serif).          */
+/* ------------------------------------------------------------------ */
+
+/* Anchored blocks land below the sticky header. */
+.pw-methods-page [id] {
+  scroll-margin-top: 96px;
+}
+
+.pw-methods-version {
+  margin: var(--space-1) 0 0;
+}
+
+.pw-methods-toc {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--paper-2);
+}
+
+.pw-methods-toc ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  margin: var(--space-1) 0 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: pw-toc;
+}
+
+.pw-methods-toc li {
+  counter-increment: pw-toc;
+}
+
+.pw-methods-toc li::before {
+  content: counter(pw-toc) '. ';
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: var(--type-12);
+}
+
+.pw-methods-section > .prose {
+  max-width: 72ch;
+}
+
+.pw-methods-section .pw-card > .prose {
+  margin-top: var(--space-2);
+}
+
+.pw-methods-source,
+.pw-methods-stat,
+.pw-screen-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.pw-methods-h4 {
+  margin: var(--space-3) 0 var(--space-1);
+  font-size: var(--type-14);
+  font-weight: 600;
+}
+
+.pw-methods-server {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pw-index-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--grid-gap);
+}
+
+@media (min-width: 1024px) {
+  .pw-index-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.pw-index-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.pw-index-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-1);
+}
+
+.pw-index-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px var(--space-1);
+  margin: 0;
+  font-size: var(--type-16);
+}
+
+.pw-index-symbol {
+  font-family: var(--font-mono);
+  font-weight: 500;
+}
+
+.pw-index-name {
+  color: var(--ink-3);
+  font-size: var(--type-14);
+  font-weight: 400;
+}
+
+/* A role or validation tag: words in a hairline frame, no colour. */
+.pw-role-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-pill);
+  color: var(--ink-2);
+  font: 500 var(--type-12) / 1.35 var(--font-body);
+  white-space: normal;
+}
+
+.pw-role-tag[data-role='primary'] {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+.pw-role-tag[data-role='not_validated'],
+.pw-role-tag[data-role='derived'],
+.pw-role-tag[data-role='exploratory'] {
+  border-style: dashed;
+}
+
+.pw-formula {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: var(--radius-control);
+  background: var(--paper-2);
+  font-family: var(--font-mono);
+  font-size: var(--type-14);
+  overflow-wrap: anywhere;
+}
+
+.pw-band-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pw-index-example {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+}
+
+.pw-index-example-how {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: var(--type-14);
+}
+
+.pw-screen-rule {
+  margin: 0;
+}
+
+.pw-gate-state {
+  color: var(--ink-2);
+  font-size: var(--type-14);
+}
+
+.pw-rates-reason {
+  padding-left: var(--space-3) !important;
+  font-weight: 400;
+}
+
+.pw-refs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding-left: 1.5em;
+}
+
+.pw-ref {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pw-ref-citation {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: var(--type-16);
+  line-height: 1.5;
+}
+
+.pw-ref-doi {
+  margin: 0;
+}
+
+@media print {
+  .pw-methods-toc {
+    display: none !important;
+  }
+
+  .pw-methods-page [id] {
+    scroll-margin-top: 0;
+  }
+
+  .pw-index-grid,
+  .pw-methods-page .pw-cols-2 {
+    display: block;
+  }
+
+  .pw-index-card,
+  .pw-methods-source,
+  .pw-screen-card,
+  .pw-methods-stat,
+  .pw-ref {
+    margin-bottom: var(--space-2);
+    break-inside: avoid;
+  }
+
+  .pw-methods-section {
+    break-before: auto;
+  }
+
+  .pw-methods-section > .prose,
+  .pw-methods-page .prose {
+    max-width: none;
+  }
+
+  .pw-formula {
+    border: 1px solid #000;
+    background: #fff;
+  }
+}

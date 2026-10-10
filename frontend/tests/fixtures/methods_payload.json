@@ -1,0 +1,438 @@
+{
+  "_meta": "Trimmed from the live API (backend with BASELINE_MODE=test, 2026-10-10): GET /methods verbatim; GET /raster-scan/highlights?mode=anomaly reduced to disclaimer, run_id, mode and baseline.",
+  "methods": {
+    "disclaimer": "Satellite index values describe water colour at pixel resolution. Small or scattered blooms may not be visible. TEST baseline mode: a Sentinel-2 NDCI reading, at a monitoring site or at a raster cell, may be compared with that same location's own earlier record for the same season. Any resulting anomaly is provisional and uncalibrated, has never been checked against recorded bloom events, and is a statistical statement only — not a bloom detection, a species identification, a risk level or a forecast. Index values alone establish neither bloom presence nor absence.",
+    "api_version": "0.1.0",
+    "indices": [
+      {
+        "key": "ndci",
+        "name": "Normalized Difference Chlorophyll Index",
+        "formula": "(B5 - B4) / (B5 + B4)",
+        "bands": [
+          "B5",
+          "B4"
+        ],
+        "wavelengths_nm": {
+          "B5": 705,
+          "B4": 665
+        },
+        "role": "primary",
+        "note": "Primary index. B5 (705 nm, red-edge) and B4 (665 nm, red) form the project's Sentinel-2 surface-reflectance proxy. Mishra & Mishra (2012) introduced NDCI using water-leaving reflectance near 708 and 665 nm; that study's fitted values are not calibration for this different product.",
+        "raster_band": "ndci",
+        "display_domain": {
+          "min": -0.05,
+          "max": 0.15
+        },
+        "worked_example": {
+          "bands": {
+            "B2": 800.0,
+            "B3": 900.0,
+            "B4": 600.0,
+            "B5": 700.0,
+            "B6": 650.0
+          },
+          "value": 0.07692307692307693,
+          "note": "Illustrative digital numbers chosen for easy hand arithmetic, not an observation; the value is the server's own index function applied to them."
+        }
+      },
+      {
+        "key": "2bda",
+        "name": "2-Band Algorithm (2BDA)",
+        "formula": "B5 / B4",
+        "bands": [
+          "B5",
+          "B4"
+        ],
+        "wavelengths_nm": {
+          "B5": 705,
+          "B4": 665
+        },
+        "role": "derived",
+        "note": "Algebraically tied to NDCI: for r = B5/B4, NDCI = (r - 1)/(r + 1). It must not be treated as an independent confirming signal.",
+        "raster_band": "bda2",
+        "display_domain": null,
+        "worked_example": {
+          "bands": {
+            "B2": 800.0,
+            "B3": 900.0,
+            "B4": 600.0,
+            "B5": 700.0,
+            "B6": 650.0
+          },
+          "value": 1.1666666666666667,
+          "note": "Illustrative digital numbers chosen for easy hand arithmetic, not an observation; the value is the server's own index function applied to them."
+        }
+      },
+      {
+        "key": "3bda",
+        "name": "3-Band Algorithm (3BDA)",
+        "formula": "(1/B4 - 1/B5) * B6",
+        "bands": [
+          "B4",
+          "B5",
+          "B6"
+        ],
+        "wavelengths_nm": {
+          "B4": 665,
+          "B5": 705,
+          "B6": 740
+        },
+        "role": "comparison",
+        "note": "Turbid-water variant: adds B6 (740 nm) to correct for backscatter dominated by suspended sediment rather than chlorophyll, which may help near turbid river mouths. Reported beside NDCI for comparison; no decision in this system reads it.",
+        "raster_band": "bda3",
+        "display_domain": null,
+        "worked_example": {
+          "bands": {
+            "B2": 800.0,
+            "B3": 900.0,
+            "B4": 600.0,
+            "B5": 700.0,
+            "B6": 650.0
+          },
+          "value": 0.15476190476190482,
+          "note": "Illustrative digital numbers chosen for easy hand arithmetic, not an observation; the value is the server's own index function applied to them."
+        }
+      },
+      {
+        "key": "b2_b3_ratio",
+        "name": "B2/B3 blue-to-green context ratio",
+        "formula": "B2 / B3",
+        "bands": [
+          "B2",
+          "B3"
+        ],
+        "wavelengths_nm": {},
+        "role": "exploratory",
+        "note": "Exploratory context ratio, not calibrated by this project against field observations. It is not a Noctiluca discriminator, not a species classifier, and not an independent bloom decision.",
+        "raster_band": "b2_b3",
+        "display_domain": null,
+        "worked_example": {
+          "bands": {
+            "B2": 800.0,
+            "B3": 900.0,
+            "B4": 600.0,
+            "B5": 700.0,
+            "B6": 650.0
+          },
+          "value": 0.8888888888888888,
+          "note": "Illustrative digital numbers chosen for easy hand arithmetic, not an observation; the value is the server's own index function applied to them."
+        }
+      }
+    ],
+    "sentinel2": {
+      "collection": "COPERNICUS/S2_SR_HARMONIZED",
+      "bands": [
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6"
+      ],
+      "native_resolution_m": {
+        "B2": 10,
+        "B3": 10,
+        "B4": 10,
+        "B5": 20,
+        "B6": 20
+      },
+      "wavelengths_nm": {
+        "B4": 665,
+        "B5": 705,
+        "B6": 740
+      },
+      "wavelengths_note": "Centre wavelengths are listed only where the project's own documentation states them; B2 and B3 are omitted rather than supplied from elsewhere.",
+      "revisit_days": 5,
+      "scale_factor": 10000.0,
+      "max_scene_age_days": 14,
+      "max_cloud_fraction": 0.5,
+      "cloud_mask_scl_classes": [
+        0,
+        1,
+        3,
+        7,
+        8,
+        9,
+        10
+      ],
+      "min_water_occurrence_pct": 50.0
+    },
+    "modis": {
+      "collection": "NASA/OCEANDATA/MODIS-Aqua/L3SMI",
+      "bands": [
+        "chlor_a",
+        "sst"
+      ],
+      "grid_resolution_m": 4638,
+      "record_start": "2002-07-04",
+      "note": "Level-3 mapped product sampled on its ~4.6 km grid (the instrument's ~1 km figure is before Level-3 binning). chlor_a is compared only with a chlor_a climatology; it is never merged with Sentinel-2 indices."
+    },
+    "gates": {
+      "risk_evaluation_active": false,
+      "signal_anomaly_active": true,
+      "signal_anomaly_floors": {
+        "min_independent_dates": 30,
+        "max_observation_age_days": 14
+      },
+      "signal_anomaly_statistic": {
+        "formula": "robust_z = (current NDCI - median NDCI) / (1.4826 * MAD)",
+        "mad_scale": 1.4826,
+        "watch_at_z": 2.0,
+        "high_at_z": 3.0,
+        "note": "Its z=2 and z=3 boundaries are provisional engineering thresholds, not validated Noctiluca thresholds."
+      }
+    },
+    "latest_scene_policy": {
+      "max_cloud_fraction": 0.5,
+      "min_water_pixels": 1000,
+      "poll_interval_hours": 1,
+      "min_scan_interval_hours": 1,
+      "settle_hours": 36
+    },
+    "season_rule": "calendar-month window, target month +/- 1 (cyclic)",
+    "season_windows": [
+      {
+        "month": 1,
+        "key": "m01+-1",
+        "months": [
+          12,
+          1,
+          2
+        ]
+      },
+      {
+        "month": 2,
+        "key": "m02+-1",
+        "months": [
+          1,
+          2,
+          3
+        ]
+      },
+      {
+        "month": 3,
+        "key": "m03+-1",
+        "months": [
+          2,
+          3,
+          4
+        ]
+      },
+      {
+        "month": 4,
+        "key": "m04+-1",
+        "months": [
+          3,
+          4,
+          5
+        ]
+      },
+      {
+        "month": 5,
+        "key": "m05+-1",
+        "months": [
+          4,
+          5,
+          6
+        ]
+      },
+      {
+        "month": 6,
+        "key": "m06+-1",
+        "months": [
+          5,
+          6,
+          7
+        ]
+      },
+      {
+        "month": 7,
+        "key": "m07+-1",
+        "months": [
+          6,
+          7,
+          8
+        ]
+      },
+      {
+        "month": 8,
+        "key": "m08+-1",
+        "months": [
+          7,
+          8,
+          9
+        ]
+      },
+      {
+        "month": 9,
+        "key": "m09+-1",
+        "months": [
+          8,
+          9,
+          10
+        ]
+      },
+      {
+        "month": 10,
+        "key": "m10+-1",
+        "months": [
+          9,
+          10,
+          11
+        ]
+      },
+      {
+        "month": 11,
+        "key": "m11+-1",
+        "months": [
+          10,
+          11,
+          12
+        ]
+      },
+      {
+        "month": 12,
+        "key": "m12+-1",
+        "months": [
+          11,
+          12,
+          1
+        ]
+      }
+    ],
+    "baseline": {
+      "mode": "test",
+      "valid": true,
+      "kind": "test",
+      "version": "TEST-20261009-9fc9a022",
+      "built_at": "2026-10-09T01:09:04+00:00",
+      "history_start": "2017-12-13",
+      "history_end": "2026-10-07",
+      "season_rule": "calendar-month window, target month +/- 1 (cyclic)",
+      "min_independent_dates": 35,
+      "median_independent_dates": 42,
+      "min_season_dates_by_location": {
+        "bangsaen": 43,
+        "siracha": 42,
+        "thachin_mouth": 36,
+        "chaophraya_mouth": 44,
+        "chaam": 35,
+        "bangpakong_mouth": 44,
+        "pattaya": 38
+      },
+      "preprocessing_signature": "9fc9a022c04817ec",
+      "base_rates": {
+        "assessed": 1706,
+        "watch": 60,
+        "high": 123,
+        "no_assessment": 1155,
+        "reasons": {
+          "insufficient_independent_dates": 1155
+        }
+      },
+      "reason": null
+    },
+    "quality_screens": {
+      "degenerate_ndci": {
+        "rule": "abs(ndci) >= 1 - 1e-6",
+        "threshold_abs": 0.999999,
+        "meaning": "NDCI = (B5 - B4) / (B5 + B4) is exactly +1 when B4 is zero and -1 when B5 is zero: a zero band, not a physical water-colour value (mostly mask-edge artefacts).",
+        "effect": "Never scored against the TEST cell baseline (counted 'invalid') and never a highlight pin in either mode; still a measured cell on the map and in the cell inspector.",
+        "status": "developer-chosen backend rule; detection's [-1, 1] validity is unchanged"
+      },
+      "low_signal": {
+        "rule": "any of B2, B3, B4 < 50 DN (or not a finite number)",
+        "min_visible_dn": 50,
+        "approx_reflectance": 0.005,
+        "bands": [
+          "B2",
+          "B3",
+          "B4"
+        ],
+        "rationale": "S2_SR_HARMONIZED removes the processing offset and clips at 0, so very dark water, shadow and residual cloud or land edges come out near 0 DN, where a band ratio such as NDCI explodes. The threshold is a screening choice, not a measured noise floor.",
+        "effect": "Never scored against the TEST cell baseline (counted 'low_signal') and never a highlight pin in either mode; still a measured cell on the map and in the cell inspector. It changes which cells are scored, not the statistic.",
+        "status": "developer-chosen, not validated"
+      }
+    },
+    "references": [
+      {
+        "id": "mishra2012",
+        "citation": "Mishra, S. and Mishra, D.R. (2012), “Normalized difference chlorophyll index: A novel model for remote estimation of chlorophyll-a concentration in turbid productive waters,”",
+        "doi": "10.1016/j.rse.2011.10.016",
+        "note": "This project uses Sentinel-2 B4/B5 surface reflectance. Similar wavelengths and formula do not make fitted values or raw thresholds interchangeable."
+      },
+      {
+        "id": "luangon2023",
+        "citation": "Luang-on et al. (2023), “MODIS-derived green Noctiluca blooms in the upper Gulf of Thailand: Algorithm development and seasonal variation mapping,”",
+        "doi": "10.3389/fmars.2023.1031901",
+        "note": "Those are chlorophyll-a observations and MODIS/in-situ classifications. They are not Sentinel-2 NDCI thresholds and are not inserted into this raster or API."
+      }
+    ]
+  },
+  "highlights_anomaly": {
+    "disclaimer": "Satellite index values describe water colour at pixel resolution. Small or scattered blooms may not be visible. TEST baseline mode: a Sentinel-2 NDCI reading, at a monitoring site or at a raster cell, may be compared with that same location's own earlier record for the same season. Any resulting anomaly is provisional and uncalibrated, has never been checked against recorded bloom events, and is a statistical statement only — not a bloom detection, a species identification, a risk level or a forecast. Index values alone establish neither bloom presence nor absence.",
+    "run_id": 6,
+    "mode": "anomaly",
+    "baseline": {
+      "mode": "test",
+      "valid": true,
+      "kind": "test",
+      "version": "TEST-20261009-9fc9a022",
+      "built_at": "2026-10-09T01:09:04+00:00",
+      "history_start": "2017-12-13",
+      "history_end": "2026-10-07",
+      "season_rule": "calendar-month window, target month +/- 1 (cyclic)",
+      "min_independent_dates": 35,
+      "median_independent_dates": 42,
+      "min_season_dates_by_location": {
+        "bangsaen": 43,
+        "siracha": 42,
+        "thachin_mouth": 36,
+        "chaophraya_mouth": 44,
+        "chaam": 35,
+        "bangpakong_mouth": 44,
+        "pattaya": 38
+      },
+      "preprocessing_signature": "9fc9a022c04817ec",
+      "base_rates": {
+        "assessed": 1706,
+        "watch": 60,
+        "high": 123,
+        "no_assessment": 1155,
+        "reasons": {
+          "insufficient_independent_dates": 1155
+        }
+      },
+      "reason": null,
+      "level_b": {
+        "season_key": "m10+-1",
+        "months": [
+          9,
+          10,
+          11
+        ],
+        "file": "cells_m10.npz",
+        "scale_m": 200,
+        "history_start": "2017-04-27",
+        "history_end": "2026-09-23",
+        "history_end_rule": "last day the history query could contain (its end is exclusive); a cell is assessed only when its own acquisition date is strictly later",
+        "season_rule": "calendar-month window, target month +/- 1 (cyclic)",
+        "min_independent_dates": 30,
+        "max_observation_age_days": 14,
+        "cell_preprocessing_signature": "4fc6831362a8cc45",
+        "built_at": "2026-10-09T12:25:08+00:00",
+        "cells": 289921,
+        "cells_n_ge_floor": 288187,
+        "share_n_ge_floor": 0.9940190603647201,
+        "n_median": 44.0,
+        "n_min": 3,
+        "n_max": 60,
+        "mad_p05": 0.01961152479052544,
+        "mad_p50": 0.0371212400496006,
+        "mad_p95": 0.05701385810971261,
+        "n_dates": 139,
+        "first_date": "2017-09-14",
+        "last_date": "2026-09-22"
+      }
+    }
+  }
+}
