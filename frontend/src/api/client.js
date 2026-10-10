@@ -96,8 +96,13 @@ export async function getMethods() {
   return data
 }
 
-export async function getTimeseries(lat, lng) {
-  const { data } = await client.get('/timeseries', { params: { lat, lng } })
+// MODIS-Aqua chlor_a series for one point. It reads a multi-year archive, so
+// a cold request can outlast the client's 30 s default; `timeout` (ms)
+// overrides it for this call only.
+export async function getTimeseries(lat, lng, { timeout } = {}) {
+  const config = { params: { lat, lng } }
+  if (Number.isFinite(timeout) && timeout > 0) config.timeout = timeout
+  const { data } = await client.get('/timeseries', config)
   return data
 }
 

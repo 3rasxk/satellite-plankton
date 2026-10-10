@@ -23,6 +23,9 @@
  * panel over the map) `fixed` is relative to that ancestor; the measured
  * offset is corrected after the first paint.
  *
+ * `headingKey` replaces the popover heading (e.g. a table column's source
+ * rather than one value's).
+ *
  * `defaultOpen` renders it open (tests, print previews). `SourceRows` is the
  * same row list for inline use (e.g. a provenance table in an inspector).
  */
@@ -89,7 +92,7 @@ export function SourceRows({ rows }) {
   )
 }
 
-export default function SourceChip({ source, defaultOpen = false, className = '' }) {
+export default function SourceChip({ source, defaultOpen = false, className = '', headingKey = 'source.heading' }) {
   const { t } = useLang()
   const ref = isObject(source) ? source : null
   const [open, setOpen] = useState(Boolean(defaultOpen))
@@ -184,13 +187,13 @@ export default function SourceChip({ source, defaultOpen = false, className = ''
           className="pw-source-pop"
           id={popId}
           role="dialog"
-          aria-label={t('source.heading')}
+          aria-label={t(headingKey)}
           tabIndex={-1}
           ref={popRef}
           style={placementStyle(placement)}
         >
           <div className="pw-source-head">
-            <span className="pw-source-title">{t('source.heading')}</span>
+            <span className="pw-source-title">{t(headingKey)}</span>
             <button type="button" className="pw-icon-btn" aria-label={t('common.close')} onClick={() => close(true)}>
               <Icon name="close" size={14} strokeWidth={2} />
             </button>

@@ -13,6 +13,8 @@ import App from './App.jsx'
 import { LangProvider } from './i18n/LangContext.jsx'
 import OverviewPage from './pages/OverviewPage.jsx'
 import RasterPage from './pages/RasterPage.jsx'
+import SitesPage from './pages/SitesPage.jsx'
+import SiteDetailPage from './pages/SiteDetailPage.jsx'
 import PlaceholderPage from './pages/PlaceholderPage.jsx'
 import NotFoundPage from './pages/NotFoundPage.jsx'
 import LegacyRasterRedirect from './pages/LegacyRasterRedirect.jsx'
@@ -29,8 +31,8 @@ createRoot(document.getElementById('root')).render(
             <Route index element={<OverviewPage />} />
             <Route path="map" element={<RasterPage />} />
             <Route path="raster" element={<LegacyRasterRedirect />} />
-            <Route path="sites" element={<PlaceholderPage titleKey="nav.sites" />} />
-            <Route path="sites/:siteId" element={<PlaceholderPage titleKey="nav.sites" />} />
+            <Route path="sites" element={<SitesPage />} />
+            <Route path="sites/:siteId" element={<SiteDetailPage />} />
             <Route path="methods" element={<PlaceholderPage titleKey="nav.methods" />} />
             <Route path="data" element={<PlaceholderPage titleKey="nav.data" />} />
             <Route path="*" element={<NotFoundPage />} />

@@ -36,6 +36,12 @@ const ICON_PATHS = {
   external: <><path d="M14 5h5v5" /><path d="m19 5-8 8" /><path d="M17 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-10A1.5 1.5 0 0 1 4 18.5v-10A1.5 1.5 0 0 1 5.5 7H10" /></>,
   grid: <><rect x="4" y="4" width="16" height="16" rx="2" /><path d="M4 12h16M12 4v16" /></>,
   'arrow-right': <><path d="M5 12h14" /><path d="m13 6 6 6-6 6" /></>,
+  'arrow-left': <><path d="M19 12H5" /><path d="m11 6-6 6 6 6" /></>,
+
+  // Sortable table headers (src/components/SitesTable.jsx).
+  sort: <><path d="m8 9 4-4 4 4" /><path d="m8 15 4 4 4-4" /></>,
+  'sort-asc': <><path d="M12 19V6" /><path d="m7 11 5-5 5 5" /></>,
+  'sort-desc': <><path d="M12 5v13" /><path d="m7 13 5 5 5-5" /></>,
 }
 
 export default function Icon({ name, size = 18, strokeWidth = 1.8, className = '' }) {
