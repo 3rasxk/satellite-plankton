@@ -11,6 +11,7 @@ import './styles/global.css'
 import './styles/dashboard.css'
 import App from './App.jsx'
 import { LangProvider } from './i18n/LangContext.jsx'
+import OverviewPage from './pages/OverviewPage.jsx'
 import RasterPage from './pages/RasterPage.jsx'
 import PlaceholderPage from './pages/PlaceholderPage.jsx'
 import NotFoundPage from './pages/NotFoundPage.jsx'
@@ -25,7 +26,7 @@ createRoot(document.getElementById('root')).render(
       <LangProvider>
         <Routes>
           <Route element={<App />}>
-            <Route index element={<PlaceholderPage titleKey="nav.overview" />} />
+            <Route index element={<OverviewPage />} />
             <Route path="map" element={<RasterPage />} />
             <Route path="raster" element={<LegacyRasterRedirect />} />
             <Route path="sites" element={<PlaceholderPage titleKey="nav.sites" />} />

@@ -71,22 +71,42 @@ const countText = (v) => formatValue(v, { kind: 'count' }).text
 const utcText = (v) => formatValue(v, { kind: 'datetime-utc' }).text
 const percentText = (v) => formatValue(v, { kind: 'percent', decimals: 0 }).text
 
-function pollMessage(poll, nowMs) {
-  if (!isObject(poll)) return message('banner.poll_never', {}, 'attention')
+/**
+ * Health of the newer-scene poll (`/raster-scan.poll`, ScenePollInfo), the
+ * one definition the banner and the Overview poll line share:
+ *   'never'   no poll status, or no successful poll on record;
+ *   'failing' an error is on record and no success is shown to be later;
+ *   'old'     the last success is older than POLL_MAX_AGE_HOURS;
+ *   'ok'      otherwise.
+ * Anything but 'ok' means newer scenes may exist unchecked. `okMs`/`errMs`
+ * are the parsed timestamps (null when absent), `ageMs` is now - okMs.
+ */
+export function classifyPoll(poll, nowMs) {
+  if (!isObject(poll)) return { state: 'never', okMs: null, errMs: null, ageMs: null }
   const okMs = toUtcMs(poll.last_poll_ok_at)
   const errMs = toUtcMs(poll.last_error_at)
+  const ageMs = okMs === null ? null : nowMs - okMs
   // An error is current unless a success is shown to be later than it.
   if (hasValue(poll.last_error) && (okMs === null || errMs === null || errMs > okMs)) {
+    return { state: 'failing', okMs, errMs, ageMs }
+  }
+  if (okMs === null) return { state: 'never', okMs, errMs, ageMs }
+  if (ageMs > POLL_MAX_AGE_HOURS * HOUR_MS) return { state: 'old', okMs, errMs, ageMs }
+  return { state: 'ok', okMs, errMs, ageMs }
+}
+
+function pollMessage(poll, nowMs) {
+  const health = classifyPoll(poll, nowMs)
+  if (health.state === 'failing') {
     return message('banner.poll_failing', {
       kind: plain(poll.last_error_kind),
       last_ok: utcText(poll.last_poll_ok_at),
     }, 'attention')
   }
-  if (okMs === null) return message('banner.poll_never', {}, 'attention')
-  const ageMs = nowMs - okMs
-  if (ageMs > POLL_MAX_AGE_HOURS * HOUR_MS) {
+  if (health.state === 'never') return message('banner.poll_never', {}, 'attention')
+  if (health.state === 'old') {
     return message('banner.poll_old', {
-      hours: String(Math.floor(ageMs / HOUR_MS)),
+      hours: String(Math.floor(health.ageMs / HOUR_MS)),
       last_ok: utcText(poll.last_poll_ok_at),
     }, 'attention')
   }

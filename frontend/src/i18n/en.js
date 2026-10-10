@@ -234,4 +234,148 @@ export default {
     accessed: 'accessed {date}',
     plain_text_note: 'Plain text; it records provenance only.',
   },
+
+  // Overview page (src/pages/OverviewPage.jsx, src/components/OverviewMapPreview.jsx;
+  // messages built by src/lib/overviewModel.js).
+  overview: {
+    eyebrow: 'Upper Gulf of Thailand · Sentinel-2',
+    lede: 'What the satellite measured, when, and how much of the study area has a reading. These are index readings only: not a bloom detection and not a risk level.',
+    open_map: 'Open the raster map',
+    status_heading: 'Status',
+    facts_heading: 'Key facts',
+    scene_heading: 'Scene selection',
+    scene_label: 'Newest acquisition',
+    poll_label: 'Newer-scene check',
+    map_heading: 'Map preview',
+    sites_heading: 'Monitoring sites',
+    sites_lede: 'Seven fixed points read from the same Sentinel-2 scenes. Each name opens the site page.',
+    server_reason: 'Server reason (verbatim)',
+    server_error: 'Server error message (verbatim)',
+
+    fact: {
+      newest_scene: 'Newest scene date',
+      newest_scene_note: 'Raster run {run}, target date {date_used}; the oldest cell is from {oldest}. Each cell keeps its own acquisition date.',
+      newest_scene_unchecked: 'Newer scenes may exist that were not checked: see the newer-scene check below.',
+      measured_area: 'Measured area',
+      measured_unit: 'of the study polygon has a reading',
+      measured_pixels: '{measured} of {polygon} overlay pixels inside the study polygon. The polygon includes land, so this is not a share of water.',
+      measured_pixels_unknown: 'The measured pixel count was not recorded for this overlay ({polygon} pixels in the polygon). The polygon includes land, so this is not a share of water.',
+      coverage_unknown: 'This overlay predates the coverage count, so the measured share is unknown, not zero.',
+      not_measured_note: 'Not measured is not low: the rest is cloud, land or no covering scene.',
+      scenes: 'Scenes mixed',
+      scenes_unit: 'Sentinel-2 scenes',
+      scenes_days: 'Cells come from {days} acquisition days ({span}); each cell keeps its own date.',
+      scenes_days_unknown: 'The per-day breakdown was not recorded for this run: unknown, not evenly spread.',
+      scenes_share: 'Largest share: {date}, {share} of the cells.',
+      scenes_note: 'Scenes are tiles by date considered for the mosaic; some contribute no cells after masking.',
+      scenes_link: 'Date shares on the raster map',
+      sites: 'Sites with a usable reading',
+      sites_unit: 'of {total} sites',
+      sites_note: 'Index readings only; bloom risk is not evaluated.',
+    },
+
+    stale: {
+      raster: 'Stale: this is the last good raster (run {run}); a newer scan (run {stale_run}) did not produce a picture.',
+      sites: '{n} of {total} site readings are stale: their last refresh failed.',
+      sites_strip: '{n} of {total} sites show a stale reading: their last refresh failed.',
+    },
+
+    // One distinct text per block and state (dashboard spec §10).
+    state: {
+      banner_loading: 'Loading the raster and site status…',
+      raster_loading: 'Loading the raster status…',
+      raster_error: 'The raster status could not be loaded, so what was measured is unknown here.',
+      raster_empty: 'No raster has been produced yet, so nothing has been measured. This is not a low reading and not "no bloom".',
+      summary_loading: 'Loading the monitoring-site summary…',
+      summary_error: 'The monitoring-site summary could not be loaded, so the site counts are unknown.',
+      summary_empty: 'The summary lists no monitoring sites, so there is nothing to count.',
+      sites_loading: 'Loading the monitoring sites…',
+      sites_error: 'The monitoring sites could not be loaded, so their status is unknown here.',
+      sites_empty: 'The API returned no monitoring sites. This says nothing about the water.',
+      pins_loading: 'Loading the pins of this run…',
+      pins_error: 'The pins could not be loaded; the raster itself is unaffected.',
+      map_empty_title: 'No map to preview',
+    },
+
+    // Latest-scene line (test-baseline spec §7). ≤ / > restate the server's
+    // decision; they are not a comparison made here.
+    scene: {
+      none: 'No acquisition date has been assessed by the newer-scene check yet.',
+      used: 'Newest assessed acquisition {date}: used in the raster shown (cloud over water {cloud} ≤ {threshold}).',
+      used_other_run: 'Newest assessed acquisition {date}: passed (cloud over water {cloud} ≤ {threshold}) and used by run {run}, which is not the raster shown.',
+      pending: 'Newest assessed acquisition {date}: passed the cloud and water screen (cloud over water {cloud} ≤ {threshold}) but is not in the raster shown yet.',
+      rejected_cloud: 'Newest assessed acquisition {date}: not used (cloud over water {cloud} > {threshold}).',
+      rejected_no_water: 'Newest assessed acquisition {date}: not used (fewer than {min} unmasked water pixels observed).',
+      not_used: 'Newest assessed acquisition {date}: not used ({decision}).',
+      reassessed_cloud: 'Newest assessed acquisition {date}: used by run {run}, then re-assessed as not passing (cloud over water {cloud} > {threshold}).',
+      reassessed_other: 'Newest assessed acquisition {date}: used by run {run}, then re-assessed as not passing ({decision}).',
+      shown: 'The raster shown (run {run}) has its newest scene on {shown}.',
+      no_raster: 'No raster is being served.',
+      settled: 'Decision final: assessed after every granule of that day had normally arrived.',
+      settled_hours: 'Decision final: assessed at least {hours} h after the date began (UTC).',
+      provisional: 'Provisional: tiles of this date may still be arriving, so the decision can change.',
+      assessed_at: 'Assessed {at}.',
+    },
+
+    // Newer-scene poll line. A failing, missing or old poll means newer
+    // scenes MAY exist unchecked; nothing here claims there is none.
+    poll: {
+      ok: 'Last successful check for newer scenes: {last_ok} ({age} ago).',
+      ok_note: 'Scenes acquired or ingested after that check appear only after the next one.',
+      old: 'The last successful check for newer scenes was {age} ago ({last_ok}), so newer scenes may exist that were not checked.',
+      never: 'The check for newer scenes has not completed yet, so newer scenes may exist that were not checked.',
+      failing: 'The check for newer scenes is failing (error kind {kind}, since {since}); last success {last_ok} ({age} ago). Newer scenes may exist that were not checked.',
+      failing_never_ok: 'The check for newer scenes is failing (error kind {kind}, since {since}) and has never succeeded, so newer scenes may exist that were not checked.',
+      recovered: 'An earlier failure ({kind}, {at}) was followed by a successful check.',
+    },
+
+    age: {
+      unknown: '—',
+      under_minute: 'under a minute',
+      minutes: '{n} min',
+      hours: '{n} h',
+      days: '{n} d',
+    },
+
+    map: {
+      alt: 'NDCI raster of run {run} over the study area, cells acquired {span}; transparent where nothing was measured.',
+      caption: 'NDCI raster, run {run}: cells acquired {span}, read at {scale} m. North up, latitude–longitude grid.',
+      extent_label: 'Extent',
+      extent: '{south}–{north} N, {west}–{east} E',
+      no_bounds: 'The raster has no valid geographic bounds, so it cannot be placed on a figure.',
+      no_overlay: 'The raster has no overlay image to show.',
+      image_error: 'The overlay image could not be loaded. The figure is blank because of the download, not because nothing was measured.',
+      legend_heading: 'Legend',
+      legend_ndci: 'NDCI (dimensionless): a display ramp, not a risk level',
+      legend_no_data: 'Transparent: no usable reading (cloud, land mask or no covering scene), not a low or zero value.',
+      legend_site: 'Monitoring site (fixed point)',
+      server_meaning: 'Server legend text (verbatim)',
+    },
+
+    // Highlight / anomaly pins (dashboard spec §4.6, test-baseline spec §6).
+    pins: {
+      heading: 'Pins',
+      heading_ndci: 'Highest NDCI in this scan',
+      heading_anomaly: 'Anomaly pins (TEST)',
+      legend_ndci: 'Numbered square: highest NDCI in this scan (a rank within one image), not a risk level.',
+      legend_anomaly: "Numbered diamond: anomaly against the cell's own seasonal history (TEST), ranked by robust z; not a risk level.",
+      caveat: 'High NDCI can also come from suspended sediment (e.g. river mouths), shallow bottom, sun glint or cloud edges; it does not by itself identify a bloom or a species.',
+      anomaly_counts: '{assessable} of {measured} measured cells could be assessed against the TEST baseline; {flagged} met the TEST anomaly condition.',
+      fewer: '{count} of {n} requested pins.',
+      none: 'No pins in this run.',
+      no_raster: 'No pins: no raster run is available to rank.',
+      other_run: 'The pins returned belong to run {pins_run}, not to the raster shown (run {run}), so they are not drawn.',
+      unknown_mode: 'The pins use a ranking this page does not know ({mode}), so they are not drawn.',
+      outside_figure: 'Some pins lie outside the figure extent and are listed only.',
+      rank: 'Rank',
+      z: 'robust z',
+      edge: 'Next to unmeasured area: cloud edges and masks can distort index values.',
+      open: 'Open pin {rank} on the raster map',
+      open_short: 'On the map',
+    },
+
+    sites: {
+      date_label: 'Newest reading',
+    },
+  },
 }

@@ -1341,6 +1341,600 @@
 }
 
 /* ------------------------------------------------------------------ */
+/* Overview (/): status banner, key facts, scene lines, map figure,    */
+/* sites strip. Ink on paper; the only data colour is the NDCI ramp    */
+/* the API sends, inside the figure and its legend.                    */
+/* ------------------------------------------------------------------ */
+
+.pw-ov-loading {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: var(--type-14);
+}
+
+.pw-ov-section-lede {
+  max-width: 72ch;
+  margin: calc(-1 * var(--space-1)) 0 0;
+  color: var(--ink-3);
+  font-size: var(--type-14);
+}
+
+/* Status banner: a hairline card with a left rule; "attention" is a
+   heavier ink rule on a tinted paper, never a warning colour. */
+.pw-ov-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line-strong);
+  border-radius: var(--radius-card);
+  background: var(--paper);
+}
+
+.pw-ov-banner[data-tone='attention'] {
+  border-left-color: var(--ink);
+  background: var(--paper-2);
+}
+
+.pw-ov-banner[data-state='loading'] {
+  border-style: dashed;
+  border-left-style: solid;
+  color: var(--ink-3);
+}
+
+.pw-ov-banner-icon {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--ink-2);
+}
+
+.pw-ov-banner-body {
+  min-width: 0;
+}
+
+.pw-ov-banner-head {
+  max-width: 92ch;
+  margin: 0;
+  font-size: var(--type-16);
+  font-weight: 600;
+  text-wrap: pretty;
+}
+
+.pw-ov-banner-lines {
+  display: grid;
+  gap: 4px;
+  max-width: 92ch;
+  margin: var(--space-1) 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--ink-2);
+  font-size: var(--type-14);
+}
+
+.pw-ov-banner-lines li {
+  position: relative;
+  padding-left: 14px;
+}
+
+.pw-ov-banner-lines li::before {
+  content: '';
+  position: absolute;
+  top: 0.75em;
+  left: 2px;
+  width: 6px;
+  height: 1px;
+  background: currentColor;
+}
+
+.pw-ov-banner-lines li[data-tone='attention'] {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+/* Key-fact cards: the number large and tabular, its unit small, the notes
+   that qualify it under a hairline. */
+.pw-fact {
+  display: flex;
+  flex-direction: column;
+}
+
+.pw-fact .pw-card-head {
+  align-items: flex-start;
+  margin-bottom: var(--space-1);
+}
+
+.pw-fact-figure {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px var(--space-1);
+  margin: 0;
+}
+
+.pw-fact[data-state='empty'] .pw-stat-value,
+.pw-fact[data-state='error'] .pw-stat-value {
+  color: var(--ink-3);
+}
+
+.pw-fact-unit {
+  color: var(--ink-3);
+  font-family: var(--font-body);
+  font-size: var(--type-14);
+}
+
+.pw-fact-breakdown {
+  display: grid;
+  gap: 6px;
+  margin: var(--space-2) 0 0;
+}
+
+.pw-fact-breakdown > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1);
+}
+
+.pw-fact-breakdown dd {
+  margin: 0;
+  font-size: var(--type-16);
+}
+
+.pw-fact-breakdown .pw-num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.pw-ov-notes {
+  display: grid;
+  gap: 6px;
+  margin: var(--space-1) 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--ink-3);
+  font-size: var(--type-12);
+  line-height: 1.5;
+}
+
+.pw-ov-notes:lang(th) {
+  line-height: 1.65;
+}
+
+.pw-ov-notes li[data-tone='attention'] {
+  color: var(--ink-2);
+  font-weight: 500;
+}
+
+.pw-fact-notes {
+  margin-top: var(--space-2);
+  padding-top: var(--space-1);
+  border-top: 1px solid var(--line-soft);
+}
+
+.pw-fact-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: auto;
+  padding-top: var(--space-1);
+  font-size: var(--type-14);
+  font-weight: 500;
+}
+
+.pw-fact-skeleton {
+  display: grid;
+  gap: 8px;
+  margin: 2px 0 var(--space-1);
+}
+
+.pw-fact-skeleton span {
+  display: block;
+  width: 60%;
+  height: 28px;
+  border: 1px solid var(--line-soft);
+  border-radius: 4px;
+  background: var(--paper-2);
+}
+
+.pw-fact-skeleton span + span {
+  width: 85%;
+  height: 12px;
+}
+
+/* Compact error inside a card. */
+.pw-ov-error {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+  margin-top: var(--space-1);
+  color: var(--ink-2);
+  font-size: var(--type-14);
+}
+
+.pw-ov-error p {
+  margin: 0;
+}
+
+/* Latest-scene and poll lines. */
+.pw-ov-line[data-tone='attention'] {
+  border-left: 3px solid var(--ink);
+}
+
+.pw-ov-line-text {
+  margin: 0;
+  font-size: var(--type-16);
+  text-wrap: pretty;
+}
+
+.pw-ov-server-label {
+  margin-top: var(--space-1);
+}
+
+/* Map figure: the overlay stretched to a box with its bounds' aspect
+   ratio; marks placed in percent. The neutral ground shows through the
+   transparent (unmeasured / outside) pixels. */
+.pw-ov-map-grid {
+  align-items: start;
+}
+
+.pw-ov-map-main {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+}
+
+.pw-ov-map-main > .pw-figure {
+  align-self: stretch;
+}
+
+.pw-ov-map {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--paper-2);
+}
+
+.pw-ov-map-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  image-rendering: pixelated; /* never blend neighbouring cells */
+}
+
+.pw-ov-site {
+  position: absolute;
+  width: 11px;
+  height: 11px;
+  margin: -5.5px 0 0 -5.5px;
+  border: 2px solid var(--ink);
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0 1.5px #fff;
+}
+
+.pw-ov-pin,
+.pw-ov-pin-key,
+.pw-ov-pin-badge {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 1.5px solid #fff;
+  border-radius: 3px;
+  background: var(--ink);
+  color: #fff;
+  font: 600 11px / 1 var(--font-mono);
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.pw-ov-pin {
+  position: absolute;
+  margin: -11px 0 0 -11px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+.pw-ov-pin-key,
+.pw-ov-pin-badge {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  border-color: var(--ink);
+}
+
+/* TEST anomaly pins: a diamond, so the two pin kinds never share a shape. */
+.pw-ov-pin[data-shape='diamond'],
+.pw-ov-pin-key[data-shape='diamond'],
+.pw-ov-pin-badge[data-shape='diamond'] {
+  border-radius: 2px;
+  transform: rotate(45deg) scale(0.86);
+}
+
+.pw-ov-pin[data-shape='diamond'] > span,
+.pw-ov-pin-key[data-shape='diamond'] > span,
+.pw-ov-pin-badge[data-shape='diamond'] > span {
+  transform: rotate(-45deg);
+}
+
+.pw-ov-extent {
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: var(--type-12);
+  white-space: nowrap;
+}
+
+.pw-ov-image-error {
+  margin: var(--space-1) 0 0;
+  color: var(--ink-2);
+  font-size: var(--type-14);
+}
+
+.pw-ov-stale {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px var(--space-1);
+  margin: 0;
+  color: var(--ink-2);
+  font-size: var(--type-14);
+}
+
+.pw-ov-map-loading {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.pw-ov-map-skeleton {
+  aspect-ratio: 1 / 1;
+  max-height: 520px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--paper-2);
+}
+
+.pw-ov-map-aside {
+  display: grid;
+  gap: var(--grid-gap);
+}
+
+.pw-ov-legend-title {
+  margin: 0 0 6px;
+  color: var(--ink-2);
+  font-size: var(--type-14);
+}
+
+.pw-ov-ramp {
+  display: flex;
+  height: 12px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.pw-ov-ramp > span {
+  flex: 1 1 0;
+}
+
+.pw-ov-ramp-scale {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  color: var(--ink-3);
+  font-size: var(--type-12);
+  font-variant-numeric: tabular-nums;
+}
+
+.pw-ov-keys {
+  display: grid;
+  gap: 8px;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--ink-2);
+  font-size: var(--type-12);
+}
+
+.pw-ov-keys li {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+}
+
+.pw-ov-key-nodata {
+  width: 20px;
+  height: 12px;
+  margin-top: 3px;
+  border: 1px solid var(--line-strong);
+  background: var(--paper-2);
+}
+
+.pw-ov-key-site {
+  width: 11px;
+  height: 11px;
+  margin: 3px 0 0 4px;
+  border: 2px solid var(--ink);
+  border-radius: 50%;
+  background: #fff;
+}
+
+.pw-ov-legend-server {
+  margin-top: var(--space-1);
+}
+
+.pw-ov-pins-legend {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0;
+  color: var(--ink-2);
+  font-size: var(--type-12);
+}
+
+.pw-ov-pins-empty {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: var(--type-14);
+}
+
+.pw-ov-pin-list {
+  display: grid;
+  margin: var(--space-1) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pw-ov-pin-list > li {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 10px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line-soft);
+}
+
+.pw-ov-pin-body {
+  min-width: 0;
+}
+
+.pw-ov-pin-values,
+.pw-ov-pin-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  margin: 0;
+}
+
+.pw-ov-pin-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pw-ov-pin-values .pw-num {
+  font-size: var(--type-14);
+}
+
+.pw-ov-pin-meta {
+  margin-top: 2px;
+  color: var(--ink-3);
+  font-size: var(--type-12);
+}
+
+.pw-ov-pin-meta .pw-num {
+  color: var(--ink-2);
+}
+
+.pw-ov-caveat {
+  margin: var(--space-1) 0 0;
+  padding-top: var(--space-1);
+  border-top: 1px solid var(--line-soft);
+  color: var(--ink-3);
+  font-size: var(--type-12);
+}
+
+/* Sites strip: seven tiles; the name is the link and covers the tile, the
+   source button sits above it. */
+.pw-ov-sites {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(172px, 1fr));
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pw-ov-site-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--paper);
+  transition: border-color var(--motion-fast);
+}
+
+.pw-ov-site-card:hover {
+  border-color: var(--line-strong);
+}
+
+/* The name link covers the tile, so its focus ring frames the tile. */
+.pw-ov-site-card:has(.pw-ov-site-name:focus-visible) {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.pw-ov-site-name:focus-visible {
+  outline: none;
+}
+
+.pw-ov-site-name {
+  color: var(--ink);
+  font-size: var(--type-14);
+  font-weight: 600;
+  line-height: 1.35;
+  text-decoration: none;
+}
+
+.pw-ov-site-name::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+
+.pw-ov-site-name:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.pw-ov-site-card .pw-source {
+  z-index: 1;
+}
+
+.pw-ov-site-date {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 6px;
+  margin: auto 0 0;
+  color: var(--ink-3);
+  font-size: var(--type-12);
+}
+
+.pw-ov-site-date .pw-num {
+  color: var(--ink);
+  font-size: var(--type-12);
+}
+
+.pw-ov-sites--loading .pw-ov-site-card {
+  min-height: 108px;
+  border-style: dashed;
+  background: var(--paper-2);
+}
+
+@media print {
+  .pw-ov-map-link {
+    display: none !important;
+  }
+
+  /* The print rule appends a link's address after it; let it flow. */
+  .pw-ov-site-name::after {
+    position: static;
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* Responsive                                                         */
 /* ------------------------------------------------------------------ */
 

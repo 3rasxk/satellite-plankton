@@ -86,6 +86,12 @@ function chip(key) {
   return { key, tone: spec.tone, hatch: spec.hatch, icon: spec.icon }
 }
 
+/** The chip for one STATUS value itself (e.g. STALE on a data block, or a
+ * count row labelled "no usable data"). Unknown -> no usable data. */
+export function chipForStatus(key) {
+  return chip(typeof key === 'string' && Object.hasOwn(STATUS_SPEC, key) ? key : STATUS.NO_USABLE_DATA)
+}
+
 /** Chip for a `/raster-scan/pixel` `state`. Unknown -> no usable data. */
 export function chipForPixelState(state) {
   const key = typeof state === 'string' && Object.hasOwn(PIXEL_TO_STATUS, state)
