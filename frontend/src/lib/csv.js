@@ -202,6 +202,28 @@ export function pinsCsv(highlights, options) {
   return toCsv(PINS.toColumns(), rows, options)
 }
 
+/**
+ * The same pins as a table: `columns` is PINS_CSV_COLUMNS and each row is
+ * the raw cell values in that order, from the very getters `pinsCsv` uses
+ * (so the on-screen table on /data cannot drift from the CSV). Unknown is
+ * null; nothing is formatted or rounded here.
+ */
+export function pinsTable(highlights) {
+  const response = isObject(highlights) ? highlights : {}
+  const pins = Array.isArray(response.pins) ? response.pins : []
+  const specs = PINS.toColumns()
+  return {
+    columns: PINS.columns,
+    rows: pins.map((p) => {
+      const ctx = { response, item: isObject(p) ? p : {} }
+      return specs.map((c) => {
+        const v = c.get(ctx)
+        return v === undefined ? null : v
+      })
+    }),
+  }
+}
+
 // ----------------------------------------------------------------- cell
 
 const CELL = exporter([

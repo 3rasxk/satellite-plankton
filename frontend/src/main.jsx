@@ -16,7 +16,7 @@ import RasterPage from './pages/RasterPage.jsx'
 import SitesPage from './pages/SitesPage.jsx'
 import SiteDetailPage from './pages/SiteDetailPage.jsx'
 import MethodsPage from './pages/MethodsPage.jsx'
-import PlaceholderPage from './pages/PlaceholderPage.jsx'
+import DataPage from './pages/DataPage.jsx'
 import NotFoundPage from './pages/NotFoundPage.jsx'
 import LegacyRasterRedirect from './pages/LegacyRasterRedirect.jsx'
 
@@ -35,7 +35,7 @@ createRoot(document.getElementById('root')).render(
             <Route path="sites" element={<SitesPage />} />
             <Route path="sites/:siteId" element={<SiteDetailPage />} />
             <Route path="methods" element={<MethodsPage />} />
-            <Route path="data" element={<PlaceholderPage titleKey="nav.data" />} />
+            <Route path="data" element={<DataPage />} />
             <Route path="*" element={<NotFoundPage />} />
           </Route>
         </Routes>

@@ -1026,4 +1026,218 @@ export default {
       note: 'What it does not license here (server text)',
     },
   },
+
+  // Data & limits page (src/pages/DataPage.jsx, src/components/{RunTable,
+  // ApiReference,LimitationsList}.jsx; model: src/lib/dataModel.js). Values
+  // arrive as {params} or from the API; field names, columns and paths are
+  // identifiers and are never translated.
+  data: {
+    eyebrow: 'Data & limits · provenance, exports, limitations',
+    lede: 'Where the numbers on this dashboard come from, what can be downloaded, which endpoints supply them, and what they do not show. Everything here is read from the running API or from the build; nothing is computed in the browser.',
+    print: 'Print or save as PDF',
+    toc: 'Contents',
+    loading: 'Loading…',
+    error_block: 'This block could not be loaded. Other blocks are not affected.',
+    server_text: 'Server text (verbatim)',
+
+    section: {
+      run: 'Run provenance',
+      scene: 'Latest scene and newer-scene poll',
+      pins: 'Highlight pins (current run)',
+      exports: 'Exports',
+      api: 'API reference',
+      limits: 'Limitations',
+      repro: 'Reproducibility',
+    },
+
+    run: {
+      intro: 'The raster run served on the map, as GET /raster-scan describes it. Each value has a source button.',
+      caption: 'Raster runs known to the API',
+      no_history: 'The API has no run-history endpoint, so only the served run and, when the API names one, the stale run can be listed. Earlier runs cannot be shown here.',
+      stale_note: 'A newer run (run {run}) exists whose picture is not on disk (running, failed or expired). The picture served is older than the newest attempt. The API returns only that run’s id, so its other values are unknown here.',
+      none: 'No raster run is being served. This is not a statement about the water: nothing has been scanned and stored yet, or the stored picture has expired.',
+      role_served: 'Served',
+      role_header: 'Role',
+      role_stale: 'Newest attempt, not served',
+      col: {
+        run_id: 'Run',
+        status: 'Status',
+        date_used: 'Target date',
+        scale_m: 'Scale',
+        cell_count: 'Cells with a reading',
+        scene_count: 'Scenes considered',
+        oldest_scene_date: 'Oldest scene date',
+        newest_scene_date: 'Newest scene date',
+        completed_at: 'Completed (UTC)',
+      },
+    },
+
+    scene: {
+      latest_heading: 'Latest-scene assessment',
+      poll_heading: 'Newer-scene poll',
+      last_used: 'Newest scene date used by a scan',
+      dates_heading: 'Scene dates in the served raster',
+      dates_intro: 'One raster mixes acquisition dates; each cell keeps its own. The share is the API’s own figure.',
+      dates_caption: 'Cells by acquisition date',
+      dates_none: 'The API gave no per-date breakdown for this run (it was taken before the breakdown was recorded). That is unknown, not an even spread.',
+      col_date: 'Acquisition date',
+      col_cells: 'Cells',
+      col_share: 'Share of cells',
+    },
+
+    pins: {
+      intro: 'The current highlight pins as GET /raster-scan/highlights returns them: every column of the pins CSV, in the same order.',
+      caption: 'Highlight pins of the served run',
+      note_ndci: 'Pins rank the highest NDCI values within this one scan. A ranking inside a scan is not a risk level and not a detection.',
+      note_anomaly: 'Pins rank the TEST-baseline anomaly of each cell against its own seasonal history. This is a provisional statistical statement, not a risk level and not a detection.',
+      empty: 'The API returned no pins for this run. That is not a statement about the water.',
+      empty_reason: 'Reason given by the server',
+      scroll_hint: 'The table is wide; scroll sideways. The CSV holds the same columns.',
+    },
+
+    exports: {
+      intro: 'Files are built in the browser from data already loaded, except the MODIS series, which is fetched when requested. Numbers are written exactly as the API returned them; unknown values are empty cells, never 0.',
+      sites_csv: 'Monitoring sites (CSV)',
+      sites_geojson: 'Monitoring sites (GeoJSON)',
+      pins_csv: 'Highlight pins (CSV)',
+      unavailable: 'Not available: the source data have not loaded.',
+      modis_heading: 'MODIS-Aqua chlor_a series, one site at a time',
+      modis_intro: 'A separate sensor and quantity (chlorophyll-a, mg m⁻³) on the Level-3 grid of {resolution}, read from a multi-year archive: a request can take up to a minute. Each file is fetched when you press the button.',
+      modis_intro_no_resolution: 'A separate sensor and quantity (chlorophyll-a, mg m⁻³) on the Level-3 grid whose size /methods reports, read from a multi-year archive: a request can take up to a minute. Each file is fetched when you press the button.',
+      modis_button: '{site} (CSV)',
+      modis_busy: 'Fetching… up to a minute',
+      modis_done: 'Downloaded {file}',
+      modis_failed: 'The series could not be downloaded. Retry; other exports are not affected.',
+      modis_none: 'No monitoring sites are loaded, so no MODIS series can be offered.',
+      cell_note: 'The CSV of a single raster cell is on the map page, in the cell inspector. No bulk cell download exists.',
+      geojson_note: 'The GeoJSON is the unchanged response of the monitoring-sites endpoint.',
+    },
+
+    api: {
+      intro: 'The endpoints this interface calls. Each example opens the live response; the fields listed are the ones the interface reads, named as in backend/src/schemas.py. No endpoint here returns a risk level.',
+      caption: 'Endpoints used by the dashboard',
+      col_endpoint: 'Endpoint',
+      col_example: 'Example',
+      col_schema: 'Schema',
+      col_fields: 'Fields the interface reads',
+      col_used_by: 'Used by',
+      image: 'PNG image, no JSON',
+      no_schema: 'No response schema (image)',
+      open: 'Open',
+      ep: {
+        raster_scan: 'Served raster run: provenance, scene dates, latest-scene assessment, poll health',
+        overlay: 'NDCI overlay picture of the served run',
+        true_color: 'True-colour picture of the served run',
+        pixel: 'One stored raster cell by coordinate',
+        highlights: 'Highlight pins of a stored run',
+        risk_map: 'Monitoring sites: cached latest readings',
+        site_image: 'Cached picture of one monitoring site',
+        timeseries: 'MODIS-Aqua chlor_a series and its same-quantity anomaly',
+        summary: 'Counts over the monitoring sites',
+        methods: 'Methods, gates, baseline status and references',
+      },
+      page: {
+        overview: 'Overview',
+        map: 'Raster map',
+        sites: 'Monitoring sites',
+        site: 'Site detail',
+        methods: 'Methods',
+        data: 'Data & limits',
+      },
+    },
+
+    repro: {
+      intro: 'What is needed to say which build and which server configuration produced the numbers on screen.',
+      app_version: 'App version',
+      git_sha: 'Commit (short SHA)',
+      api_version: 'API version',
+      baseline_version: 'TEST baseline version',
+      baseline_mode: 'Baseline mode',
+      signature: 'Preprocessing signature',
+      modis_grid: 'MODIS grid resolution',
+      build_note: 'Version and commit are fixed when the app is built; the other rows are read from GET /methods when the page loads.',
+      dev_build: 'This is a development build: no commit was recorded.',
+      cite_hint: 'The Cite button in the header copies a citation that includes these values.',
+    },
+  },
+
+  // Summary of LIMITATIONS.md and of the TEST-baseline limits (src/lib/
+  // limitationsMap.js lists every key and the heading it summarises).
+  // No numbers: values are on /methods and in LIMITATIONS.md.
+  limits: {
+    intro: 'A summary of LIMITATIONS.md in plain words, followed by the limits that apply to the TEST baseline. The file is the authority; Methods gives every value.',
+    summarises: 'Summarises “{heading}” in {file}',
+    from_spec: 'Source: TEST-baseline design, truth-boundary additions, and the quality screens on Methods',
+    see_methods: 'Values and formulas: Methods',
+
+    truth_boundary: {
+      title: 'Truth boundary',
+      p1: 'Detection reports Sentinel-2 spectral-index values with each cell’s own acquisition date. It does not state whether a bloom is present or absent. A provisional TEST anomaly, where one is shown, is a statement about a location’s own history.',
+      p2: 'The field signal_anomaly_level is a nullable statistical signal and is not a synonym for a risk level. Rule-based escalation cannot be evaluated, so no risk level is produced.',
+      p3: 'The MODIS series from GET /timeseries is a separate calculation: chlor_a is compared only with a chlor_a climatology and is never merged with the Sentinel-2 indices.',
+      p4: 'Every API response carries a server disclaimer, shown verbatim; detection and prediction fields stay structurally separate.',
+    },
+
+    sensor_limits: {
+      title: 'Sensor and interpretation limits',
+      p1: 'A bloom smaller than, or dispersed within, a pixel may leave no detectable signal. The absence of an index signal is not evidence that no bloom exists.',
+      p2: 'Cloud is a hard stop. Optical sensors cannot see through it, and the system reports no imagery rather than substituting data.',
+      p3: 'A reading is only as current as its own scene date. Readings come from the newest usable image inside the scene-age window shown on Methods; beyond it no reading is given. Cloud, especially in the south-west monsoon, can leave much of the area without a recent image, and a missing reading never means that nothing is there.',
+      p4: 'A clicked cell is one sampled pixel, not an area. It is not an average of the square it appears to fill, and neighbouring cells may come from different scenes, so a low reading in one cell says nothing about the water beside it.',
+      p5: 'Unmeasured is not zero. Water with no usable observation is “not measured” and drawn transparent. Cloud, land masking and no scene coverage are one state in the stored raster and cannot be told apart.',
+      p6: 'Turbidity and sediment confound optical indices: river plumes and shallow water can resemble a bloom signal. The indices are not species classifiers, and B2/B3 is exploratory and has not been validated as a Noctiluca discriminator.',
+      p7: 'Near-shore sampling is fragile. A fixed buffer around a pier or coastline coordinate can contain land or structure, and the pipeline does not move coordinates or widen buffers to force a result.',
+      p8: 'Geographic scope is limited to the upper Gulf of Thailand; nothing is calibrated or claimed to generalise beyond it.',
+      p9: 'Prediction is not validated. The retained rule interface is labelled indicative and rule-based, and no lead-time accuracy is reported.',
+    },
+
+    no_anomaly_layer: {
+      title: 'No spectral-index anomaly layer is active',
+      p1: 'The raster shows raw indices with per-cell scene dates. There is no active anomaly threshold, tier or cluster for the indices; numeric entries in the detection configuration are inactive placeholders and every calibrated value is null.',
+      p2: 'The statistical signal (a robust z-score against a location’s own seasonal history) rests on provisional boundaries and a minimum number of independent dates. These are engineering starting points, not biological thresholds and not validated bloom levels.',
+      p3: 'A valid baseline must keep history for the same location and season, use only earlier acquisition dates, and record a preprocessing identity. Missing, stale, degenerate or too-short inputs give “not evaluated”, never “normal”.',
+      p4: 'The next steps named in LIMITATIONS.md are an append-only Sentinel-2 baseline table with versioned preprocessing, leakage tests, a sensitivity analysis of the minimum history, and retrospective comparison with independent field observations.',
+    },
+
+    threshold_register: {
+      title: 'Numerical threshold register',
+      p1: 'LIMITATIONS.md lists every cutoff present in the code. No cutoff is a calibrated Sentinel-2 bloom threshold; the values are on Methods and in that file.',
+      p2: 'Active cutoffs are display ranges, data-freshness and quality rules, masks and sampling geometry. They decide what is drawn or admitted, not what a reading means.',
+      p3: 'NDCI and 2BDA are transformations of the same B5/B4 ratio, so they are not two independent confirmations.',
+      p4: 'Legacy ensemble and forecast files remain in the repository as orphaned experiments. Nothing in the API or the interface uses them, and their thresholds are uncalibrated.',
+    },
+
+    references: {
+      title: 'Scientific references and transfer limits',
+      p1: 'Mishra and Mishra (2012) define NDCI from water-leaving reflectance in the red and red-edge bands. This project applies the formula to Sentinel-2 B4/B5 surface reflectance, so fitted values and raw thresholds are not interchangeable.',
+      p2: 'Luang-on et al. (2023) classified MODIS chlorophyll-a for green Noctiluca in the upper Gulf. Those are chlorophyll-a concentrations, not Sentinel-2 NDCI thresholds, and they are not used in the raster or the API. The DOIs are on Methods.',
+    },
+
+    pipeline: {
+      title: 'Data-pipeline findings',
+      p1: 'The MODIS Ocean Color catalogue in Earth Engine can lag the present by months. Its newest observation must not be assumed to be near real time.',
+      p2: 'Earth Engine reduces bands independently and can return misaligned lists when masks differ, so the water mask is applied on the server before a combined reduction.',
+      p3: 'The water mask uses JRC Global Surface Water where it has data and ETOPO1 bathymetry only where JRC is silent. ETOPO1 is coarse, so near-shore fallback readings need caution. The retained check fixture is itself derived from satellite data and is not ground truth.',
+    },
+
+    interpretation: {
+      title: 'Plain interpretation',
+      p1: 'Read detection output as index values with provenance, not as a bloom verdict.',
+      p2: 'Treat null anomaly, tier and risk fields as “not computed”, not as a clear result.',
+      p3: 'Do not convert index magnitude into a probability or a confidence score.',
+      p4: 'Confirm consequential observations with field sampling or another independent source.',
+    },
+
+    test_baseline: {
+      title: 'TEST baseline limits',
+      p1: 'A TEST anomaly is relative to the location’s own record for the same season (a calendar window around the target month, over the history period shown on Methods). It does not say a bloom exists, nor which species, nor that a value close to the median excludes one.',
+      p2: 'The z boundaries are provisional engineering values, not validated. The base rates of the Level A self-check (how many site-dates were assessed, fell in each class, or could not be assessed) are shown beside them on Methods and describe the history, not accuracy.',
+      p3: 'River-mouth and shallow-water sites have broad NDCI distributions driven by sediment. A wide MAD lowers z, so the same departure scores lower there.',
+      p4: 'The reasons zero_mad, insufficient_independent_dates and incompatible_preprocessing are shown as reasons, never as “normal”.',
+      p5: 'The low-signal and degenerate-NDCI screens, which exclude cells from scoring and from pins, are developer-chosen backend rules that have not been validated. They change which cells are scored, not the statistic.',
+      p6: 'Level A (monitoring sites) has a self-check against its own history. Level B (the per-cell raster baseline) has no equivalent self-check, so its pins have not had that test.',
+      p7: 'No TEST anomaly has been compared with recorded bloom events or with independent field observations.',
+      p8: 'The word “risk” is not used for baseline output on this dashboard: a pin means “highest NDCI in this scan” or “anomaly against own seasonal history (TEST)”, nothing more.',
+    },
+  },
 }

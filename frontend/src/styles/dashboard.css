@@ -3704,3 +3704,129 @@ th[aria-sort='descending'] .pw-sort-icon {
     background: #fff;
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Data & limits page (/data)                                         */
+/* Tables and prose only; no colour carries meaning. Prints cleanly.   */
+/* ------------------------------------------------------------------ */
+
+.pw-data-page [id] {
+  scroll-margin-top: 96px;
+}
+
+.pw-data-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin: var(--space-2) 0;
+}
+
+.pw-data-line {
+  min-width: 0;
+}
+
+.pw-data-modis-list {
+  display: grid;
+  gap: var(--space-1);
+  margin: var(--space-1) 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pw-data-modis-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+}
+
+.pw-data-status {
+  color: var(--ink-2);
+  font-size: var(--type-14);
+}
+
+/* The pins table has every CSV column: scroll sideways, keep it compact. */
+.pw-data-pins {
+  font-size: var(--type-12);
+  width: max-content;
+  min-width: 100%;
+}
+
+.pw-data-pins td,
+.pw-data-pins th {
+  white-space: nowrap;
+}
+
+.pw-data-server-cell {
+  display: inline-block;
+  max-width: 28rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+}
+
+.pw-data-ep-note {
+  display: block;
+  margin-top: 2px;
+  color: var(--ink-2);
+  font-size: var(--type-12);
+}
+
+.pw-data-example {
+  overflow-wrap: anywhere;
+}
+
+.pw-data-fields,
+.pw-data-used {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pw-data-fields code {
+  font-size: var(--type-12);
+}
+
+.pw-data-limits {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.pw-data-limit .prose ul {
+  margin: var(--space-1) 0 0;
+  padding-left: 1.25em;
+}
+
+.pw-data-limit .prose li + li {
+  margin-top: var(--space-1);
+}
+
+@media print {
+  .pw-data-pins {
+    width: 100%;
+    font-size: 8pt;
+  }
+
+  .pw-data-pins td,
+  .pw-data-pins th {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .pw-data-server-cell {
+    max-width: none;
+    overflow: visible;
+  }
+
+  .pw-data-actions,
+  .pw-data-modis-list button {
+    display: none !important;
+  }
+
+  .pw-data-limit {
+    break-inside: avoid;
+  }
+}
