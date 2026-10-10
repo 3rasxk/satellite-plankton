@@ -5,6 +5,13 @@ export const CircleMarker = ({ center, children }) => createElement(
   'div', { 'data-scan-marker': `${center[0]},${center[1]}` }, children,
 )
 export const MapContainer = ({ children, className }) => createElement('main', { className }, children)
+// A pin marker: records its position and rank (from the divIcon html) so a
+// test can see which pins were drawn without a DOM.
+export const Marker = ({ position, icon, title }) => createElement('div', {
+  'data-pin-marker': `${position[0]},${position[1]}`,
+  'data-pin-title': title,
+  'data-pin-icon': icon?.options?.html ?? '',
+})
 export const Tooltip = ({ children }) => createElement('div', null, children)
 export const Popup = ({ children }) => createElement('section', null, children)
 export const TileLayer = ({ url, attribution, pane }) => createElement('span', {

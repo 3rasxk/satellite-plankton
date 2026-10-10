@@ -1,18 +1,25 @@
 /**
- * What one clicked cell of the raster actually holds.
+ * What one clicked cell of the raster actually holds (the cell inspector,
+ * dashboard spec §4.2).
  *
  * Every number here comes from the API, which read it out of the stored
  * blob the overlay was drawn from (backend/src/raster_scan/pixel.py).
  * Nothing is computed in this file: no index is re-derived, no value is
- * inferred from a colour, and no reading is invented for a cell that has
- * none.
+ * inferred from a colour, no z-score is computed, and no reading is
+ * invented for a cell that has none. The view model is
+ * `buildCellModel` (src/lib/mapModel.js); text is i18n `map.cell.*`.
  *
  * The panel answers in the same three states the overlay paints, because
  * a difference a viewer can see on the map has to be a difference they
  * can read in words:
  *
- *   reading             the four index values and THIS cell's own
- *                       acquisition date
+ *   reading             the four index values (each with its source and a
+ *                       link to its definition on /methods), THIS cell's
+ *                       own acquisition date and time, the observed pixel
+ *                       vs the drawn square's centre, the read scale and
+ *                       the one-sampled-pixel statement, the run -- and,
+ *                       only when the response carries `anomaly` (TEST
+ *                       cell baseline), the anomaly block labelled TEST
  *   not_measured        inside the study area, nothing usable here --
  *                       cloud, land, or no scene covered it. Never shown
  *                       as a number, and never as zero: an unmeasured
@@ -23,112 +30,318 @@
  *
  * Only a state of exactly "reading" produces numbers; every other value,
  * including one this build does not recognise, is shown as unmeasured.
- * The default has to fall that way -- an unknown state rendered through
- * the value table would print whatever `index_values` held, and for a
- * masked cell that is 0.0.
  *
- * Bound by the same rule as the legend and the pin ramp: these are index
- * readings, not risk levels. No valid spectral-index baseline exists, so
- * nothing here ranks or classifies water (CLAUDE.md §0/§1).
+ * Actions (every state): Copy citation, Copy permalink, Download cell CSV
+ * (`cellCsv`), Open raw JSON (the exact API request).
+ *
+ * Bound by the same rule as the legend and the pins: these are index
+ * readings, not risk levels (CLAUDE.md §0/§1).
  */
+import { useEffect, useRef, useState } from 'react'
+import Icon from './Icon.jsx'
+import CiteButton from './ui/CiteButton.jsx'
+import RouteLink from './ui/RouteLink.jsx'
+import SourceChip from './ui/SourceChip.jsx'
+import StatusChip from './ui/StatusChip.jsx'
+import Value from './ui/Value.jsx'
+import { buildCellModel } from '../lib/mapModel.js'
+import { copyText, downloadText } from '../lib/browser.js'
+import { reasonKey } from '../lib/format.js'
+import { useLang } from '../i18n/useLang.js'
 
-// Display names only. The API's band keys are the raster's own
-// (ndci/bda2/bda3/b2_b3); these are the labels the rest of the dashboard
-// already uses for the same four quantities.
-const BAND_LABELS = {
-  ndci: 'NDCI',
-  bda2: '2BDA',
-  bda3: '3BDA',
-  b2_b3: 'B2/B3',
-}
+const CONFIRM_MS = 6000
 
-// Four decimals: enough to tell two neighbouring cells apart, and a
-// display choice only -- the API carries the stored value unrounded.
-const DECIMALS = 4
+/** Copy-permalink button with a polite outcome and a selectable fallback. */
+function CopyPermalink({ permalink }) {
+  const { t } = useLang()
+  const [status, setStatus] = useState('idle')
+  const [link, setLink] = useState('')
+  const timer = useRef(null)
+  useEffect(() => () => clearTimeout(timer.current), [])
 
-export default function RasterPixelPanel({ pixel, loading, error, onClose }) {
-  if (!loading && !error && !pixel) return null
+  const onClick = async () => {
+    clearTimeout(timer.current)
+    let href = ''
+    try {
+      href = typeof permalink === 'function' ? permalink() : typeof permalink === 'string' ? permalink : ''
+    } catch {
+      href = ''
+    }
+    setLink(href)
+    let ok = false
+    try {
+      ok = href !== '' && (await copyText(href))
+    } catch {
+      ok = false
+    }
+    setStatus(ok ? 'copied' : 'failed')
+    if (ok) timer.current = setTimeout(() => setStatus('idle'), CONFIRM_MS)
+  }
 
+  const message = status === 'copied' ? t('map.actions.permalink_copied') : status === 'failed' ? t('map.actions.permalink_failed') : ''
   return (
-    <div className="raster-pixel-panel glass" role="region" aria-label="ค่าที่วัดได้ของเซลล์ที่เลือก">
-      <div className="raster-pixel-head">
-        <span className="raster-pixel-title">ค่าดัชนีของเซลล์ที่เลือก</span>
-        {onClose && (
-          <button type="button" className="raster-pixel-close" onClick={onClose} aria-label="ปิด">
-            ×
-          </button>
-        )}
-      </div>
-
-      {loading && <p className="raster-pixel-note">กำลังอ่านค่าจากเซลล์ที่เก็บไว้…</p>}
-
-      {error && (
-        <p className="raster-pixel-note">
-          อ่านค่าเซลล์ไม่สำเร็จ — <strong>ไม่ได้แปลว่าไม่พบสาหร่าย</strong> แต่แปลว่ายังอ่านข้อมูลที่เก็บไว้ไม่ได้
-        </p>
+    <div className="pw-map-copy">
+      <button type="button" className="pw-btn pw-btn--quiet pw-btn--small" onClick={onClick}>
+        <Icon name="external" size={14} strokeWidth={2} />
+        {t('action.copy_permalink')}
+      </button>
+      <span className="pw-cite-status" role="status" aria-live="polite">{message}</span>
+      {status === 'failed' && link !== '' && (
+        <label className="pw-cite-fallback">
+          <span>{t('map.actions.permalink_label')}</span>
+          <input type="text" readOnly value={link} onFocus={(event) => event.target.select()} />
+        </label>
       )}
-
-      {!loading && !error && pixel && <PixelBody pixel={pixel} />}
     </div>
   )
 }
 
-function PixelBody({ pixel }) {
-  if (pixel.state === 'outside_study_area') {
-    return (
-      <p className="raster-pixel-note">
-        นอกพื้นที่ศึกษา — ไม่ได้ตรวจวัดจุดนี้ จึงไม่มีค่าใด ๆ ให้รายงาน
-      </p>
-    )
+/**
+ * The inspector's action row, shared by the cell and pin inspectors.
+ * `citation` = CiteButton props; `permalink` = () => absolute URL; `csv` =
+ * `{filename, content, labelKey}`; `rawUrl` = the API request; `children`
+ * are extra buttons placed first (e.g. Zoom to cell).
+ */
+export function InspectorActions({ citation, permalink, csv, rawUrl, children }) {
+  const { t } = useLang()
+  const onCsv = () => {
+    try {
+      const content = typeof csv.content === 'function' ? csv.content() : csv.content
+      downloadText(csv.filename, content)
+    } catch {
+      // Never throw from a click handler; the raw JSON stays available.
+    }
+  }
+  return (
+    <div className="pw-map-actions" role="group" aria-label={t('map.actions.label')}>
+      {children}
+      <CiteButton className="pw-map-cite" {...(citation ?? {})} permalink={typeof permalink === 'function' ? safeCall(permalink) : undefined} />
+      <CopyPermalink permalink={permalink} />
+      {csv && (
+        <button type="button" className="pw-btn pw-btn--quiet pw-btn--small" onClick={onCsv}>
+          <Icon name="download" size={14} strokeWidth={2} />
+          {t(csv.labelKey ?? 'action.download_csv')}
+        </button>
+      )}
+      {typeof rawUrl === 'string' && rawUrl !== '' && (
+        <a className="pw-btn pw-btn--quiet pw-btn--small" href={rawUrl} target="_blank" rel="noopener noreferrer">
+          <Icon name="external" size={14} strokeWidth={2} />
+          {t('action.open_raw_json')}
+        </a>
+      )}
+    </div>
+  )
+}
+
+function safeCall(fn) {
+  try {
+    const out = fn()
+    return typeof out === 'string' ? out : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** One labelled value with its source chip. */
+function Field({ label, value, source, reasonText, showReason = false, children }) {
+  return (
+    <div className="pw-map-field">
+      <dt>{label}</dt>
+      <dd>
+        <Value value={value.raw} spec={value.spec} source={source} reasonText={reasonText} showReason={showReason} />
+        {children}
+      </dd>
+    </div>
+  )
+}
+
+function Coordinate({ label, coord }) {
+  return (
+    <div className="pw-map-field">
+      <dt>{label}</dt>
+      <dd>
+        <Value value={coord.lat.raw} spec={coord.lat.spec} />
+        {', '}
+        <Value value={coord.lng.raw} spec={coord.lng.spec} source={coord.source} />
+      </dd>
+    </div>
+  )
+}
+
+function ServerText({ labelKey, text }) {
+  const { t } = useLang()
+  if (!text) return null
+  return (
+    <div className="pw-map-server">
+      <p className="pw-label">{t(labelKey)}</p>
+      <blockquote className="pw-server-text" lang="en">{text}</blockquote>
+    </div>
+  )
+}
+
+/** The TEST anomaly block of a cell (present only when `anomaly != null`). */
+function CellAnomaly({ anomaly }) {
+  const { t } = useLang()
+  const reasonLabel = anomaly.reason
+    ? (reasonKey(anomaly.reason) ? t(reasonKey(anomaly.reason)) : anomaly.reason)
+    : null
+  return (
+    <section className="pw-map-block pw-map-test-block" data-test-block="true">
+      <h3 className="pw-map-block-title">{t('map.anomaly.heading')}</h3>
+      <p className="pw-map-chips"><StatusChip chip={anomaly.chip} /></p>
+      <dl className="pw-map-fields">
+        {anomaly.rows.map((row) => (
+          <Field
+            key={row.id}
+            label={t(row.labelKey)}
+            value={row.value}
+            source={row.source}
+            showReason={row.id === 'robust_z'}
+          />
+        ))}
+        {anomaly.reason && (
+          <div className="pw-map-field">
+            <dt>{t('map.anomaly.reason')}</dt>
+            <dd><code className="pw-mono">{anomaly.reason}</code>{reasonLabel && reasonLabel !== anomaly.reason ? ` — ${reasonLabel}` : ''}</dd>
+          </div>
+        )}
+        <div className="pw-map-field">
+          <dt>{t('map.anomaly.season_key')}</dt>
+          <dd><code className="pw-mono">{anomaly.seasonKey}</code></dd>
+        </div>
+        <div className="pw-map-field">
+          <dt>{t('map.anomaly.baseline_version')}</dt>
+          <dd><code className="pw-mono">{anomaly.baselineVersion}</code></dd>
+        </div>
+      </dl>
+      {anomaly.bands ? (
+        <>
+          <p className="pw-label">{t('map.pin.bands')}</p>
+          <dl className="pw-map-fields pw-map-fields--3">
+            {anomaly.bands.map((b) => <Field key={b.id} label={t(b.labelKey)} value={b.value} source={b.source} />)}
+          </dl>
+        </>
+      ) : null}
+      <p className="pw-map-note">{t('map.anomaly.note')}</p>
+    </section>
+  )
+}
+
+function PixelBody({ model }) {
+  const { t } = useLang()
+  if (model.state === 'outside') {
+    return <p className="raster-pixel-note">{t('map.cell.outside')}</p>
   }
 
   // Anything that is not positively a reading is drawn as "not measured".
-  // The test is on `state === 'reading'`, not on `state === 'not_measured'`,
-  // so the safe direction is the default: a state this build has never
-  // heard of says "we have no reading here" rather than falling through to
-  // a table that would print whatever `index_values` happened to hold.
-  if (pixel.state !== 'reading') {
+  if (model.state !== 'reading') {
     return (
       <>
         <p className="raster-pixel-note">
-          ไม่ได้วัดค่าที่จุดนี้ — เมฆบัง พื้นดิน หรือไม่มีภาพถ่ายครอบคลุม{' '}
-          <strong>ไม่ใช่ค่าดัชนีต่ำ และไม่ใช่ค่าศูนย์</strong>
+          {t('map.cell.not_measured')}{' '}
+          <strong>{t('map.cell.not_measured_strong')}</strong>
         </p>
-        <p className="raster-pixel-note">
-          ทั้งสามสาเหตุแยกจากกันไม่ได้จากข้อมูลที่เก็บไว้ จึงรายงานรวมเป็นสถานะเดียว
-        </p>
+        <p className="raster-pixel-note">{t('map.cell.not_measured_causes')}</p>
       </>
     )
   }
 
-  const values = pixel.index_values || {}
-
   return (
     <>
       <dl className="raster-pixel-values">
-        {Object.keys(BAND_LABELS).map((band) => (
-          <div className="raster-pixel-value" key={band}>
-            <dt>{BAND_LABELS[band]}</dt>
+        {model.indices.map((row) => (
+          <div className="raster-pixel-value" key={row.id}>
+            <dt><RouteLink to={row.href} className="pw-map-index-link">{row.label}</RouteLink></dt>
             <dd className="mono">
-              {typeof values[band] === 'number'
-                ? values[band].toFixed(DECIMALS)
-                : 'คำนวณไม่ได้'}
+              <Value
+                value={row.value.raw}
+                spec={row.value.spec}
+                source={row.source}
+                reasonText={row.unreadable ? t('map.cell.unreadable') : undefined}
+                showReason={row.unreadable}
+              />
             </dd>
           </div>
         ))}
       </dl>
 
-      <p className="raster-pixel-meta">
-        ภาพถ่ายของเซลล์นี้ <span className="mono">{pixel.acquired_date}</span> · พิกัดพิกเซลที่วัดจริง{' '}
-        <span className="mono">
-          {pixel.cell_lat?.toFixed(5)}, {pixel.cell_lng?.toFixed(5)}
-        </span>
-      </p>
+      <dl className="pw-map-fields">
+        <Field label={t('map.cell.acquired_date')} value={model.acquiredDate.value} source={model.acquiredDate.source} />
+        <Field label={t('map.cell.acquired_at')} value={model.acquiredAt.value} source={model.acquiredAt.source} />
+        <Coordinate label={t('map.cell.cell')} coord={model.cell} />
+        <Coordinate label={t('map.cell.centre')} coord={model.centre} />
+        <Field label={t('map.cell.scale')} value={model.scale.value} source={model.scale.source} />
+      </dl>
 
-      <p className="raster-pixel-note">
-        แต่ละเซลล์คือพิกเซลจริง 1 จุด (~{pixel.scale_m} ม.) พร้อมวันที่ภาพของตัวเอง ไม่ใช่ค่าเฉลี่ยของทั้งช่อง ·
-        เป็น<strong>ค่าดัชนี ไม่ใช่ระดับความเสี่ยง</strong> — ยังไม่มีการประเมินความผิดปกติ
-      </p>
+      <p className="raster-pixel-note">{t(model.scale.note.key, model.scale.note.params)}</p>
+
+      {model.anomaly
+        ? <CellAnomaly anomaly={model.anomaly} />
+        : <p className="raster-pixel-note">{t('map.cell.no_anomaly')}</p>}
     </>
+  )
+}
+
+/**
+ * @param {{pixel, loading, error, onClose, citation?, permalink?}} props
+ *   `citation`: CiteButton props (runId, oldestScene, newestScene,
+ *   baselineVersion); `permalink`: () => absolute URL of this view.
+ */
+export default function RasterPixelPanel({ pixel, loading, error, onClose, citation, permalink }) {
+  const { t } = useLang()
+  if (!loading && !error && !pixel) return null
+  const model = !loading && !error ? buildCellModel(pixel) : null
+  const status = error?.response?.status
+  const detail = error?.response?.data?.detail
+
+  return (
+    <div className="raster-pixel-panel glass" role="region" aria-label={t('map.cell.region')}>
+      <div className="raster-pixel-head">
+        <span className="raster-pixel-title">{t('map.cell.title')}</span>
+        {onClose && (
+          <button type="button" className="raster-pixel-close" onClick={onClose} aria-label={t('common.close')}>
+            ×
+          </button>
+        )}
+      </div>
+
+      {loading && <p className="raster-pixel-note">{t('map.cell.loading')}</p>}
+
+      {error && (
+        <>
+          <p className="raster-pixel-note">
+            {t('map.cell.error')} <strong>{t('map.cell.error_strong')}</strong> {t('map.cell.error_rest')}
+          </p>
+          {(Number.isInteger(status) || typeof detail === 'string') && (
+            <p className="raster-pixel-note">
+              {Number.isInteger(status) && <span className="pw-mono">{t('error.http', { status })}</span>}
+              {typeof detail === 'string' && detail !== '' && (
+                <> · <span lang="en">{detail}</span></>
+              )}
+            </p>
+          )}
+        </>
+      )}
+
+      {model && (
+        <>
+          <p className="pw-map-chips">
+            <StatusChip chip={model.chip} />
+            <span className="pw-map-run">
+              {t('common.run')} <span className="pw-mono">{model.runId}</span>
+              <SourceChip source={model.runSource} />
+            </span>
+          </p>
+          <PixelBody model={model} />
+          <ServerText labelKey="map.cell.meaning" text={model.meaning} />
+          <InspectorActions
+            citation={citation}
+            permalink={permalink}
+            csv={{ ...model.csv, labelKey: 'map.cell.download_csv' }}
+            rawUrl={model.rawUrl}
+          />
+        </>
+      )}
+    </div>
   )
 }

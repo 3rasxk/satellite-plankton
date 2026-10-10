@@ -68,21 +68,10 @@
   min-height: 0;
 }
 
-/* Below 681 px the raster page puts its panels in document flow under a
-   50vh map (global.css); let the page grow and scroll as a whole. */
-@media (max-width: 680px) {
-  .pw-shell[data-layout='map'] .pw-viewport {
-    height: auto;
-  }
-
-  .pw-shell[data-layout='map'] .pw-main {
-    overflow: visible;
-  }
-
-  .pw-shell[data-layout='map'] .pw-main > .overview-page {
-    height: auto;
-  }
-}
+/* The map keeps filling the viewport below the header at every width: on
+   narrow screens the rail becomes a drawer and the inspector a bottom
+   sheet over the map ("Raster map page" below), instead of the panels
+   flowing under a shortened map. */
 
 .pw-container {
   width: 100%;
@@ -2034,6 +2023,856 @@
     left: 16px;
     width: auto;
     max-height: 70vh;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Raster map page (/map)                                             */
+/* rail | map column (truth bar + map). The reused raster components   */
+/* (layer switcher, legend, scan banner, pixel panel) float over the   */
+/* map elsewhere in global.css; here they are laid into the rail or    */
+/* the inspector, so their global positions (and the F9 clearance      */
+/* rules) stay untouched. Panels are paper, not glass, here: a         */
+/* backdrop-filter would make every SourceChip popover inside them     */
+/* position against the panel and be clipped by its scroll. Ink only:  */
+/* no risk colour; the accent marks interaction (links, selection,     */
+/* focus).                                                            */
+/* ------------------------------------------------------------------ */
+
+.pw-map-page {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  height: 100%;
+  min-height: 0;
+  color: var(--ink);
+  font-family: var(--font-body);
+}
+
+/* --- rail ---------------------------------------------------------- */
+
+.pw-map-rail {
+  display: flex;
+  flex: 0 0 360px;
+  flex-direction: column;
+  width: 360px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-right: 1px solid var(--line);
+  background: var(--paper);
+  font-size: var(--type-14);
+  line-height: var(--lh);
+}
+
+.pw-map-rail:lang(th) {
+  line-height: var(--lh-th);
+}
+
+.pw-map-rail[hidden] {
+  display: none;
+}
+
+.pw-map-rail-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1);
+  padding: 10px var(--space-2);
+  border-bottom: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.pw-map-rail-title {
+  font-size: var(--type-16);
+  font-weight: 600;
+}
+
+.pw-map-rail > .pw-map-notes {
+  padding: 12px var(--space-2) 0;
+}
+
+.pw-map-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: 14px var(--space-2) var(--space-2);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.pw-map-section-title {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: var(--type-12);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.pw-map-section-title:lang(th) {
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* Reused raster components, laid into the rail instead of floating. */
+.pw-map-rail .raster-layer-switcher,
+.pw-map-rail .raster-legend,
+.pw-map-rail .raster-scan-banner {
+  position: static;
+  z-index: auto;
+  width: auto;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  overflow: visible;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.pw-map-rail .raster-layer-switcher {
+  flex-direction: row;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+}
+
+.pw-map-rail .raster-layer-switcher button {
+  flex: 1 1 0;
+  min-width: 0;
+  border-bottom: 0;
+  border-right: 1px solid var(--line);
+  text-align: center;
+}
+
+.pw-map-rail .raster-layer-switcher button:last-child {
+  border-right: 0;
+}
+
+.pw-map-rail .raster-legend,
+.pw-map-rail .raster-scan-banner {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+
+.pw-map-rail .raster-legend {
+  font-size: var(--type-12);
+}
+
+.pw-map-rail .raster-scan-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pw-map-rail .raster-scan-banner p {
+  margin: 0;
+  color: var(--ink-2);
+}
+
+.pw-map-rail .raster-scan-banner .raster-scan-banner-note {
+  color: var(--ink-3);
+}
+
+.pw-map-rail .raster-scan-banner-stale {
+  border-left-color: var(--ink);
+}
+
+/* --- notes, lines, fields ----------------------------------------- */
+
+.pw-map-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  color: var(--ink-2);
+  font-size: var(--type-12);
+  list-style: none;
+}
+
+.pw-map-note {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: var(--type-12);
+}
+
+.pw-map-notes li[data-tone='attention'],
+.pw-map-note[data-tone='attention'],
+.pw-map-line[data-tone='attention'] {
+  padding-left: 8px;
+  border-left: 2px solid var(--ink);
+  color: var(--ink);
+}
+
+.pw-map-loading {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: var(--type-12);
+}
+
+.pw-map-line {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--type-12);
+}
+
+.pw-map-line p {
+  margin: 0;
+}
+
+.pw-map-line-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pw-map-server {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pw-map-server .pw-server-text,
+.pw-map-line .pw-server-text {
+  padding: 6px 10px;
+  font-size: var(--type-12);
+}
+
+.pw-map-error {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius);
+  font-size: var(--type-12);
+}
+
+.pw-map-error p {
+  margin: 0;
+}
+
+.pw-map-fields {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.pw-map-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: var(--space-1);
+  font-size: var(--type-12);
+}
+
+.pw-map-field dt {
+  color: var(--ink-3);
+}
+
+.pw-map-field dd {
+  margin: 0;
+  text-align: right;
+}
+
+.pw-map-fields--3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.pw-map-fields--3 .pw-map-field {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.pw-map-fields--3 .pw-map-field dd {
+  text-align: left;
+}
+
+.pw-map-id-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 240px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  font-size: 11px;
+  list-style: none;
+  overflow-wrap: anywhere;
+}
+
+/* --- pins ---------------------------------------------------------- */
+
+.pw-map-pin-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  font-size: var(--type-12);
+}
+
+.pw-map-check,
+.pw-map-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pw-map-check {
+  cursor: pointer;
+}
+
+.pw-map-check input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.pw-map-select select {
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+}
+
+.pw-map-pins,
+.pw-map-pins-empty {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.pw-map-pins-empty p {
+  margin: 0;
+}
+
+/* The marker itself: dark neutral, numbered; a square for NDCI pins, a
+   diamond for TEST anomaly pins (sites, where shown, are hollow circles). */
+.pw-map-pin-wrap {
+  border: 0;
+  background: none;
+}
+
+.pw-map-pin {
+  display: inline-grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: 24px;
+  height: 24px;
+  border: 2px solid #fff;
+  border-radius: 3px;
+  background: var(--ink);
+  color: #fff;
+  font: 600 12px / 1 var(--font-mono);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.pw-map-pin[data-shape='diamond'] {
+  border-radius: 2px;
+  transform: rotate(45deg) scale(0.86);
+}
+
+.pw-map-pin[data-shape='diamond'] > span {
+  transform: rotate(-45deg);
+}
+
+.pw-map-pin[data-selected='true'] {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.pw-map-pin-wrap:focus {
+  outline: none;
+}
+
+.pw-map-pin-wrap:focus-visible .pw-map-pin {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.pw-map-pin-row .pw-map-pin,
+.pw-map-pin-legend .pw-map-pin {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  border-color: var(--ink);
+  font-size: 11px;
+  box-shadow: none;
+}
+
+.pw-map-pin-legend {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  color: var(--ink-2);
+  font-size: var(--type-12);
+}
+
+.pw-map-pin-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pw-map-pin-list > li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pw-map-pin-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 40px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--type-12);
+  text-align: left;
+  cursor: pointer;
+}
+
+.pw-map-pin-row:hover {
+  background: var(--paper-2);
+}
+
+.pw-map-pin-row[aria-pressed='true'] {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.pw-map-pin-row:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.pw-map-pin-row-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pw-map-pin-row-values,
+.pw-map-pin-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+}
+
+.pw-map-pin-row-meta {
+  color: var(--ink-3);
+}
+
+.pw-map-pin-chip {
+  align-self: flex-start;
+  margin-left: 40px;
+}
+
+.pw-map-counts .pw-disclosure-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pw-map-count-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+}
+
+.pw-map-count-list--indent {
+  padding-left: 10px;
+  border-left: 1px solid var(--line);
+}
+
+.pw-map-count {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: var(--space-1);
+  font-size: var(--type-12);
+}
+
+.pw-map-count dt {
+  color: var(--ink-2);
+}
+
+.pw-map-count dd {
+  margin: 0;
+  text-align: right;
+}
+
+.pw-map-partition {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: var(--type-12);
+}
+
+.pw-map-partition[data-ok='false'],
+.pw-map-partition[data-ok='unknown'] {
+  padding-left: 8px;
+  border-left: 2px solid var(--ink);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* --- scene-date chart --------------------------------------------- */
+
+.pw-map-chart .pw-figure-body {
+  padding: 10px 12px;
+}
+
+.pw-map-chart .pw-figcaption {
+  font-size: var(--type-12);
+}
+
+.pw-map-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pw-map-bars > li {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr) 52px;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--type-12);
+}
+
+.pw-map-bar-track {
+  height: 10px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--paper-2);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+
+.pw-map-bar {
+  display: block;
+  min-width: 2px;
+  height: 100%;
+  background: var(--ink-2);
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.pw-map-bar-share {
+  text-align: right;
+}
+
+.pw-map-chart-table {
+  font-size: var(--type-12);
+}
+
+/* --- map column ---------------------------------------------------- */
+
+.pw-map-main {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.pw-map-main > .pw-map-canvas {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.pw-map-canvas .leaflet-map {
+  height: 100%;
+  min-height: 280px;
+}
+
+/* One line above the map; the body opens over the map, so expanding it
+   never resizes Leaflet. */
+.pw-map-truth {
+  position: relative;
+  z-index: 1150;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper-2);
+  font-size: var(--type-12);
+  line-height: var(--lh);
+}
+
+.pw-map-truth > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 4px var(--space-2);
+  overflow: hidden;
+  color: var(--ink-2);
+  white-space: nowrap;
+  cursor: pointer;
+  list-style: none;
+}
+
+.pw-map-truth > summary::-webkit-details-marker {
+  display: none;
+}
+
+.pw-map-truth > summary:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.pw-map-truth-label {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.pw-map-truth-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pw-map-truth-body {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  left: 0;
+  max-height: min(60vh, 480px);
+  padding: var(--space-2);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper);
+  box-shadow: var(--shadow-pop);
+  color: var(--ink-2);
+  font-size: var(--type-14);
+}
+
+.pw-map-truth-body:lang(th) {
+  line-height: var(--lh-th);
+}
+
+.pw-map-truth-body > .pw-label {
+  margin-top: var(--space-2);
+}
+
+.pw-map-rail-toggle {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 1050;
+  box-shadow: var(--shadow-card);
+}
+
+/* --- inspector (top right; bottom sheet under 640 px) -------------- */
+
+.pw-map-inspector {
+  position: absolute;
+  top: 12px;
+  right: 56px; /* clears Leaflet's top-right zoom control */
+  bottom: 12px;
+  z-index: 1050;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  width: min(360px, calc(100% - 80px));
+  pointer-events: none; /* only the panel itself takes clicks */
+  outline: none;
+}
+
+.pw-map-inspector > * {
+  pointer-events: auto;
+}
+
+.pw-map-inspector .raster-pixel-panel {
+  position: static;
+  width: auto;
+  max-height: 100%;
+  margin: 0;
+  padding: 12px 14px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+  box-shadow: var(--shadow-pop);
+  color: var(--ink);
+  font-size: var(--type-12);
+  line-height: var(--lh);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.pw-map-inspector .raster-pixel-panel:lang(th) {
+  line-height: var(--lh-th);
+}
+
+.pw-map-inspector .raster-pixel-panel > * + * {
+  margin-top: 8px;
+}
+
+.pw-map-inspector .raster-pixel-title {
+  font-size: var(--type-14);
+}
+
+.pw-map-inspector .raster-pixel-close {
+  min-width: 28px;
+  min-height: 28px;
+}
+
+.pw-map-pin-panel-kind {
+  margin: 0;
+  font-weight: 600;
+}
+
+.pw-map-index-link {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.pw-map-index-link:hover {
+  text-decoration: underline;
+}
+
+.pw-map-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin: 0;
+}
+
+.pw-map-run {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--ink-3);
+}
+
+.pw-map-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+/* TEST values sit on the TEST strip's sand, so they are never read as
+   the plain index readings above them. */
+.pw-map-test-block {
+  border-color: var(--sand-line);
+  background: var(--sand);
+}
+
+.pw-map-block-title {
+  margin: 0;
+  font-size: var(--type-12);
+  font-weight: 600;
+}
+
+.pw-map-caveat {
+  color: var(--ink-2);
+}
+
+.pw-map-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.pw-map-actions .pw-cite .pw-btn {
+  min-height: 28px;
+  padding: 0 8px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--accent);
+  font-size: var(--type-12);
+}
+
+.pw-map-copy {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  max-width: 100%;
+}
+
+.pw-map-copy input {
+  width: min(320px, 100%);
+  padding: 6px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  font: 12px / 1.5 var(--font-mono);
+}
+
+/* --- responsive ----------------------------------------------------- */
+
+/* Under 1024 px the rail is a drawer over the map. */
+@media (max-width: 1023px) {
+  .pw-map-rail {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 1200;
+    width: min(380px, calc(100% - 48px));
+    box-shadow: var(--shadow-pop);
+  }
+}
+
+/* Under 640 px the inspector is a bottom sheet. */
+@media (max-width: 639px) {
+  .pw-map-inspector {
+    top: auto;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: auto;
+  }
+
+  .pw-map-inspector .raster-pixel-panel {
+    max-height: 55vh;
+    border-bottom: 0;
+    border-radius: 12px 12px 0 0;
+  }
+
+  .pw-map-rail {
+    width: calc(100% - 32px);
+  }
+
+  .pw-map-truth > summary {
+    padding-inline: 12px;
   }
 }
 

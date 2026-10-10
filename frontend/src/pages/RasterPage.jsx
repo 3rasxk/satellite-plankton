@@ -1,34 +1,232 @@
 /**
- * Raster coverage view — its own page, not a toggle on the pin map.
+ * The raster map page (`/map`, dashboard spec §4.2, §4.6; test-baseline spec
+ * §6, §7) -- the served raster over a neutral basemap, a left rail, highlight
+ * pins, a provenance-rich inspector and a permalink.
  *
- * Shows valid index readings inside the study polygon; all unmeasured
- * pixels remain transparent over the Light Map.
- * Clicking anywhere on the raster reads that one cell back out of the
- * stored blob the picture was drawn from — the four index values and
- * that cell's own acquisition date. Not a live satellite call: the map
- * shows what was already measured, so a click must answer with the number
- * behind the pixel on screen and give the same answer every time.
+ * Data source (all read-only; no Earth Engine call from here):
+ *   - `GET /raster-scan`: the served run -- overlay, legend, coverage, scene
+ *     dates, provenance, latest scene, poll (rail and banner);
+ *   - `GET /raster-scan/highlights?n=<3-10>&run_id=<served run>`: the pins,
+ *     in the mode the API picks (no `mode` is sent);
+ *   - `GET /raster-scan/pixel?lat=&lng=&run_id=`: one cell, only for a click
+ *     on the map (or "Read this cell" on a pin) -- never for a control;
+ *   - useBaseline() (`/methods`): TEST mode for the wording, settle hours.
+ * All view logic is in src/lib/mapModel.js; this file wires state to it.
  *
- * Four pieces, all reading the same `/raster-scan` run: the overlay, the
- * legend, the per-cell inspector, and `RasterScanBanner` — which states
- * in words what the picture is (dates and their per-day shares, how much
- * of the polygon carries a reading, what a cell actually samples, and
- * that no anomaly statistic exists). The banner replaced this page's
- * earlier inline status line, which showed only the target date, the
- * scene-date range and the scale.
+ * One raster at a time: a different `run_id` remounts the view, so an old
+ * reading, pin or pending response cannot outlive its picture.
+ *
+ * Layout (stylesheet, dashboard.css "Raster map page"): rail | map column.
+ * The map column starts with a one-line truth bar ("Truth boundary",
+ * expanding to the three points and the server disclaimer -- the footer is
+ * below the fold on this page); the map fills the rest. The inspector floats
+ * at the top right (a bottom sheet under 640 px); the rail is a drawer under
+ * 1024 px. Every panel is a sibling of the Leaflet container, never inside
+ * it, so no click on a control can reach the map's click handler (the only
+ * control left inside the map, Leaflet's own zoom buttons, stops its own
+ * clicks; pin markers do not bubble).
+ *
+ * Permalink: `decodeView(location.search)` once on load (lat/lng select and
+ * fly to the cell; `pin` selects that pin; `layer`, `zoom`, `run`), and
+ * `encodeView` written with `history.replaceState` after an interaction. A
+ * link to a run that is no longer served says so and shows the latest.
  */
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useOutletContext } from 'react-router-dom'
+import { useMap } from 'react-leaflet'
 import { useApi } from '../hooks/useApi.js'
-import { getRasterScan, getRasterPixel } from '../api/client.js'
+import { useBaseline } from '../hooks/useBaseline.js'
+import { getHighlights, getRasterPixel, getRasterScan } from '../api/client.js'
+import Icon from '../components/Icon.jsx'
 import RiskMap from '../components/RiskMap.jsx'
-import RasterLayerSwitcher, { RasterMapLayers } from '../components/RasterLayerSwitcher.jsx'
-import { RasterLegendDock } from '../components/RasterLegend.jsx'
+import { RasterMapLayers } from '../components/RasterLayerSwitcher.jsx'
 import RasterPixelProbe from '../components/RasterPixelProbe.jsx'
 import RasterPixelPanel from '../components/RasterPixelPanel.jsx'
-import RasterScanBanner from '../components/RasterScanBanner.jsx'
+import RasterRail from '../components/RasterRail.jsx'
+import HighlightPins, { PinDetails } from '../components/HighlightPins.jsx'
+import {
+  applyPermalink, buildPinView, buildPinsModel, buildRailModel, clampPinCount, readPermalink, serializeView,
+  PIN_N_DEFAULT,
+} from '../lib/mapModel.js'
+import { useLang } from '../i18n/useLang.js'
+
+const MINUTE_MS = 60000
+const FOCUS_ZOOM = 12
+const DRAWER_QUERY = '(max-width: 1023px)'
+
+function currentSearch() {
+  try {
+    return typeof window !== 'undefined' ? window.location.search : ''
+  } catch {
+    return ''
+  }
+}
+
+/** The `?lang=` currently in the address bar (kept when the view is written). */
+function urlLang() {
+  try {
+    return new URLSearchParams(currentSearch()).get('lang') ?? undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** Replace the query in place (no navigation, no history entry). Keeps the
+ * router's own history state so back/forward still work. */
+function writeQuery(query) {
+  if (typeof window === 'undefined') return
+  try {
+    const { pathname, hash, search } = window.location
+    const next = query ? `?${query}` : ''
+    if (next === search) return
+    window.history.replaceState(window.history.state, '', `${pathname}${next}${hash}`)
+  } catch {
+    // A refused history write leaves the URL as it was; the view still works.
+  }
+}
+
+function absoluteUrl(query) {
+  try {
+    const { origin, pathname } = window.location
+    return `${origin}${pathname}${query ? `?${query}` : ''}`
+  } catch {
+    return ''
+  }
+}
+
+function prefersReducedMotion() {
+  try {
+    return typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
+  } catch {
+    return false
+  }
+}
+
+function drawerMatches() {
+  try {
+    return typeof window !== 'undefined' && window.matchMedia?.(DRAWER_QUERY).matches === true
+  } catch {
+    return false
+  }
+}
+
+/** True below 1024 px, where the rail is a drawer. */
+function useDrawerMode() {
+  const [drawer, setDrawer] = useState(drawerMatches)
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return undefined
+    const mql = window.matchMedia(DRAWER_QUERY)
+    const onChange = (event) => setDrawer(event.matches)
+    mql.addEventListener?.('change', onChange)
+    return () => mql.removeEventListener?.('change', onChange)
+  }, [])
+  return drawer
+}
+
+/** Wall-clock time, re-read every `intervalMs`, so poll ages stay true. */
+function useNow(intervalMs) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), intervalMs)
+    return () => clearInterval(id)
+  }, [intervalMs])
+  return now
+}
+
+/**
+ * Map-side effects that need the Leaflet instance: fly to a target, apply
+ * the permalink's zoom once, report zoom changes, notice user interaction
+ * (for the permalink) and keep Leaflet's size in step with its container
+ * (the rail and the truth bar change it). Renders nothing.
+ */
+function MapController({ target, initialZoom, onZoom, onUserInteraction }) {
+  const map = useMap()
+
+  useEffect(() => {
+    if (!map || typeof map.on !== 'function') return undefined
+    const handleZoom = () => onZoom?.(map.getZoom())
+    map.on('zoomend', handleZoom)
+    const el = typeof map.getContainer === 'function' ? map.getContainer() : null
+    const mark = () => onUserInteraction?.()
+    el?.addEventListener('pointerdown', mark)
+    el?.addEventListener('wheel', mark, { passive: true })
+    el?.addEventListener('keydown', mark)
+    let observer = null
+    if (el && typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(() => map.invalidateSize())
+      observer.observe(el)
+    }
+    return () => {
+      map.off('zoomend', handleZoom)
+      el?.removeEventListener('pointerdown', mark)
+      el?.removeEventListener('wheel', mark)
+      el?.removeEventListener('keydown', mark)
+      observer?.disconnect()
+    }
+  }, [map, onZoom, onUserInteraction])
+
+  const appliedZoom = useRef(false)
+  useEffect(() => {
+    if (appliedZoom.current || !map || typeof map.setZoom !== 'function') return
+    appliedZoom.current = true
+    if (Number.isFinite(initialZoom) && !target) map.setZoom(initialZoom)
+  }, [map, initialZoom, target])
+
+  useEffect(() => {
+    if (!target || !map || typeof map.flyTo !== 'function') return
+    const zoom = Number.isFinite(target.zoom) ? target.zoom : Math.max(map.getZoom(), FOCUS_ZOOM)
+    if (prefersReducedMotion()) map.setView([target.lat, target.lng], zoom)
+    else map.flyTo([target.lat, target.lng], zoom, { duration: 0.6 })
+  }, [map, target])
+
+  return null
+}
+
+/** The one-line truth bar inside the map column. */
+function MapTruthBar({ disclaimer, endpoint, isTest }) {
+  const { t } = useLang()
+  return (
+    <details className="pw-map-truth">
+      <summary>
+        <Icon name="alert" size={14} strokeWidth={2} />
+        <span className="pw-map-truth-label">{t('map.truthbar.label')}</span>
+        <span className="pw-map-truth-summary">{t('map.truthbar.summary')}</span>
+      </summary>
+      <div className="pw-map-truth-body">
+        <ol className="pw-truth-list" role="list">
+          <li>{t('truth.point_1')}</li>
+          <li>{t('truth.point_2')}</li>
+          <li>{t(isTest ? 'truth.point_3_test' : 'truth.point_3')}</li>
+        </ol>
+        <p className="pw-truth-null">{t('truth.null_rule')}</p>
+        <p className="pw-label">{t('truth.server_disclaimer')}</p>
+        {disclaimer ? (
+          <>
+            <blockquote className="pw-server-text" lang="en">{disclaimer}</blockquote>
+            {endpoint && <p className="pw-footer-note">{t('truth.disclaimer_source', { endpoint: `GET ${endpoint}` })}</p>}
+          </>
+        ) : (
+          <p className="pw-footer-note">{t('truth.no_server_disclaimer')}</p>
+        )}
+      </div>
+    </details>
+  )
+}
 
 export default function RasterPage() {
   const { data, loading, error, refetch } = useApi(getRasterScan, [])
+  // Read once: later writes to the address bar are this page's own.
+  const [initialView] = useState(() => readPermalink(currentSearch()))
+  const drawer = useDrawerMode()
+  const [railOpen, setRailOpen] = useState(() => !drawerMatches())
+  const firstDrawer = useRef(true)
+  useEffect(() => {
+    if (firstDrawer.current) {
+      firstDrawer.current = false
+      return
+    }
+    setRailOpen(!drawer)
+  }, [drawer])
 
   // A different scan replaces the picture and all inspector state in one
   // render. An old reading or pending response must not outlive its image.
@@ -39,52 +237,291 @@ export default function RasterPage() {
       loading={loading}
       error={error}
       refetch={refetch}
+      initialView={initialView}
+      drawer={drawer}
+      railOpen={railOpen}
+      setRailOpen={setRailOpen}
     />
   )
 }
 
-function RasterView({ data, loading, error, refetch }) {
-  const [picked, setPicked] = useState(null)
-  const [layerMode, setLayerMode] = useState('ndci')
-  const runId = data?.run_id
+function RasterView({ data, loading, error, refetch, initialView, drawer, railOpen, setRailOpen }) {
+  const { t, lang } = useLang()
+  const baseline = useBaseline()
+  const { reportDisclaimer } = useOutletContext() ?? {}
+  const runId = Number.isInteger(data?.run_id) ? data.run_id : null
+  const hasRaster = runId !== null
+  const railId = useId()
+  const toggleRef = useRef(null)
+  const inspectorRef = useRef(null)
+  const now = useNow(MINUTE_MS)
 
-  // Only ask once there is a raster to ask about; without a rendered run
-  // the endpoint has nothing to answer from and returns 404, and a 404
-  // rendered as an error would read as "nothing found here".
-  const hasRaster = Boolean(runId)
+  // The permalink, applied to the raster this view was mounted for.
+  const [applied] = useState(() => applyPermalink(initialView, { raster: data }))
+  // `lang` alone is the language toggle's, not a view to restore.
+  const hadPermalink = Object.keys(initialView ?? {}).some((key) => key !== 'lang')
+  const [selection, setSelection] = useState(applied.selection)
+  const [layerMode, setLayerMode] = useState(applied.layer)
+  const [zoom, setZoom] = useState(applied.zoom)
+  const [flyTarget, setFlyTarget] = useState(applied.fly)
+  const [notes] = useState(applied.notes)
+  const [pinCount, setPinCount] = useState(() => clampPinCount(Math.max(PIN_N_DEFAULT, applied.selection?.kind === 'pin' ? applied.selection.rank : 0)))
+  const [showPins, setShowPins] = useState(true)
+  const [interacted, setInteracted] = useState(false)
+  const markInteraction = useCallback(() => setInteracted(true), [])
+  const onZoom = useCallback((z) => setZoom(z), [])
+
+  // --- the clicked cell: asked only for a map click (or "Read this cell").
+  const pickedLat = selection?.kind === 'cell' ? selection.lat : null
+  const pickedLng = selection?.kind === 'cell' ? selection.lng : null
+  // Named functions: the test fixture for useApi keys responses by name.
   const fetchPixel = useCallback(
-    () => (picked ? getRasterPixel(picked.lat, picked.lng, runId) : Promise.resolve(null)),
-    [picked, runId],
+    function fetchPixel() {
+      return pickedLat !== null ? getRasterPixel(pickedLat, pickedLng, runId) : Promise.resolve(null)
+    },
+    [pickedLat, pickedLng, runId],
   )
   const {
     data: pixel,
     loading: pixelLoading,
     error: pixelError,
-  } = useApi(fetchPixel, [picked], { enabled: Boolean(picked) && hasRaster })
+  } = useApi(fetchPixel, [pickedLat, pickedLng], { enabled: pickedLat !== null && hasRaster })
+
+  // --- the pins of this run, in the API's chosen mode.
+  const fetchHighlights = useCallback(
+    function fetchHighlights() {
+      return getHighlights({ n: pinCount, run_id: runId })
+    },
+    [pinCount, runId],
+  )
+  const highlights = useApi(fetchHighlights, [pinCount, runId], { enabled: hasRaster })
+  const highlightsLoading = hasRaster && (highlights.loading || (!highlights.data && !highlights.error))
+  const highlightsData = highlightsLoading ? null : highlights.data
+  const pins = useMemo(() => buildPinsModel({
+    highlights: highlightsData,
+    request: { loading: highlightsLoading, error: highlights.error },
+    runId,
+    n: pinCount,
+    show: showPins,
+  }), [highlightsData, highlightsLoading, highlights.error, runId, pinCount, showPins])
+
+  // A selected pin that is not among the loaded pins (a link's rank this
+  // run does not have, or N lowered below it) is no selection.
+  const pinsSettled = pins.state !== 'loading'
+  const pinFound = (rank) => pins.state === 'ready' && pins.items.some((p) => p.rank === rank)
+  const effective = selection?.kind === 'pin' && pinsSettled && !pinFound(selection.rank) ? null : selection
+  const selectedRank = effective?.kind === 'pin' ? effective.rank : null
+  const pinView = useMemo(
+    () => (selectedRank !== null && pins.state === 'ready' ? buildPinView(highlightsData, selectedRank) : null),
+    [selectedRank, pins.state, highlightsData],
+  )
+
+  // A pin named by the permalink: the map flies to it once the pins are
+  // here (unless the reader has moved on), or the rail says it is not
+  // among them.
+  const linkRank = applied.selection?.kind === 'pin' ? applied.selection.rank : null
+  const linkPin = linkRank !== null && selectedRank === linkRank ? pins.items.find((p) => p.rank === linkRank) : null
+  const linkLat = linkPin?.onMap ? linkPin.lat : null
+  const linkLng = linkPin?.onMap ? linkPin.lng : null
+  const linkPinTarget = useMemo(
+    () => (linkLat !== null ? { lat: linkLat, lng: linkLng, zoom: applied.zoom } : null),
+    [linkLat, linkLng, applied.zoom],
+  )
+  const allNotes = linkRank !== null && pinsSettled && !pinFound(linkRank)
+    ? [...notes, { key: 'map.permalink.pin_missing', params: { pin: String(linkRank) }, tone: 'attention' }]
+    : notes
+
+  const rail = useMemo(
+    () => buildRailModel({ raster: data, request: { loading, error }, methods: baseline.methods, now }),
+    [data, loading, error, baseline.methods, now],
+  )
+
+  // --- permalink: written after an interaction (or to normalise a link).
+  useEffect(() => {
+    if (!interacted && !hadPermalink) return
+    writeQuery(serializeView({ selection: effective, layer: layerMode, zoom, runId, lang: urlLang() }))
+  }, [interacted, hadPermalink, effective, layerMode, zoom, runId, lang])
+
+  const permalink = useCallback(
+    () => absoluteUrl(serializeView({ selection: effective, layer: layerMode, zoom, runId, lang })),
+    [effective, layerMode, zoom, runId, lang],
+  )
+  const citation = useMemo(() => ({
+    runId,
+    oldestScene: data?.oldest_scene_date,
+    newestScene: data?.newest_scene_date,
+    baselineVersion: baseline.isTest ? baseline.version : null,
+  }), [runId, data?.oldest_scene_date, data?.newest_scene_date, baseline.isTest, baseline.version])
+
+  // --- the server disclaimer of the response being shown, for the footer
+  // and the truth bar (verbatim).
+  const shown = (pixel && effective?.kind === 'cell' && typeof pixel.disclaimer === 'string' && pixel.disclaimer)
+    ? { text: pixel.disclaimer, endpoint: '/raster-scan/pixel' }
+    : (pins.state === 'ready' && typeof highlightsData?.disclaimer === 'string' && highlightsData.disclaimer)
+      ? { text: highlightsData.disclaimer, endpoint: '/raster-scan/highlights' }
+      : (typeof data?.disclaimer === 'string' && data.disclaimer)
+        ? { text: data.disclaimer, endpoint: '/raster-scan' }
+        : (baseline.disclaimer ? { text: baseline.disclaimer, endpoint: '/methods' } : null)
+  const disclaimerText = shown?.text ?? null
+  const disclaimerEndpoint = shown?.endpoint ?? null
+  useEffect(() => {
+    reportDisclaimer?.(disclaimerText, disclaimerEndpoint)
+  }, [reportDisclaimer, disclaimerText, disclaimerEndpoint])
+
+  // --- actions.
+  const onPick = useCallback((point) => {
+    setSelection({ kind: 'cell', lat: point.lat, lng: point.lng })
+    markInteraction()
+    if (drawer) setRailOpen(false) // the drawer would cover the inspector
+  }, [markInteraction, drawer, setRailOpen])
+  const selectPin = useCallback((rank, { fly = false } = {}) => {
+    setSelection({ kind: 'pin', rank })
+    markInteraction()
+    if (fly) {
+      const item = pins.items.find((p) => p.rank === rank)
+      if (item?.onMap) setFlyTarget({ lat: item.lat, lng: item.lng, zoom: null })
+    }
+    if (drawer) {
+      // The drawer covers the map: close it and move focus to the inspector.
+      setRailOpen(false)
+      setTimeout(() => inspectorRef.current?.focus(), 0)
+    }
+  }, [pins.items, markInteraction, drawer, setRailOpen])
+  const onLayerChange = useCallback((mode) => {
+    setLayerMode(mode)
+    markInteraction()
+  }, [markInteraction])
+  const onPinCount = useCallback((n) => {
+    setPinCount(clampPinCount(n))
+  }, [])
+  const clearSelection = useCallback(() => {
+    setSelection(null)
+    markInteraction()
+  }, [markInteraction])
+
+  const openRail = () => setRailOpen(true)
+  const closeRail = () => {
+    setRailOpen(false)
+    // Back to the control that opened it (it renders once the rail is closed).
+    setTimeout(() => toggleRef.current?.focus(), 0)
+  }
+
+  // In drawer mode, move focus into the drawer when it opens.
+  const railWasOpen = useRef(railOpen)
+  useEffect(() => {
+    if (drawer && railOpen && !railWasOpen.current && typeof document !== 'undefined') {
+      document.getElementById(railId)?.querySelector('.pw-map-rail-close')?.focus()
+    }
+    railWasOpen.current = railOpen
+  }, [drawer, railOpen, railId])
+
+  // Esc inside a source popover closes only the popover (SourceChip).
+  const inPopover = (event) => event.target instanceof Element && event.target.closest('.pw-source') !== null
+  const onPageKeyDown = (event) => {
+    if (event.key !== 'Escape' || inPopover(event)) return
+    if (drawer && railOpen && event.target instanceof Node && document.getElementById(railId)?.contains(event.target)) {
+      event.stopPropagation()
+      closeRail()
+    }
+  }
+  const onInspectorKeyDown = (event) => {
+    if (event.key === 'Escape' && effective && !inPopover(event)) {
+      event.stopPropagation()
+      clearSelection()
+    }
+  }
 
   return (
-    <div className="overview-page">
-      <div className="overview-map-area">
-        <RiskMap mode="raster">
-          <RasterMapLayers mode={layerMode} data={data} />
-          <RasterLayerSwitcher
-            mode={layerMode}
-            onModeChange={setLayerMode}
-            trueColorAvailable={Boolean(data?.true_color_url)}
-          />
-          {hasRaster && <RasterPixelProbe onPick={setPicked} />}
-        </RiskMap>
+    <div
+      className="overview-page pw-map-page"
+      data-rail={railOpen ? 'open' : 'closed'}
+      data-drawer={drawer ? 'true' : 'false'}
+      onKeyDown={onPageKeyDown}
+    >
+      <h1 className="pw-sr-only">{t('map.title')}</h1>
 
-        <RasterLegendDock layerMode={layerMode} legend={data?.legend} hasRaster={hasRaster} />
+      <RasterRail
+        id={railId}
+        open={railOpen}
+        drawer={drawer}
+        onClose={closeRail}
+        raster={data}
+        rasterLoading={loading}
+        rasterError={error}
+        onRefresh={refetch}
+        isTest={baseline.isTest}
+        layerMode={layerMode}
+        onLayerChange={onLayerChange}
+        rail={rail}
+        pins={pins}
+        pinCount={pinCount}
+        onPinCount={onPinCount}
+        showPins={showPins}
+        onShowPins={setShowPins}
+        selectedRank={selectedRank}
+        onSelectPin={(rank) => selectPin(rank, { fly: true })}
+        onRetryPins={highlights.refetch}
+        notes={allNotes}
+      />
 
-        <RasterPixelPanel
-          pixel={pixel}
-          loading={pixelLoading}
-          error={pixelError}
-          onClose={() => setPicked(null)}
-        />
+      <div className="pw-map-main">
+        <MapTruthBar disclaimer={disclaimerText} endpoint={disclaimerEndpoint} isTest={baseline.isTest} />
 
-        <RasterScanBanner data={data} loading={loading} error={error} onRefresh={refetch} />
+        <div className="overview-map-area pw-map-canvas">
+          <RiskMap mode="raster">
+            <RasterMapLayers mode={layerMode} data={data} t={t} />
+            <HighlightPins pins={pins} selectedRank={selectedRank} onSelect={(rank) => selectPin(rank)} />
+            <MapController target={flyTarget ?? linkPinTarget} initialZoom={applied.zoom} onZoom={onZoom} onUserInteraction={markInteraction} />
+            {hasRaster && <RasterPixelProbe onPick={onPick} />}
+          </RiskMap>
+
+          {!railOpen && (
+            <button
+              type="button"
+              ref={toggleRef}
+              className="pw-btn pw-map-rail-toggle"
+              aria-controls={railId}
+              aria-expanded={false}
+              onClick={openRail}
+            >
+              <Icon name="menu" size={16} strokeWidth={2} />
+              {t('map.rail.show')}
+            </button>
+          )}
+
+          <div
+            className="pw-map-inspector"
+            ref={inspectorRef}
+            tabIndex={-1}
+            aria-live="polite"
+            aria-label={t('map.inspector.label')}
+            role="region"
+            onKeyDown={onInspectorKeyDown}
+          >
+            {effective?.kind === 'pin' ? (
+              <PinDetails
+                view={pinView}
+                onClose={clearSelection}
+                onZoom={pinView?.target ? () => setFlyTarget({ ...pinView.target, zoom: Math.max(zoom ?? 0, FOCUS_ZOOM) }) : undefined}
+                onInspect={pinView?.cellQuery ? () => {
+                  setSelection({ kind: 'cell', lat: pinView.cellQuery.lat, lng: pinView.cellQuery.lng })
+                  markInteraction()
+                } : undefined}
+                citation={citation}
+                permalink={permalink}
+              />
+            ) : (
+              <RasterPixelPanel
+                pixel={pixel}
+                loading={pixelLoading}
+                error={pixelError}
+                onClose={clearSelection}
+                citation={citation}
+                permalink={permalink}
+              />
+            )}
+          </div>
+        </div>
       </div>
     </div>
   )

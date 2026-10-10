@@ -1,68 +1,76 @@
+/**
+ * The raster page's layer selector (True Color / Light Map / NDCI Raster)
+ * and the overlay each layer mounts.
+ *
+ * Text comes from i18n `map.layer.*` through a `t` prop (default Thai): the
+ * component deliberately uses no hooks, so it stays callable as a plain
+ * function (tests/rasterLayerSwitcher.test.js reads its tree directly). The
+ * three layer names are product names and read the same in both languages.
+ */
 import L from 'leaflet'
 import RasterOverlay from './RasterOverlay.jsx'
+import { createT } from '../i18n/index.js'
 
-const MODES = [
-  ['true_color', 'True Color'],
-  ['light_map', 'Light Map'],
-  ['ndci', 'NDCI Raster'],
-]
+const MODES = ['true_color', 'light_map', 'ndci']
 
-// The switcher is a plain DOM child of the Leaflet map, so React's synthetic
+const defaultT = createT('th')
+
+// The switcher may sit inside the Leaflet map, where React's synthetic
 // stopPropagation does not reach Leaflet's native listeners: without this a
 // click on a button would also pick the map pixel under it and a double
 // click would zoom. A callback ref (not a hook) keeps the component callable
-// as a plain function; the listeners die with the element.
+// as a plain function; the listeners die with the element. On /map it sits
+// in the rail, outside the map, and the shield is a harmless second guard.
 const shieldFromMap = (el) => {
   if (!el) return
   L.DomEvent.disableClickPropagation(el)
   L.DomEvent.disableScrollPropagation(el)
 }
 
-export default function RasterLayerSwitcher({ mode, onModeChange, trueColorAvailable }) {
+export default function RasterLayerSwitcher({ mode, onModeChange, trueColorAvailable, t = defaultT }) {
+  const unavailable = t('map.layer.true_color_unavailable')
   return (
-    <div ref={shieldFromMap} className="leaflet-bar raster-layer-switcher" role="group" aria-label="เลือกชั้นข้อมูลแผนที่">
-      {MODES.map(([value, label]) => (
-        <button
-          type="button"
-          key={value}
-          data-layer-mode={value}
-          aria-pressed={mode === value}
-          disabled={value === 'true_color' && !trueColorAvailable}
-          title={value === 'true_color' && !trueColorAvailable
-            ? 'ข้อมูลชุดนี้ไม่มีภาพสีธรรมชาติที่ตรงกับรอบสแกน จึงไม่สามารถเปิด True Color ได้'
-            : undefined}
-          aria-label={value === 'true_color' && !trueColorAvailable
-            ? 'True Color — ไม่มีภาพสีธรรมชาติที่ตรงกับรอบสแกน'
-            : label}
-          onMouseDown={(event) => event.stopPropagation()}
-          onDoubleClick={(event) => event.stopPropagation()}
-          onClick={(event) => {
-            event?.stopPropagation?.()
-            onModeChange(value)
-          }}
-        >
-          <span>{label}</span>
-          {value === 'true_color' && !trueColorAvailable && (
-            <small>ไม่มีภาพสีธรรมชาติที่ตรงกับรอบสแกน</small>
-          )}
-        </button>
-      ))}
+    <div ref={shieldFromMap} className="leaflet-bar raster-layer-switcher" role="group" aria-label={t('map.layer.group')}>
+      {MODES.map((value) => {
+        const label = t(`map.layer.${value}`)
+        const off = value === 'true_color' && !trueColorAvailable
+        return (
+          <button
+            type="button"
+            key={value}
+            data-layer-mode={value}
+            aria-pressed={mode === value}
+            disabled={off}
+            title={off ? t('map.layer.true_color_unavailable_title') : undefined}
+            aria-label={off ? `${label} — ${unavailable}` : label}
+            onMouseDown={(event) => event.stopPropagation()}
+            onDoubleClick={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event?.stopPropagation?.()
+              onModeChange(value)
+            }}
+          >
+            <span>{label}</span>
+            {off && <small>{unavailable}</small>}
+          </button>
+        )
+      })}
     </div>
   )
 }
 
-export function RasterMapLayers({ mode, data }) {
+export function RasterMapLayers({ mode, data, t = defaultT }) {
   if (mode === 'true_color') {
     return (
       <RasterOverlay
         data={data}
         urlField="true_color_url"
         className="raster-overlay-image raster-true-color-image"
-        alt="ภาพสีธรรมชาติ Sentinel-2 จากรอบสแกนที่แสดงอยู่"
+        alt={t('map.layer.true_color_alt')}
         opacity={1}
       />
     )
   }
-  if (mode === 'ndci') return <RasterOverlay data={data} />
+  if (mode === 'ndci') return <RasterOverlay data={data} alt={t('map.layer.ndci_alt')} />
   return null
 }

@@ -28,9 +28,22 @@
  *     the sampling interval is hit or missed outright rather than
  *     diluted, which makes a low reading weaker evidence than its
  *     confident block of colour suggests.
- *   - No anomaly statistic, no risk tier, no presence/absence verdict:
- *     no valid spectral-index baseline exists (CLAUDE.md §0/§1).
+ *   - No risk tier and no presence/absence verdict. Without a TEST baseline
+ *     there is no anomaly statistic either (no valid spectral-index
+ *     baseline exists, CLAUDE.md §0/§1); with one in force (`isTest`) the
+ *     closing note says the anomaly is TEST, against the location's own
+ *     history and uncalibrated.
+ *
+ * Text: i18n `map.banner.*` (Thai by default, so a render without a
+ * language provider reads exactly as before). Props: `isTest` switches the
+ * closing note to its TEST wording; `compact` (the /map rail) drops what the
+ * rail already carries -- the headline (the rail section has its own), the
+ * per-day bar list (SceneDateChart draws it, with a data table) and the
+ * server disclaimer (the map's truth bar shows it verbatim).
  */
+import { useLang } from '../i18n/useLang.js'
+
+
 
 // Sentinel-2's own native resolutions. The four indices are computed
 // from 10 m bands (B2/B3/B4) and 20 m bands (B5/B6), so one coarse cell
@@ -39,11 +52,11 @@
 const NATIVE_M_10 = 10
 const NATIVE_M_20 = 20
 
-const STATUS_LABEL_TH = {
-  ok: 'สแกนสำเร็จ',
-  no_data: 'ไม่มีภาพที่ใช้ได้ในรอบนี้',
-  error: 'รอบสแกนล้มเหลว',
-  running: 'กำลังสแกน — ภาพที่เห็นยังเป็นของรอบก่อนหน้า',
+const STATUS_KEYS = {
+  ok: 'map.banner.status_ok',
+  no_data: 'map.banner.status_no_data',
+  error: 'map.banner.status_error',
+  running: 'map.banner.status_running',
 }
 
 /** Whole percent-with-one-decimal, e.g. 0.2571 -> "25.7". Null-safe:
@@ -67,7 +80,7 @@ function daysBefore(targetDate, sceneDate) {
   return Number.isFinite(gap) ? Math.round(gap) : null
 }
 
-/** How many native pixels one cell of `scale_m` was sampled from: one
+/** How many native pixels one cell of `scaleM` was sampled from: one
  * pixel is kept out of this many. Only for a scale coarser than the
  * native one -- an equal or finer read samples nothing, and claiming a
  * ratio there would be arithmetic pretending to be a measurement. */
@@ -77,28 +90,29 @@ function sampleRatio(scaleM, nativeM) {
 }
 
 function AgeOfImagery({ data }) {
+  const { t } = useLang()
   const newestAge = daysBefore(data.date_used, data.newest_scene_date)
   const oldestAge = daysBefore(data.date_used, data.oldest_scene_date)
   return (
     <p>
-      วันที่เป้าหมายการสแกน <span className="mono">{data.date_used}</span>
+      {t('map.banner.target_date')} <span className="mono">{data.date_used}</span>
       <br />
-      ภาพใหม่สุดในแรสเตอร์นี้ <span className="mono">{data.newest_scene_date}</span>
-      {Number.isFinite(newestAge) && ` (ก่อนวันเป้าหมาย ${newestAge} วัน)`}
+      {t('map.banner.newest')} <span className="mono">{data.newest_scene_date}</span>
+      {Number.isFinite(newestAge) && ` ${t('map.banner.days_before', { n: newestAge })}`}
       {' · '}
-      เก่าสุด <span className="mono">{data.oldest_scene_date}</span>
-      {Number.isFinite(oldestAge) && ` (ก่อนวันเป้าหมาย ${oldestAge} วัน)`}
+      {t('map.banner.oldest')} <span className="mono">{data.oldest_scene_date}</span>
+      {Number.isFinite(oldestAge) && ` ${t('map.banner.days_before', { n: oldestAge })}`}
       {/* The day the run itself was taken -- stated, not turned into an
           age, because an age would be measured against the viewer's own
           clock and would drift away from every other number here. */}
       {typeof data.completed_at === 'string' && (
         <>
           <br />
-          รอบนี้สแกนเมื่อ <span className="mono">{data.completed_at.slice(0, 10)}</span> (UTC)
+          {t('map.banner.completed')} <span className="mono">{data.completed_at.slice(0, 10)}</span> (UTC)
         </>
       )}
       <br />
-      วันที่เป้าหมายไม่ใช่วันที่ของข้อมูล — แต่ละเซลล์ถือวันที่ภาพของตัวเอง
+      {t('map.banner.target_not_data')}
     </p>
   )
 }
@@ -106,13 +120,15 @@ function AgeOfImagery({ data }) {
 /** The distribution a date range cannot carry. Rendered whole -- every
  * day the run recorded, largest share first -- rather than topped and
  * tailed: a rolled-up "and 5 other days" would be the same hiding the
- * range already does, one level down. */
-function SceneDateShares({ data }) {
+ * range already does, one level down. `showList` false keeps the summary
+ * sentence and leaves the per-day bars to the rail's SceneDateChart. */
+function SceneDateShares({ data, showList }) {
+  const { t } = useLang()
   if (!Array.isArray(data.scene_dates) || data.scene_dates.length === 0) {
     return (
       <p className="raster-scan-banner-note">
-        รอบนี้ไม่ได้บันทึกสัดส่วนเซลล์รายวัน — ทราบเพียงช่วงวันที่ ไม่ทราบว่าวันไหนให้เซลล์เท่าใด
-        <strong> ไม่ได้แปลว่ากระจายเท่า ๆ กัน</strong>
+        {t('map.banner.no_breakdown')}
+        <strong> {t('map.banner.no_breakdown_strong')}</strong>
       </p>
     )
   }
@@ -125,29 +141,31 @@ function SceneDateShares({ data }) {
   return (
     <>
       <p>
-        เซลล์ที่เก็บไว้มีวันที่ถ่ายภาพ {data.scene_dates.length} วัน · วันที่ให้เซลล์มากที่สุดคือ{' '}
+        {t('map.banner.days_count', { n: data.scene_dates.length })} · {t('map.banner.top_day')}{' '}
         <span className="mono">{top.date}</span>
-        {Number.isFinite(top.share) && ` คิดเป็น ${pct(top.share)}% ของเซลล์ทั้งหมด`}
+        {Number.isFinite(top.share) && ` ${t('map.banner.top_share', { pct: pct(top.share) })}`}
         {Number.isFinite(data.scene_count) &&
-          ` · ภาพที่นำมาพิจารณา ${data.scene_count} ภาพ (บางภาพอาจไม่มีเซลล์เหลือในผลลัพธ์)`}
+          ` · ${t('map.banner.scenes_considered', { n: data.scene_count })}`}
       </p>
-      <ol className="raster-scan-day-list">
-        {data.scene_dates.map((entry) => (
-          <li key={entry.date}>
-            <span className="mono">{entry.date}</span>
-            <span
-              className="raster-scan-day-bar"
-              style={{ width: `${Math.max(1, (entry.share || 0) * 100)}%` }}
-              aria-hidden="true"
-            />
-            <span className="raster-scan-day-share mono">{pct(entry.share)}%</span>
-            <span className="raster-scan-day-cells">{grouped(entry.cells)} เซลล์</span>
-          </li>
-        ))}
-      </ol>
-      <p className="raster-scan-banner-note">
-        ช่วงวันที่อย่างเดียวไม่บอกว่าเซลล์ส่วนใหญ่มาจากวันไหน จึงแสดงสัดส่วนรายวันไว้ด้วย
-      </p>
+      {showList && (
+        <>
+          <ol className="raster-scan-day-list">
+            {data.scene_dates.map((entry) => (
+              <li key={entry.date}>
+                <span className="mono">{entry.date}</span>
+                <span
+                  className="raster-scan-day-bar"
+                  style={{ width: `${Math.max(1, (entry.share || 0) * 100)}%` }}
+                  aria-hidden="true"
+                />
+                <span className="raster-scan-day-share mono">{pct(entry.share)}%</span>
+                <span className="raster-scan-day-cells">{t('map.banner.cells_count', { n: grouped(entry.cells) })}</span>
+              </li>
+            ))}
+          </ol>
+          <p className="raster-scan-banner-note">{t('map.banner.range_note')}</p>
+        </>
+      )}
     </>
   )
 }
@@ -157,29 +175,25 @@ function SceneDateShares({ data }) {
  * work, so the sentence says "of the polygon, land included" every time
  * and never shortens to "of the area". */
 function Coverage({ data }) {
+  const { t } = useLang()
   const coverage = data.coverage
   if (!coverage || !Number.isFinite(coverage.measured_fraction)) {
-    return (
-      <p className="raster-scan-banner-note">
-        รอบนี้ไม่ได้บันทึกสัดส่วนพื้นที่ที่วัดได้ — ไม่รายงานตัวเลขที่ไม่ได้วัดไว้
-      </p>
-    )
+    return <p className="raster-scan-banner-note">{t('map.banner.no_coverage')}</p>
   }
   return (
     <>
       <p>
-        วัดค่าได้ {pct(coverage.measured_fraction)}% ของพื้นที่ในกรอบพื้นที่ศึกษา ·
-        อีก {pct(1 - coverage.measured_fraction)}% ไม่มีค่าอ่าน
+        {t('map.banner.coverage', { pct: pct(coverage.measured_fraction), rest: pct(1 - coverage.measured_fraction) })}
       </p>
       <p className="raster-scan-banner-note">
-        ตัวหารคือพื้นที่ทั้งหมดในกรอบรูปหลายเหลี่ยม <strong>รวมแผ่นดินที่อยู่ในกรอบ</strong> —
-        กรอบนี้เป็นขอบเขตพื้นที่ศึกษา ไม่ใช่หน้ากากน้ำ จึงไม่ใช่สัดส่วนของ “พื้นน้ำ”
+        {t('map.banner.denominator')} <strong>{t('map.banner.denominator_strong')}</strong>{' '}
+        {t('map.banner.denominator_rest')}
         {Number.isFinite(coverage.measured_pixels) && Number.isFinite(coverage.polygon_pixels) &&
-          ` (${grouped(coverage.measured_pixels)} จาก ${grouped(coverage.polygon_pixels)} พิกเซลของภาพซ้อนบนแผนที่)`}
+          ` ${t('map.banner.pixels', { measured: grouped(coverage.measured_pixels), polygon: grouped(coverage.polygon_pixels) })}`}
       </p>
       <p className="raster-scan-banner-note">
-        ส่วนที่ไม่มีค่าอ่านคือเมฆบัง แผ่นดิน หรือไม่มีภาพครอบคลุม รวมเป็นสถานะเดียวเพราะข้อมูลที่เก็บไว้แยกไม่ได้ ·
-        <strong> ไม่ใช่ค่าดัชนีต่ำ และไม่ใช่ค่าศูนย์</strong>
+        {t('map.banner.unmeasured')}
+        <strong> {t('map.banner.unmeasured_strong')}</strong>
       </p>
     </>
   )
@@ -191,82 +205,94 @@ function Coverage({ data }) {
  * the area" (it is one point, and the difference is what makes a small
  * feature hit-or-miss rather than diluted). */
 function SamplingReality({ data }) {
+  const { t } = useLang()
   const scaleM = data.scale_m
   const ratio10 = sampleRatio(scaleM, NATIVE_M_10)
   const ratio20 = sampleRatio(scaleM, NATIVE_M_20)
   return (
     <p className="raster-scan-banner-note">
-      หนึ่งเซลล์ = <strong>พิกเซลจริง 1 พิกเซล</strong> ที่เลือกมาแบบ nearest neighbour
-      {Number.isFinite(scaleM) && ` ทุกระยะ ${scaleM} ม.`}
-      {ratio10 && ` (สุ่มเก็บ 1 ใน ${grouped(ratio10)} พิกเซลของแบนด์ 10 ม.`}
-      {ratio20 && ` และ 1 ใน ${grouped(ratio20)} ของแบนด์ 20 ม.`}
+      {t('map.banner.sampling_a')} <strong>{t('map.banner.sampling_strong')}</strong> {t('map.banner.sampling_b')}
+      {Number.isFinite(scaleM) && ` ${t('map.banner.sampling_every', { m: scaleM })}`}
+      {ratio10 && ` (${t('map.banner.ratio10', { n: grouped(ratio10) })}`}
+      {ratio20 && ` ${t('map.banner.ratio20', { n: grouped(ratio20) })}`}
       {ratio10 && ')'}
       {' '}
-      <strong>ไม่ใช่ค่าเฉลี่ยของช่องสี่เหลี่ยมที่เห็นบนจอ</strong> ·
-      สิ่งที่เล็กกว่าระยะสุ่มจึงถูกเก็บมาทั้งก้อนหรือพลาดไปทั้งก้อน ไม่ได้ถูกเฉลี่ยจนจาง —
-      เซลล์ที่ค่าต่ำจึงไม่ใช่หลักฐานเรื่องน้ำข้าง ๆ
+      <strong>{t('map.banner.not_average')}</strong> · {t('map.banner.consequence')}
     </p>
   )
 }
 
-export default function RasterScanBanner({ data, loading, error, onRefresh }) {
+export default function RasterScanBanner({ data, loading, error, onRefresh, isTest = false, compact = false }) {
+  const { t } = useLang()
   const hasRaster = Boolean(data?.run_id)
 
   return (
-    <div className="raster-scan-banner info-callout glass" role="status">
-      <div className="raster-scan-banner-status-row">
-        <span className="headline">ภาพแรสเตอร์ทั่วพื้นที่ศึกษา</span>
-        {onRefresh && (
-          <button type="button" className="retry-btn" onClick={onRefresh} disabled={loading}>
-            {loading ? 'กำลังโหลด…' : 'โหลดผลล่าสุด'}
-          </button>
-        )}
-      </div>
+    <div className="raster-scan-banner info-callout glass" role="status" data-compact={compact ? 'true' : undefined}>
+      {(!compact || onRefresh) && (
+        <div className="raster-scan-banner-status-row">
+          {!compact && <span className="headline">{t('map.banner.headline')}</span>}
+          {onRefresh && (
+            <button type="button" className="retry-btn" onClick={onRefresh} disabled={loading}>
+              {loading ? t('map.banner.refreshing') : t('map.banner.refresh')}
+            </button>
+          )}
+        </div>
+      )}
 
-      {loading && <p>กำลังโหลดภาพแรสเตอร์…</p>}
+      {loading && <p>{t('map.banner.loading')}</p>}
 
       {error && !loading && (
         <p>
-          โหลดภาพแรสเตอร์ไม่สำเร็จ — <strong>ไม่ได้แปลว่าไม่พบสาหร่าย</strong>{' '}
-          แต่แปลว่ายังอ่านผลที่เก็บไว้ไม่ได้
+          {t('map.banner.error')} <strong>{t('map.banner.error_strong')}</strong>{' '}
+          {t('map.banner.error_rest')}
         </p>
       )}
 
       {!loading && !error && !hasRaster && (
-        <p>{data?.reason || 'ยังไม่มีภาพแรสเตอร์ — ต้องรันการสแกนก่อน'}</p>
+        <p>{data?.reason || t('map.banner.no_raster')}</p>
       )}
 
       {hasRaster && (
         <>
-          {data.status && <p>{STATUS_LABEL_TH[data.status] || data.status}</p>}
+          {data.status && <p>{STATUS_KEYS[data.status] ? t(STATUS_KEYS[data.status]) : data.status}</p>}
 
           {/* The picture on screen is not the newest attempt. Said before
               anything else about it, because every date below belongs to
               the older run. */}
           {data.stale_run_id != null && (
             <p className="raster-scan-banner-stale">
-              มีรอบสแกนใหม่กว่า (รอบที่ {data.stale_run_id}) ที่ยังไม่มีภาพให้แสดง —
-              กำลังสแกน ล้มเหลว หรือถูกลบตามอายุข้อมูล ·{' '}
-              <strong>ภาพและตัวเลขทั้งหมดนี้เป็นของรอบที่ {data.run_id} ซึ่งเก่ากว่ารอบล่าสุด</strong>
+              {t('map.banner.stale', { stale_run: data.stale_run_id })}{' '}
+              <strong>{t('map.banner.stale_strong', { run: data.run_id })}</strong>
             </p>
           )}
 
           <AgeOfImagery data={data} />
-          <SceneDateShares data={data} />
+          <SceneDateShares data={data} showList={!compact} />
           <Coverage data={data} />
           <SamplingReality data={data} />
 
-          <p>คลิกบนแผนที่เพื่ออ่านค่าของเซลล์นั้นทีละเซลล์</p>
+          <p>{t('map.banner.click_hint')}</p>
         </>
       )}
 
-      <p className="raster-scan-banner-note">
-        แสดงค่าดัชนีเท่านั้น <strong>ยังไม่มีการคำนวณค่าความผิดปกติ (anomaly)</strong> —
-        ไม่มีค่าฐานของดัชนีที่ใช้ได้ จึงไม่มีระดับความเสี่ยง ไม่มีการจัดอันดับ
-        และไม่มีคำตัดสินว่าพบหรือไม่พบสาหร่าย
-      </p>
-      <p>index values only — no anomaly detection active</p>
-      {data?.disclaimer && <p className="raster-scan-banner-note">{data.disclaimer}</p>}
+      {isTest ? (
+        <>
+          <p className="raster-scan-banner-note">
+            {t('map.banner.test_only')} <strong>{t('map.banner.test_only_strong')}</strong>{' '}
+            {t('map.banner.test_only_rest')}
+          </p>
+          <p>{t('map.banner.test_only_en')}</p>
+        </>
+      ) : (
+        <>
+          <p className="raster-scan-banner-note">
+            {t('map.banner.index_only')} <strong>{t('map.banner.index_only_strong')}</strong>{' '}
+            {t('map.banner.index_only_rest')}
+          </p>
+          <p>{t('map.banner.index_only_en')}</p>
+        </>
+      )}
+      {!compact && data?.disclaimer && <p className="raster-scan-banner-note">{data.disclaimer}</p>}
     </div>
   )
 }

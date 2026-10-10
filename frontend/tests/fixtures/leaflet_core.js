@@ -7,6 +7,7 @@ const record = (kind) => (el) => {
   return el
 }
 const L = {
+  divIcon: (options) => ({ options }),
   DomEvent: {
     disableClickPropagation: record('click'),
     disableScrollPropagation: record('scroll'),

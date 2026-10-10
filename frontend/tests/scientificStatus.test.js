@@ -9,11 +9,17 @@ test('the UI names the satellite-signal field without converting NDCI colours to
     readFile(new URL('../src/components/RasterLegend.jsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/utils/noiseField.js', import.meta.url), 'utf8'),
   ])
+  // The legend's words moved to i18n (Task 4): the title it renders must
+  // still deny a risk level in both languages.
+  const { default: th } = await import('../src/i18n/th.js')
+  const { default: en } = await import('../src/i18n/en.js')
 
   assert.match(constants, /ระดับความผิดปกติของสัญญาณดาวเทียม/)
   assert.match(constants, /ไม่มีข้อมูลประเมิน/)
   assert.match(ndciPage, /SIGNAL_ANOMALY_LABEL_TH/)
-  assert.match(legend, /ไม่ใช่ระดับความเสี่ยง/)
+  assert.match(legend, /t\('map\.legend\.title'\)/)
+  assert.match(th.map.legend.title, /ไม่ใช่ระดับความเสี่ยง/)
+  assert.match(en.map.legend.title, /not a risk level/)
   assert.doesNotMatch(legend, /ความเสี่ยง(?:ต่ำ|ปานกลาง|สูง)|(?:low|medium|high) (?:bloom )?risk/i)
   assert.doesNotMatch(oldTexture, /severe bloom|bloom likely|NDCI\s*[<>]/i)
   assert.doesNotMatch(ndciPage, /chlorophyll-a\s*[≥>]\s*10|29\s*[–-]\s*30|1,?469/i)

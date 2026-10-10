@@ -308,7 +308,8 @@ function sitesCard(summary, req) {
 
 // ---------------------------------------------------- scene and poll lines
 
-function latestSceneBlock(raster, req, methods) {
+/** The latest-scene line (also used by the /map rail, src/lib/mapModel.js). */
+export function latestSceneBlock(raster, req, methods) {
   const missing = missingState(raster, req)
   const source = isObject(raster) ? refForRasterField(raster, 'latest_scene') : null
   if (missing) {
@@ -377,7 +378,8 @@ function latestSceneBlock(raster, req, methods) {
   }
 }
 
-function pollBlock(raster, req, nowMs) {
+/** The newer-scene poll line (also used by the /map rail). */
+export function pollBlock(raster, req, nowMs) {
   const missing = missingState(raster, req)
   if (missing) {
     return {
