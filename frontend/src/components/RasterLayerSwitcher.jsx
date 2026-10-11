@@ -1,6 +1,10 @@
 /**
- * The raster page's layer selector (True Color / Light Map / NDCI Raster)
+ * The raster page's layer selector (True Color / NDCI Raster / Light Map)
  * and the overlay each layer mounts.
+ *
+ * 2026-10 glass restyle: drawn as an iOS segmented control (`pw-seg`) in the
+ * map's bottom dock; the order puts the two scan images first (True Color,
+ * then NDCI) and the plain reference map last.
  *
  * Text comes from i18n `map.layer.*` through a `t` prop (default Thai): the
  * component deliberately uses no hooks, so it stays callable as a plain
@@ -11,7 +15,7 @@ import L from 'leaflet'
 import RasterOverlay from './RasterOverlay.jsx'
 import { createT } from '../i18n/index.js'
 
-const MODES = ['true_color', 'light_map', 'ndci']
+const MODES = ['true_color', 'ndci', 'light_map']
 
 const defaultT = createT('th')
 
@@ -30,7 +34,7 @@ const shieldFromMap = (el) => {
 export default function RasterLayerSwitcher({ mode, onModeChange, trueColorAvailable, t = defaultT }) {
   const unavailable = t('map.layer.true_color_unavailable')
   return (
-    <div ref={shieldFromMap} className="leaflet-bar raster-layer-switcher" role="group" aria-label={t('map.layer.group')}>
+    <div ref={shieldFromMap} className="leaflet-bar raster-layer-switcher pw-seg" role="group" aria-label={t('map.layer.group')}>
       {MODES.map((value) => {
         const label = t(`map.layer.${value}`)
         const off = value === 'true_color' && !trueColorAvailable
@@ -38,6 +42,7 @@ export default function RasterLayerSwitcher({ mode, onModeChange, trueColorAvail
           <button
             type="button"
             key={value}
+            className="pw-seg-btn"
             data-layer-mode={value}
             aria-pressed={mode === value}
             disabled={off}

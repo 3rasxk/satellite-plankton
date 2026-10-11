@@ -1,0 +1,1901 @@
+/* Glass layer (2026-10): Apple-HIG surfaces over the dashboard system.
+   Loaded after dashboard.css; it restyles, it does not re-lay out the
+   pages' logic. Tokens in tokens.css (--glass-*, --seg-*, --status-stale).
+
+   Rules
+   - Colour: surfaces #FFFFFF / #F5F5F7 / #E5E5EA, ink #1D1D1F / #6E6E73 /
+     #8E8E93. --accent (#0071E3) is interaction only (links, current item,
+     focus, selected marker ring). Glass and accent are never data
+     colours; the only data colours are the NDCI ramp the API sends. The
+     four risk-ramp tokens are never used here.
+   - Glass (translucent white + backdrop blur) is for panels floating over
+     the map and the reading-guide sheet. It is painted on a ::before
+     layer, never on the panel itself: a backdrop-filter on an ancestor
+     becomes the containing block of every position:fixed descendant, which
+     would trap the SourceChip popovers inside the panel. The panel itself
+     stays filter-free.
+   - Over satellite imagery (True Color layer) the same panels are solid
+     white: data are never read through a blurred photograph.
+   - No backdrop-filter support: solid white.
+   - prefers-reduced-motion removes transitions (tokens set the motion
+     durations to 0). */
+
+/* ------------------------------------------------------------------ */
+/* Glass primitive                                                    */
+/* ------------------------------------------------------------------ */
+
+.pw-glass {
+  position: relative;
+  isolation: isolate; /* keeps the ::before layer behind this panel's own content, wherever it sits */
+  border-radius: var(--radius-glass);
+  box-shadow: var(--glass-ring), var(--glass-shadow);
+}
+
+.pw-glass::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  pointer-events: none;
+}
+
+@supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  .pw-glass::before {
+    background: var(--glass-solid);
+  }
+}
+
+/* Over the satellite photograph: solid. */
+.pw-map-page[data-basemap='true_color'] .pw-glass::before,
+.pw-shell[data-layout='map']:has(.pw-map-page[data-basemap='true_color']) .pw-header::before {
+  background: var(--glass-solid);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* Segmented control (iOS)                                            */
+/* ------------------------------------------------------------------ */
+
+.pw-seg {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 2px;
+  max-width: 100%;
+  padding: 2px;
+  border-radius: var(--radius-pill);
+  background: var(--seg-track);
+  font-family: var(--font-body);
+}
+
+.pw-seg-btn {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--ink);
+  font: 500 var(--type-12) / 1.2 var(--font-body);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--motion-fast), box-shadow var(--motion-fast);
+}
+
+.pw-seg[data-size='large'] .pw-seg-btn {
+  min-height: 32px;
+  padding: 0 14px;
+  font-size: 13px;
+}
+
+.pw-seg-btn:hover:not([disabled]):not([aria-pressed='true']):not([aria-selected='true']) {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.pw-seg-btn[aria-pressed='true'],
+.pw-seg-btn[aria-selected='true'] {
+  background: var(--seg-thumb);
+  box-shadow: var(--seg-thumb-shadow);
+  font-weight: 600;
+}
+
+.pw-seg-btn[disabled] {
+  color: var(--text-tertiary);
+  cursor: not-allowed;
+}
+
+.pw-seg-btn:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Pills: buttons, chips, language toggle                             */
+/* ------------------------------------------------------------------ */
+
+.pw-btn {
+  border-radius: var(--radius-pill);
+}
+
+.pw-btn--primary {
+  border-color: var(--accent);
+}
+
+.pw-icon-btn {
+  border-radius: var(--radius-pill);
+}
+
+.pw-chip {
+  border-radius: var(--radius-pill);
+  padding-inline: 7px 10px; /* 7 px: the TEST hatch tab sits flush on the leading edge */
+}
+
+.pw-lang {
+  padding: 2px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--seg-track);
+}
+
+.pw-lang-btn {
+  min-height: 28px;
+  border-radius: var(--radius-pill);
+  color: var(--ink);
+}
+
+.pw-lang-btn[aria-pressed='true'] {
+  background: var(--seg-thumb);
+  box-shadow: var(--seg-thumb-shadow);
+}
+
+.pw-lang-btn:focus-visible,
+.pw-btn:focus-visible,
+.pw-icon-btn:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Top bar (one component: the sticky page header, or glass over map)  */
+/* ------------------------------------------------------------------ */
+
+.pw-header {
+  border-bottom: 0;
+  background: transparent;
+}
+
+.pw-header::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: rgba(255, 255, 255, 0.8);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: inset 0 -0.5px 0 rgba(0, 0, 0, 0.16);
+  pointer-events: none;
+}
+
+@supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  .pw-header::before {
+    background: var(--glass-solid);
+  }
+}
+
+.pw-header-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 56px;
+  padding-block: 8px;
+}
+
+.pw-header .pw-brand {
+  flex: 0 1 auto;
+  gap: 12px;
+}
+
+.pw-brand-tagline {
+  max-width: 22rem;
+  line-height: 1.35;
+}
+
+.pw-header .pw-nav {
+  flex: 1 1 auto;
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+  border-top: 0;
+}
+
+.pw-header .pw-nav-list {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  gap: 2px;
+  margin: 0;
+  padding: 2px;
+  border-radius: var(--radius-pill);
+  background: var(--seg-track);
+}
+
+.pw-header .pw-nav-link {
+  min-height: 30px;
+  margin: 0;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  color: var(--ink);
+  font-size: 13px;
+  transition: background-color var(--motion-fast), box-shadow var(--motion-fast);
+}
+
+.pw-header .pw-nav-link:hover {
+  border: 0;
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.pw-header .pw-nav-link[aria-current='page'] {
+  border: 0;
+  background: var(--seg-thumb);
+  box-shadow: var(--seg-thumb-shadow);
+  font-weight: 600;
+}
+
+.pw-header .pw-nav-link:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.pw-header-tools {
+  gap: 8px;
+}
+
+.pw-help-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 12px 0 6px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--seg-track);
+  color: var(--ink);
+  font: 500 var(--type-12) / 1 var(--font-body);
+  cursor: pointer;
+}
+
+.pw-help-btn:hover {
+  background: rgba(118, 118, 128, 0.2);
+}
+
+.pw-help-btn:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.pw-help-glyph {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--paper);
+  font-weight: 700;
+  box-shadow: var(--seg-thumb-shadow);
+}
+
+.pw-menu-btn {
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--seg-track);
+}
+
+/* --- data freshness chip -------------------------------------------- */
+
+.pw-updated {
+  position: relative;
+  font-family: var(--font-body);
+}
+
+.pw-updated > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: var(--radius-pill);
+  background: var(--seg-track);
+  color: var(--ink);
+  font: 500 var(--type-12) / 1 var(--font-body);
+  white-space: nowrap;
+  cursor: pointer;
+  list-style: none;
+}
+
+.pw-updated > summary::-webkit-details-marker {
+  display: none;
+}
+
+.pw-updated > summary:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.pw-updated-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+}
+
+.pw-updated[data-tone='ok'] .pw-updated-dot {
+  background: var(--status-ok);
+}
+
+/* Attention: a hollow amber ring with a solid core -- shape as well as
+   hue, so the state never rests on colour alone. */
+.pw-updated[data-tone='attention'] .pw-updated-dot {
+  background: var(--status-stale);
+  box-shadow: 0 0 0 2px var(--paper), 0 0 0 3px var(--status-stale);
+}
+
+.pw-updated[data-state='loading'] .pw-updated-dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--text-tertiary);
+}
+
+.pw-updated-caret {
+  color: var(--text-secondary);
+  transition: transform var(--motion-fast);
+}
+
+.pw-updated[open] .pw-updated-caret {
+  transform: rotate(180deg);
+}
+
+.pw-updated-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 1300;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: min(340px, calc(100vw - 32px));
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: var(--paper);
+  box-shadow: var(--glass-ring), var(--shadow-pop);
+  color: var(--ink-2);
+  font-size: var(--type-12);
+  line-height: var(--lh);
+  white-space: normal;
+}
+
+.pw-updated-pop:lang(th) {
+  line-height: var(--lh-th);
+}
+
+.pw-updated-pop p {
+  margin: 0;
+}
+
+.pw-updated-pop .pw-label + p {
+  margin-bottom: 6px;
+}
+
+.pw-updated-pop a {
+  color: var(--accent);
+}
+
+/* ------------------------------------------------------------------ */
+/* /map: the bar floats over a full-bleed map                          */
+/* ------------------------------------------------------------------ */
+
+.pw-shell[data-layout='map'] .pw-viewport {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.pw-shell[data-layout='map'] .pw-baseline {
+  grid-row: 1;
+  grid-column: 1;
+}
+
+.pw-shell[data-layout='map'] .pw-main {
+  grid-row: 2;
+  grid-column: 1;
+  min-height: 0;
+}
+
+.pw-shell[data-layout='map'] .pw-header {
+  grid-row: 2;
+  grid-column: 1;
+  align-self: start;
+  z-index: 1150;
+  margin: 12px 12px 0;
+  border-radius: var(--radius-glass);
+  box-shadow: var(--glass-ring), var(--glass-shadow);
+}
+
+.pw-shell[data-layout='map'] .pw-header::before {
+  border-radius: inherit;
+  background: var(--glass-bg);
+  box-shadow: none;
+}
+
+.pw-shell[data-layout='map'] .pw-header-bar {
+  max-width: none;
+  min-height: 52px;
+  padding: 6px 8px 6px 14px;
+}
+
+.pw-shell[data-layout='map'] .pw-brand-tagline {
+  display: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* Cards, tables and states on the pages (paper, not glass)           */
+/* ------------------------------------------------------------------ */
+
+.pw-card,
+.pw-fact {
+  border-color: transparent;
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.1), 0 2px 10px rgba(0, 0, 0, 0.05);
+}
+
+.pw-ov-site-card {
+  border-color: transparent;
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.1), 0 2px 10px rgba(0, 0, 0, 0.05);
+}
+
+/* The banner keeps its left rule (the attention mark is ink weight). */
+.pw-ov-banner {
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
+}
+
+.pw-table-wrap {
+  border-radius: 14px;
+}
+
+.pw-state {
+  border-radius: 16px;
+}
+
+/* Skeleton shimmer for loading blocks (static under reduced motion). */
+.pw-skeleton {
+  display: block;
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, #ececef 0%, #f5f5f7 50%, #ececef 100%);
+  background-size: 200% 100%;
+  animation: pw-shimmer 1.4s ease-in-out infinite;
+}
+
+.pw-skeleton + .pw-skeleton {
+  margin-top: 8px;
+}
+
+@keyframes pw-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pw-skeleton {
+    animation: none;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Reading guide                                                       */
+/* ------------------------------------------------------------------ */
+
+.pw-guide-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(29, 29, 31, 0.28);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  animation: pw-fade var(--motion-panel);
+}
+
+.pw-guide {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(440px, 100%);
+  max-height: calc(100vh - 32px);
+  max-height: calc(100svh - 32px);
+  padding: 18px 22px 20px;
+  overflow-y: auto;
+  border-radius: 24px;
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: var(--type-14);
+  line-height: var(--lh);
+}
+
+.pw-guide:lang(th) {
+  line-height: var(--lh-th);
+}
+
+/* The sheet scrolls only on very short screens; its glass is a plain
+   translucent fill (no popovers inside, so no ::before needed there). */
+.pw-guide.pw-glass::before {
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.pw-guide-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.pw-guide-progress,
+.pw-guide-kicker {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--type-12);
+}
+
+.pw-guide-kicker {
+  font-weight: 600;
+}
+
+.pw-guide-title {
+  margin: 0;
+  font-size: var(--type-20);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+}
+
+.pw-guide-body {
+  margin: 0;
+  color: var(--ink-2);
+}
+
+.pw-guide-art {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  height: 88px;
+  border-radius: 16px;
+  background: var(--paper-2);
+  box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.08);
+}
+
+/* Ink tints only: the guide explains the idea of a ramp; it never shows
+   data colours that the API did not send. */
+.pw-guide-art[data-art='ramp'] {
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pw-guide-ramp {
+  width: 70%;
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, #e5e5ea, #1d1d1f);
+}
+
+.pw-guide-ramp-ends {
+  display: flex;
+  justify-content: space-between;
+  width: 70%;
+  color: var(--text-secondary);
+  font: 600 12px / 1 var(--font-mono);
+}
+
+.pw-guide-pin {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 2px solid #fff;
+  border-radius: 4px;
+  background: var(--ink);
+  color: #fff;
+  font: 600 12px / 1 var(--font-mono);
+  box-shadow: 0 0 0 3px var(--accent);
+}
+
+.pw-guide-site {
+  width: 22px;
+  height: 22px;
+  border: 3px solid #fff;
+  border-radius: 50%;
+  background: var(--ink-2);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+
+.pw-guide-cursor {
+  width: 0;
+  height: 0;
+  border-right: 7px solid transparent;
+  border-bottom: 18px solid var(--ink);
+  border-left: 7px solid transparent;
+  transform: rotate(-30deg);
+}
+
+.pw-guide-badge {
+  padding: 4px 8px;
+  border: 1.5px solid var(--ink);
+  border-radius: 4px;
+  background: var(--sand);
+  font: 600 12px / 1 var(--font-mono);
+  letter-spacing: 0.08em;
+}
+
+.pw-guide-tilde {
+  color: var(--ink-2);
+  font-size: 32px;
+  line-height: 1;
+}
+
+.pw-guide-dots {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pw-guide-dots li {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #d1d1d6;
+}
+
+.pw-guide-dots li[data-current='true'] {
+  width: 18px;
+  border-radius: 3px;
+  background: var(--ink);
+}
+
+.pw-guide-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.pw-guide-actions .pw-btn[disabled] {
+  visibility: hidden;
+}
+
+@keyframes pw-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ------------------------------------------------------------------ */
+/* Responsive: top bar                                                 */
+/* ------------------------------------------------------------------ */
+
+/* One bar holds brand, routes and tools: the subtitle shows only where
+   there is room for all three. */
+@media (max-width: 1439px) {
+  .pw-brand-tagline {
+    display: none;
+  }
+}
+
+@media (max-width: 1099px) {
+  .pw-help-text {
+    display: none;
+  }
+
+  .pw-help-btn {
+    padding: 0 6px;
+  }
+}
+
+/* Below 1180 px the routes collapse behind the Menu button (the Thai
+   labels need the width). */
+@media (max-width: 1179px) {
+  .pw-header .pw-nav {
+    display: none;
+  }
+
+  .pw-header .pw-nav[data-open='true'] {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 8px;
+    left: 8px;
+    display: block;
+    padding: 6px;
+    border-radius: 16px;
+    background: var(--paper);
+    box-shadow: var(--glass-ring), var(--shadow-pop);
+  }
+
+  .pw-header .pw-nav[data-open='true'] .pw-nav-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 0;
+    background: none;
+  }
+
+  .pw-header .pw-nav[data-open='true'] .pw-nav-link {
+    display: flex;
+    min-height: 44px;
+    border-radius: 10px;
+    font-size: var(--type-14);
+  }
+
+  .pw-header .pw-nav[data-open='true'] .pw-nav-link[aria-current='page'] {
+    background: var(--seg-track);
+    box-shadow: none;
+  }
+
+  .pw-header .pw-menu-btn {
+    display: inline-flex;
+    min-height: 32px;
+  }
+
+  .pw-header-bar {
+    justify-content: space-between;
+  }
+}
+
+@media (max-width: 639px) {
+  .pw-updated-text {
+    display: none;
+  }
+
+  .pw-updated > summary {
+    padding: 0 8px;
+  }
+
+  .pw-shell[data-layout='map'] .pw-header {
+    margin: 8px 8px 0;
+  }
+
+  .pw-menu-btn span {
+    display: none;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Map page (/map): full-bleed map, floating glass panels              */
+/* Every panel is a sibling of the Leaflet container (never inside).   */
+/* ------------------------------------------------------------------ */
+
+.pw-map-page {
+  --map-top: 76px; /* below the floating top bar */
+  --map-bottom: 28px; /* clears Leaflet's attribution line */
+  --map-gap: 12px;
+  --rail-w: 344px;
+  --panel-w: 400px;
+  position: relative;
+  display: block;
+  overflow: hidden;
+}
+
+.pw-map-page > .pw-map-canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.pw-map-canvas .leaflet-map {
+  height: 100%;
+  min-height: 0;
+}
+
+/* Leaflet's zoom buttons: below the top bar, left of an open panel. */
+.pw-map-page .leaflet-top.leaflet-right {
+  top: calc(var(--map-top) - 10px);
+  transition: right var(--motion-panel);
+}
+
+.pw-map-page:not([data-selection='none']) .leaflet-top.leaflet-right {
+  right: calc(var(--panel-w) + var(--map-gap) * 2);
+}
+
+.pw-map-page .leaflet-bar {
+  border: 0;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: var(--glass-ring), var(--glass-shadow);
+}
+
+.pw-map-page .leaflet-control-attribution {
+  border-radius: 6px 0 0 0;
+  background: rgba(255, 255, 255, 0.8);
+}
+
+/* --- left card ------------------------------------------------------ */
+
+.pw-map-page .pw-map-rail {
+  position: absolute;
+  top: var(--map-top);
+  left: var(--map-gap);
+  z-index: 1060;
+  display: flex;
+  flex-direction: column;
+  width: var(--rail-w);
+  max-height: calc(100% - var(--map-top) - var(--map-bottom));
+  overflow: visible;
+  border: 0;
+  border-radius: var(--radius-glass);
+  background: transparent;
+  box-shadow: var(--glass-ring), var(--glass-shadow);
+}
+
+.pw-map-page .pw-map-rail[hidden] {
+  display: none;
+}
+
+.pw-map-page .pw-map-rail::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  pointer-events: none;
+}
+
+.pw-map-rail-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-radius: inherit;
+}
+
+.pw-map-page .pw-map-rail-head {
+  position: static;
+  align-items: flex-start;
+  padding: 16px 16px 8px;
+  border-bottom: 0;
+  background: transparent;
+}
+
+.pw-map-rail-titles {
+  min-width: 0;
+}
+
+.pw-map-page .pw-map-rail-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+}
+
+.pw-map-rail-title:focus {
+  outline: none;
+}
+
+.pw-map-rail-title:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.pw-map-rail-sub {
+  margin: 2px 0 0;
+  color: var(--text-secondary);
+  font-size: var(--type-12);
+}
+
+.pw-map-page .pw-map-section {
+  padding: 12px 16px 14px;
+  border-bottom: 0;
+  border-top: 0.5px solid rgba(0, 0, 0, 0.1);
+}
+
+.pw-map-page .pw-map-rail > .pw-map-rail-scroll > .pw-map-notes {
+  padding: 0 16px 10px;
+}
+
+.pw-count-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0 16px 12px;
+  list-style: none;
+}
+
+.pw-count-chip {
+  min-height: 26px;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.pw-count-n {
+  font-weight: 600;
+}
+
+/* Station rows: the same glyphs as the markers on the map. */
+.pw-map-site-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pw-map-site-list > li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pw-map-site-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--type-12);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--motion-fast);
+}
+
+.pw-map-site-row:hover {
+  background: rgba(118, 118, 128, 0.1);
+}
+
+.pw-map-site-row[aria-pressed='true'] {
+  background: rgba(var(--accent-rgb), 0.1);
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+
+.pw-map-site-row:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.pw-map-site-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.pw-map-site-name {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pw-map-site-meta {
+  color: var(--text-secondary);
+}
+
+.pw-map-site-values {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.pw-map-site-value {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.pw-map-site-value .pw-label {
+  font-family: var(--font-body);
+}
+
+.pw-map-site-chip {
+  align-self: flex-start;
+  margin-left: 38px;
+}
+
+.pw-site-glyph {
+  display: block;
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  border: 3px solid #fff;
+  border-radius: 50%;
+  background: var(--ink-2);
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+
+.pw-site-glyph[data-kind='no_data'] {
+  border: 2px dashed var(--text-tertiary);
+  background: #fff;
+  box-shadow: none;
+}
+
+.pw-site-glyph[data-kind='not_checked'] {
+  border: 2px dotted var(--text-tertiary);
+  background: #fff;
+  box-shadow: none;
+}
+
+/* Pin controls: show toggle and the 3-10 segmented count. */
+.pw-map-page .pw-map-pin-controls {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.pw-map-count-seg {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pw-map-count-label {
+  color: var(--text-secondary);
+  font-size: var(--type-12);
+}
+
+.pw-seg--fill {
+  display: flex;
+  width: 100%;
+}
+
+.pw-seg--fill .pw-seg-btn {
+  padding: 0;
+  font-family: var(--font-mono);
+}
+
+.pw-map-page .pw-map-pin-row {
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+}
+
+.pw-map-page .pw-map-pin-row:hover {
+  background: rgba(118, 118, 128, 0.1);
+}
+
+.pw-map-page .pw-map-pin-row[aria-pressed='true'] {
+  background: rgba(var(--accent-rgb), 0.1);
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+
+/* "Scan details": the scene, coverage, dates and provenance sections. */
+.pw-map-more {
+  border-top: 0.5px solid rgba(0, 0, 0, 0.1);
+}
+
+.pw-map-more > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 10px 16px;
+  color: var(--accent);
+  font-size: var(--type-12);
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+}
+
+.pw-map-more > summary::-webkit-details-marker {
+  display: none;
+}
+
+.pw-map-more > summary::after {
+  content: '';
+  width: 7px;
+  height: 7px;
+  margin-left: auto;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg);
+  transition: transform var(--motion-fast);
+}
+
+.pw-map-more[open] > summary::after {
+  transform: rotate(-135deg);
+}
+
+.pw-map-more > summary:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.pw-map-more > .pw-map-note {
+  padding: 0 16px 8px;
+}
+
+.pw-map-page .pw-map-rail-toggle {
+  top: var(--map-top);
+  left: var(--map-gap);
+  border: 0;
+  background: var(--paper);
+  box-shadow: var(--glass-ring), var(--glass-shadow);
+}
+
+/* --- top line: acquisition pill + truth bar -------------------------- */
+
+.pw-map-topline {
+  position: absolute;
+  top: var(--map-top);
+  right: 72px; /* clears the zoom buttons */
+  left: calc(var(--map-gap) * 2 + var(--rail-w));
+  z-index: 1055;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.pw-map-page[data-rail='closed'] .pw-map-topline {
+  left: 150px; /* clears the "Show panel" button */
+}
+
+.pw-map-page:not([data-selection='none']) .pw-map-topline {
+  right: calc(var(--panel-w) + var(--map-gap) * 2 + 60px);
+}
+
+.pw-map-topline > * {
+  pointer-events: auto;
+}
+
+.pw-map-acq {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  margin: 0;
+  padding: 0 12px;
+  border-radius: var(--radius-pill);
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-ring), var(--glass-shadow);
+  color: var(--ink);
+  font: 500 var(--type-12) / 1 var(--font-body);
+  white-space: nowrap;
+}
+
+.pw-map-page .pw-map-topline .pw-map-truth {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: min(520px, 100%);
+  border: 0;
+  border-radius: 16px;
+  background: transparent;
+  box-shadow: var(--glass-ring), var(--glass-shadow);
+}
+
+.pw-map-page .pw-map-topline .pw-map-truth::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  pointer-events: none;
+}
+
+.pw-map-page .pw-map-topline .pw-map-truth > summary {
+  min-height: 32px;
+  padding: 4px 12px;
+  border-radius: 16px;
+}
+
+.pw-map-page .pw-map-topline .pw-map-truth-body {
+  top: calc(100% + 6px);
+  right: auto;
+  left: 0;
+  width: min(560px, calc(100vw - 32px));
+  border: 0;
+  border-radius: 16px;
+  box-shadow: var(--glass-ring), var(--shadow-pop);
+}
+
+/* --- bottom dock: colour bar / caption + layer switch ---------------- */
+
+.pw-map-dock {
+  position: absolute;
+  bottom: var(--map-bottom);
+  left: calc(var(--map-gap) * 2 + var(--rail-w));
+  z-index: 1050;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  max-width: calc(100% - var(--rail-w) - var(--map-gap) * 3);
+  pointer-events: none;
+  transition: left var(--motion-panel);
+}
+
+.pw-map-page[data-rail='closed'] .pw-map-dock {
+  left: var(--map-gap);
+  max-width: calc(100% - var(--map-gap) * 2);
+}
+
+.pw-map-page:not([data-selection='none']) .pw-map-dock {
+  max-width: calc(100% - var(--panel-w) - var(--map-gap) * 3);
+}
+
+/* A selection is open: the colour bar stacks above the layer switch. */
+.pw-map-dock[data-stack='true'] {
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.pw-map-dock > * {
+  pointer-events: auto;
+}
+
+.pw-map-dock .raster-legend,
+.pw-scale {
+  position: static;
+  width: 264px;
+  max-width: 100%;
+  margin: 0;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 16px;
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-ring), var(--glass-shadow);
+  color: var(--ink);
+  font: 400 11px / 1.4 var(--font-body);
+}
+
+.pw-map-dock .raster-legend .raster-legend-transparent {
+  margin: 0;
+}
+
+.pw-scale-title {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.pw-scale-bar {
+  height: 10px;
+  border-radius: 5px;
+  box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.15);
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.pw-scale-ends {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.pw-scale-ends > span {
+  display: flex;
+  flex-direction: column;
+}
+
+.pw-scale-ends > span:last-child {
+  align-items: flex-end;
+  text-align: right;
+}
+
+.pw-scale-word {
+  font-weight: 600;
+}
+
+.pw-scale-ends .pw-num {
+  color: var(--text-secondary);
+}
+
+.pw-scale-note {
+  margin: 6px 0 0;
+  color: var(--text-secondary);
+}
+
+.pw-map-dock .raster-layer-switcher {
+  position: static;
+  z-index: auto;
+  flex-direction: row;
+  overflow: visible;
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-ring), var(--glass-shadow);
+}
+
+.pw-map-dock .raster-layer-switcher button {
+  min-height: 30px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--ink);
+  font: 500 var(--type-12) / 1.2 var(--font-body);
+  text-align: center;
+}
+
+.pw-map-dock .raster-layer-switcher button[aria-pressed='true'] {
+  background: var(--seg-thumb);
+  box-shadow: var(--seg-thumb-shadow);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.pw-map-dock .raster-layer-switcher button:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.pw-map-dock .raster-layer-switcher button:disabled {
+  color: var(--text-tertiary);
+}
+
+/* The reason a layer is unavailable stays in the accessible name and the
+   tooltip; the pill shows the name only. */
+.pw-map-dock .raster-layer-switcher button small {
+  display: none;
+}
+
+/* Over the satellite photograph every floating surface is solid. */
+.pw-map-page[data-basemap='true_color'] .pw-map-rail::before,
+.pw-map-page[data-basemap='true_color'] .pw-map-topline .pw-map-truth::before,
+.pw-map-page[data-basemap='true_color'] .pw-map-acq,
+.pw-map-page[data-basemap='true_color'] .pw-map-dock .raster-legend,
+.pw-map-page[data-basemap='true_color'] .pw-scale,
+.pw-map-page[data-basemap='true_color'] .pw-map-dock .raster-layer-switcher,
+.pw-map-page[data-basemap='true_color'] .pw-site-label {
+  background: var(--glass-solid);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+@supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  .pw-map-page .pw-map-rail::before,
+  .pw-map-page .pw-map-topline .pw-map-truth::before,
+  .pw-map-acq,
+  .pw-map-dock .raster-legend,
+  .pw-scale,
+  .pw-map-dock .raster-layer-switcher,
+  .pw-site-label,
+  .pw-shell[data-layout='map'] .pw-header::before {
+    background: var(--glass-solid);
+  }
+}
+
+/* --- station markers ---------------------------------------------- */
+
+.pw-site-marker-wrap {
+  border: 0;
+  background: none;
+}
+
+.pw-site-marker-wrap:focus {
+  outline: none;
+}
+
+.pw-site-marker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.pw-site-dot {
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  width: 18px;
+  height: 18px;
+  border: 3px solid #fff;
+  border-radius: 50%;
+  background: var(--ink-2);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+/* No usable reading: hollow, dashed ring. Not checked yet: hollow, dotted. */
+.pw-site-marker[data-kind='no_data'] .pw-site-dot {
+  border: 2.5px dashed #6e6e73;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 0 0 1.5px #fff, 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+
+.pw-site-marker[data-kind='not_checked'] .pw-site-dot {
+  border: 2.5px dotted #6e6e73;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 0 0 1.5px #fff, 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+
+.pw-site-marker[data-selected='true'] .pw-site-dot {
+  box-shadow: 0 0 0 3px var(--accent), 0 1px 4px rgba(0, 0, 0, 0.45);
+}
+
+.pw-site-marker-wrap:focus-visible .pw-site-dot {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.pw-site-label {
+  padding: 3px 8px;
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, 0.82);
+  -webkit-backdrop-filter: blur(12px) saturate(180%);
+  backdrop-filter: blur(12px) saturate(180%);
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.14), 0 2px 6px rgba(0, 0, 0, 0.12);
+  color: var(--ink);
+  font: 600 11px / 1.3 var(--font-body);
+}
+
+.pw-site-marker[data-selected='true'] .pw-site-label {
+  box-shadow: 0 0 0 1.5px var(--accent), 0 2px 6px rgba(0, 0, 0, 0.12);
+}
+
+/* Pins keep their dark numbered square/diamond; the white ring is wider. */
+.pw-map-page .pw-map-pin-wrap .pw-map-pin {
+  border-width: 2.5px;
+}
+
+/* --- right detail panel ------------------------------------------- */
+
+.pw-map-page .pw-map-inspector {
+  top: var(--map-top);
+  right: var(--map-gap);
+  bottom: var(--map-bottom);
+  z-index: 1070;
+  width: min(var(--panel-w), calc(100% - var(--map-gap) * 2));
+}
+
+.pw-detail {
+  display: flex;
+  flex-direction: column;
+  max-height: 100%;
+  min-height: 0;
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: var(--type-12);
+  line-height: var(--lh);
+  animation: pw-panel-in var(--motion-panel);
+}
+
+.pw-detail:lang(th) {
+  line-height: var(--lh-th);
+}
+
+@keyframes pw-panel-in {
+  from { opacity: 0; transform: translateX(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+.pw-detail-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 16px 16px 6px;
+}
+
+.pw-detail-titles {
+  min-width: 0;
+}
+
+.pw-detail-kicker {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.pw-detail-kicker:lang(th) {
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.pw-detail-title {
+  margin: 2px 0 0;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+}
+
+.pw-detail-coords {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--type-12);
+}
+
+.pw-detail-close {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  background: var(--seg-track);
+  color: var(--ink);
+}
+
+.pw-detail-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 4px 16px 0;
+}
+
+.pw-detail-headline {
+  margin: 0;
+  padding: 8px 16px 0;
+  font-size: var(--type-14);
+  font-weight: 500;
+}
+
+.pw-detail-tabs {
+  display: flex;
+  margin: 12px 16px 4px;
+}
+
+.pw-detail-tabs .pw-seg-btn {
+  flex: 1 1 0;
+}
+
+.pw-detail-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 8px 16px 12px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.pw-detail-body:focus {
+  outline: none;
+}
+
+.pw-detail-body:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: -3px;
+  border-radius: 8px;
+}
+
+.pw-detail-body > * + * {
+  margin-top: 10px;
+}
+
+.pw-detail-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 16px 14px;
+  border-top: 0.5px solid rgba(0, 0, 0, 0.1);
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.pw-detail-foot p {
+  margin: 0;
+}
+
+.pw-detail-note {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.pw-detail-disclaimer > summary {
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.pw-detail-disclaimer .pw-server-text {
+  margin-top: 6px;
+  font-size: 11px;
+}
+
+.pw-detail-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.pw-detail-more:hover {
+  text-decoration: underline;
+}
+
+.pw-detail-status,
+.pw-detail-stale {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: rgba(118, 118, 128, 0.1);
+}
+
+.pw-detail-status p {
+  margin: 0;
+}
+
+.pw-detail-stale {
+  border-left: 3px solid var(--ink);
+}
+
+/* Inset grouped list (iOS). */
+.pw-inset {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pw-inset-title {
+  margin: 0;
+  padding: 0 4px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.pw-inset-title:lang(th) {
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.pw-inset-card {
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.08);
+}
+
+.pw-inset-list {
+  margin: 0;
+}
+
+.pw-inset-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 12px;
+  min-height: 36px;
+  padding: 8px 12px;
+}
+
+.pw-inset-row + .pw-inset-row {
+  box-shadow: inset 0 0.5px 0 rgba(0, 0, 0, 0.1);
+}
+
+.pw-inset-row dt {
+  color: var(--ink-2);
+}
+
+.pw-inset-row dd {
+  margin: 0;
+  max-width: 220px;
+  text-align: right;
+}
+
+.pw-inset-tag {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  background: var(--seg-track);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.pw-inset-note {
+  margin: 0;
+  padding: 0 4px;
+  color: var(--text-secondary);
+}
+
+.pw-inset-card > .pw-inset-note {
+  padding: 10px 12px;
+}
+
+.pw-detail-imagery .pw-site-images {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* The reused inspectors (pin, cell) inside the glass frame. */
+.pw-map-inspector .pw-detail .raster-pixel-panel {
+  max-height: none;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  animation: none;
+}
+
+.pw-detail[data-kind='pin'] .raster-pixel-head {
+  display: none;
+}
+
+.pw-detail[data-kind='cell'] .pw-detail-body {
+  padding-top: 14px;
+}
+
+/* --- responsive ------------------------------------------------------ */
+
+@media (max-width: 1279px) {
+  .pw-map-page {
+    --rail-w: 316px;
+    --panel-w: 380px;
+  }
+}
+
+/* Drawer mode (< 1024 px, RasterPage DRAWER_QUERY): the card is a drawer
+   over the map; the dock and top line no longer make room for it. */
+@media (max-width: 1023px) {
+  .pw-map-page .pw-map-rail {
+    top: var(--map-top);
+    bottom: auto;
+    left: var(--map-gap);
+    z-index: 1200;
+    width: min(var(--rail-w), calc(100% - 48px));
+    box-shadow: var(--glass-ring), var(--shadow-pop);
+  }
+
+  .pw-map-topline,
+  .pw-map-page[data-rail='closed'] .pw-map-topline {
+    left: 150px;
+  }
+
+  .pw-map-dock,
+  .pw-map-page[data-rail='closed'] .pw-map-dock {
+    left: var(--map-gap);
+    max-width: calc(100% - var(--map-gap) * 2);
+  }
+}
+
+/* Under 720 px: the detail panel is a bottom sheet and the card a bottom
+   drawer; station labels show for the selected station only. */
+@media (max-width: 719px) {
+  .pw-map-page {
+    --map-top: 68px;
+    --map-gap: 8px;
+  }
+
+  .pw-map-page .pw-map-inspector {
+    top: auto;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: auto;
+  }
+
+  .pw-map-page .pw-map-inspector .pw-detail {
+    max-height: 62vh;
+    max-height: 62svh;
+    border-radius: var(--radius-glass) var(--radius-glass) 0 0;
+    animation-name: pw-sheet-in;
+  }
+
+  .pw-map-page .pw-map-rail {
+    top: auto;
+    right: var(--map-gap);
+    bottom: var(--map-gap);
+    left: var(--map-gap);
+    width: auto;
+    max-height: 60vh;
+    max-height: 60svh;
+  }
+
+  .pw-map-page:not([data-selection='none']) .leaflet-top.leaflet-right {
+    right: 0;
+  }
+
+  .pw-map-page:not([data-selection='none']) .pw-map-dock {
+    display: none;
+  }
+
+  .pw-map-topline,
+  .pw-map-page[data-rail='closed'] .pw-map-topline,
+  .pw-map-page:not([data-selection='none']) .pw-map-topline {
+    right: 56px;
+    left: var(--map-gap);
+    justify-content: flex-start;
+  }
+
+  .pw-map-page .pw-map-topline .pw-map-truth-summary {
+    display: none;
+  }
+
+  .pw-map-page .pw-map-rail-toggle {
+    top: auto;
+    right: var(--map-gap);
+    bottom: var(--map-bottom);
+    left: auto;
+  }
+
+  .pw-map-dock .raster-legend,
+  .pw-scale {
+    width: 220px;
+  }
+
+  .pw-site-marker:not([data-selected='true']) .pw-site-label {
+    display: none;
+  }
+}
+
+@keyframes pw-sheet-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pw-detail,
+  .pw-guide-backdrop {
+    animation: none;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* /states (development only): design review of every state            */
+/* ------------------------------------------------------------------ */
+
+.pw-states-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.pw-states-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.pw-states-markers {
+  padding: 16px;
+  border-radius: 12px;
+  background: var(--paper-2);
+}
+
+.pw-states-scale {
+  max-width: 280px;
+}
+
+.pw-states-panel {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border-radius: 16px;
+  background: linear-gradient(135deg, #dfe6ec, #f5f5f7);
+}
+
+.pw-states-panel .pw-detail {
+  max-height: 640px;
+}

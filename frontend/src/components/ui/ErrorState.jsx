@@ -38,7 +38,7 @@ export default function ErrorState({ error, endpoint, onRetry, title, level = 2 
     <section className="pw-state" data-kind="error" role="status">
       <span className="pw-state-icon"><Icon name="alert" size={20} strokeWidth={1.7} /></span>
       <div className="pw-state-body">
-        <Heading className="pw-state-title">{title ?? t('common.error')}</Heading>
+        <Heading className="pw-state-title">{title ?? t(noResponse ? 'error.unreachable' : 'common.error')}</Heading>
         {(status !== null || endpoint) && (
           <p className="pw-state-facts">
             {status !== null && <span className="pw-mono">{t('error.http', { status })}</span>}

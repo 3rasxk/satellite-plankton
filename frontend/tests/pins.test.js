@@ -179,16 +179,24 @@ test('the map page: rail, truth bar and inspector sit outside the Leaflet contai
     // Pins are drawn on the map; no control is a child of it.
     assert.equal((inside.match(/data-pin-marker=/g) ?? []).length, 3)
     assert.doesNotMatch(inside, /<button|<select|<input|<details|<a /, 'a control inside the map would reach its click handler')
-    assert.match(inside, /data-overlay-url="[^"]*overlay\.png\?run_id=6"/)
+    // 2026-10 glass restyle: a fresh visit opens on the run's own true-colour
+    // composite when the run stored one (RASTER does), not on NDCI.
+    assert.match(inside, /data-overlay-url="[^"]*true-color\.png\?run_id=6"/)
     const outside = html.slice(0, mapStart) + html.slice(mapEnd)
     assert.match(outside, /class="pw-map-rail"/)
     assert.match(outside, /class="pw-map-truth"/)
     assert.match(outside, /class="pw-map-inspector"[^>]*aria-live="polite"/)
-    assert.match(outside, /data-layer-mode="ndci"[^>]*aria-pressed="true"/)
+    assert.match(outside, /data-layer-mode="true_color"[^>]*aria-pressed="true"/)
+    assert.match(outside, /class="pw-map-dock"/, 'the layer switch and legend float in the bottom dock')
+    assert.match(outside, /class="pw-map-topline"/)
     const text = visible(html)
     assert.equal((html.match(/<h1/g) ?? []).length, 1)
     assert.ok(text.includes(en.map.truthbar.label))
     assert.ok(text.includes(en.map.pins.legend_anomaly))
+    // True Color: the no-data caption, not the NDCI colour bar.
+    assert.ok(text.includes(en.map.legend.transparent))
+    assert.ok(!text.includes(en.glass.scale.lower), 'the NDCI bar is shown only in the NDCI layer')
+    assert.ok(text.includes('Newest Sentinel-2 acquisition 2026-10-07'), 'the acquisition pill from newest_scene_date')
     assert.ok(text.includes('20260927T033541_20260927T034657_T47PQR'), 'a selected scene id is listed')
     assert.ok(text.includes(en.overview.scene.used.split('{')[0].trim()), 'the latest-scene line as on the Overview')
     assert.ok(text.includes(RASTER.disclaimer), 'the truth bar quotes the server disclaimer')
@@ -204,12 +212,14 @@ test('the map page in Thai: the rail, banner and legend follow the language', ()
     const thText = visible(inLang('th', createElement(RasterPage)))
     // run 1's pins do not belong to run 6: said, not drawn.
     assert.ok(thText.includes('หมุดที่ได้รับเป็นของรอบสแกน 1'))
-    assert.ok(thText.includes(th.map.legend.title))
+    // Default layer is True Color (2026-10): the legend dock shows the
+    // no-data caption in the page's language.
+    assert.ok(thText.includes(th.map.legend.transparent))
     assert.ok(thText.includes(th.map.rail.coverage))
     const enText = visible(inLang('en', createElement(RasterPage)))
-    assert.ok(enText.includes(en.map.legend.title))
+    assert.ok(enText.includes(en.map.legend.transparent))
     assert.ok(enText.includes(en.map.rail.coverage))
-    assert.ok(!enText.includes(th.map.legend.title), 'the English page shows no Thai legend')
+    assert.ok(!enText.includes(th.map.legend.transparent), 'the English page shows no Thai legend')
   } finally {
     setResponses({})
   }

@@ -7,10 +7,14 @@
  * marks the current page with `aria-current="page"`; `/sites/:id` keeps
  * "Monitoring sites" current).
  *
- * Layout: two tiers -- masthead (brand, subtitle, TH|EN) above a tab row of
- * the five routes. Below 640 px the tab row collapses behind a Menu button
- * (`aria-expanded`/`aria-controls`); choosing a page or pressing Esc closes
- * it (Esc returns focus to the button).
+ * Layout (2026-10 glass restyle): one bar -- brand (and subtitle), the five
+ * routes as an iOS-style segmented control, then the tools: the data
+ * freshness chip (`status`, from the shell), TH|EN and the reading-guide
+ * button (`onHelp`). On /map the shell floats this same bar over the map as
+ * a glass panel; on every other page it is the sticky page header -- one
+ * component, never duplicated. Below 1180 px the routes collapse behind a
+ * Menu button (`aria-expanded`/`aria-controls`); choosing a page or
+ * pressing Esc closes it (Esc returns focus to the button).
  *
  * Limitations: the nav lists pages only; per-page actions (cite, export)
  * live on the pages that own the data.
@@ -19,6 +23,7 @@ import { useEffect, useId, useRef, useState } from 'react'
 import { Link, NavLink } from 'react-router-dom'
 import Icon from '../Icon.jsx'
 import LangToggle from './LangToggle.jsx'
+import UpdatedChip from './UpdatedChip.jsx'
 import { useLang } from '../../i18n/useLang.js'
 
 const ROUTES = Object.freeze([
@@ -40,7 +45,7 @@ function BrandMark() {
   )
 }
 
-export default function NavBar() {
+export default function NavBar({ status = null, onHelp } = {}) {
   const { t } = useLang()
   const [open, setOpen] = useState(false)
   const menuId = useId()
@@ -60,7 +65,7 @@ export default function NavBar() {
 
   return (
     <header className="pw-header">
-      <div className="pw-container pw-header-top">
+      <div className="pw-container pw-header-bar">
         <div className="pw-brand">
           <Link to="/" className="pw-brand-link" onClick={() => setOpen(false)}>
             <BrandMark />
@@ -68,8 +73,26 @@ export default function NavBar() {
           </Link>
           <p className="pw-brand-tagline">{t('app.tagline')}</p>
         </div>
+        <nav className="pw-nav" id={menuId} aria-label={t('nav.main_label')} data-open={open ? 'true' : 'false'}>
+          <ul className="pw-nav-list">
+            {ROUTES.map((route) => (
+              <li key={route.to}>
+                <NavLink to={route.to} end={route.end} className="pw-nav-link" onClick={() => setOpen(false)}>
+                  {t(`nav.${route.key}`)}
+                </NavLink>
+              </li>
+            ))}
+          </ul>
+        </nav>
         <div className="pw-header-tools">
+          <UpdatedChip chip={status} />
           <LangToggle />
+          {typeof onHelp === 'function' && (
+            <button type="button" className="pw-help-btn" onClick={() => onHelp()} aria-label={t('glass.topbar.help_label')}>
+              <span className="pw-help-glyph" aria-hidden="true">?</span>
+              <span className="pw-help-text">{t('glass.topbar.help')}</span>
+            </button>
+          )}
           <button
             type="button"
             ref={buttonRef}
@@ -83,17 +106,6 @@ export default function NavBar() {
           </button>
         </div>
       </div>
-      <nav className="pw-nav" id={menuId} aria-label={t('nav.main_label')} data-open={open ? 'true' : 'false'}>
-        <ul className="pw-container pw-nav-list">
-          {ROUTES.map((route) => (
-            <li key={route.to}>
-              <NavLink to={route.to} end={route.end} className="pw-nav-link" onClick={() => setOpen(false)}>
-                {t(`nav.${route.key}`)}
-              </NavLink>
-            </li>
-          ))}
-        </ul>
-      </nav>
     </header>
   )
 }

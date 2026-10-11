@@ -75,9 +75,13 @@
      z-scores, dates, scene ids — never general UI text or labels (see
      global.css: every former mono label — nav, eyebrows, section titles,
      badges, buttons, pill text — moved to --font-body). */
-  --font-body: 'Inter', 'Noto Sans Thai', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', system-ui, sans-serif;
-  --font-display: 'Inter', 'Noto Sans Thai', -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif;
-  --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  /* Apple-HIG stack (2026-10 glass restyle): the system face first (SF Pro
+     on Apple platforms), Inter elsewhere, Noto Sans Thai for Thai glyphs
+     (SF Pro and Inter carry none, so the browser falls through per glyph).
+     Data values: SF Mono, then IBM Plex Mono -- always tabular. */
+  --font-body: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', 'Noto Sans Thai', system-ui, sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', 'Noto Sans Thai', system-ui, sans-serif;
+  --font-mono: 'SF Mono', ui-monospace, 'IBM Plex Mono', 'SFMono-Regular', Menlo, monospace;
 
   /* Larger scale + more generous rhythm than the old instrument-panel
      type scale. */
@@ -103,9 +107,25 @@
   --radius-pill: 999px;
   --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.08);
 
-  --glass-bg: rgba(255, 255, 255, 0.86);
-  --glass-blur: blur(20px) saturate(180%);
-  --glass-border: 0.5px solid rgba(0, 0, 0, 0.06);
+  /* Glass: only for panels floating over the map (and the reading-guide
+     sheet). Never a data colour. Over satellite imagery the panels turn
+     solid --glass-solid (src/styles/glass.css). */
+  --glass-bg: rgba(255, 255, 255, 0.76);
+  --glass-solid: #ffffff;
+  --glass-blur: blur(28px) saturate(180%);
+  --glass-border: 0.5px solid rgba(0, 0, 0, 0.12);
+  --glass-ring: 0 0 0 0.5px rgba(0, 0, 0, 0.12);
+  --glass-shadow: 0 8px 28px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.06);
+  --radius-glass: 20px;
+
+  /* iOS segmented control: a grey track, the selected segment a white pill. */
+  --seg-track: rgba(118, 118, 128, 0.12);
+  --seg-thumb: #ffffff;
+  --seg-thumb-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
+
+  /* Freshness dot of the "Updated" chip: system health, not data. Amber
+     means "newer scenes may exist unchecked", never a risk reading. */
+  --status-stale: #c77c02;
 
   --focus-ring: 2px solid var(--accent);
 
@@ -178,6 +198,6 @@
   --hatch-soft: repeating-linear-gradient(135deg, rgba(29, 29, 31, 0.45) 0 1.5px, transparent 1.5px 4px);
   --hatch-inverse: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.7) 0 1.5px, transparent 1.5px 4px);
 
-  --radius-card: 8px;
+  --radius-card: 16px; /* 2026-10 glass restyle: softer Apple-style cards */
   --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.06);
 }

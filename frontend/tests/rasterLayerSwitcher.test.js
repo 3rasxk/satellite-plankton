@@ -50,8 +50,9 @@ test('the selector exposes the exact three labels with one selected mode', () =>
     assert.match(html, />True Color</)
     assert.match(html, />Light Map</)
     assert.match(html, />NDCI Raster</)
-    assert.ok(html.indexOf('True Color') < html.indexOf('Light Map'))
-    assert.ok(html.indexOf('Light Map') < html.indexOf('NDCI Raster'))
+    // 2026-10 glass restyle: the two scan images first, the reference map last.
+    assert.ok(html.indexOf('True Color') < html.indexOf('NDCI Raster'))
+    assert.ok(html.indexOf('NDCI Raster') < html.indexOf('Light Map'))
     assert.equal((html.match(/aria-pressed="true"/g) || []).length, 1)
     assert.match(html, new RegExp(`data-layer-mode="${selected}"[^>]*aria-pressed="true"`))
   }
@@ -65,7 +66,7 @@ test('selecting a layer reports the requested mutually exclusive mode', () => {
     trueColorAvailable: true,
   })
   for (const button of tree.props.children) button.props.onClick()
-  assert.deepEqual(selected, ['true_color', 'light_map', 'ndci'])
+  assert.deepEqual(selected, ['true_color', 'ndci', 'light_map'])
 })
 
 test('only the selected run-aligned overlay is mounted', () => {

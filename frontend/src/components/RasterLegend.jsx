@@ -13,6 +13,7 @@
  * colour is the NDCI reading, not an anomaly.
  */
 import { useLang } from '../i18n/useLang.js'
+import { formatValue } from '../lib/format.js'
 
 // Shared by the NDCI legend and the caption-only dock, so the wording
 // cannot differ between layer modes.
@@ -74,6 +75,37 @@ export default function RasterLegend({ legend }) {
       <NoDataCaption />
 
       <p className="raster-legend-note">{t('map.legend.note')}</p>
+    </div>
+  )
+}
+
+/**
+ * The map's NDCI colour bar (2026-10 glass dock): the API's own swatches as
+ * one continuous bar, the domain ends in mono, and "Lower / Higher NDCI" --
+ * NDCI is an optical index, not a chlorophyll concentration, so the ends
+ * are never worded as chlorophyll. The no-data caption travels with it.
+ * Shown only while the NDCI layer is on (the page shows the caption-only
+ * dock in the other layers).
+ */
+export function NdciScaleBar({ legend }) {
+  const { t } = useLang()
+  const value = legend?.value || {}
+  const swatches = (Array.isArray(value.swatches) ? value.swatches : []).filter((s) => typeof s?.hex === 'string')
+  if (swatches.length === 0) return null
+  const domain = Array.isArray(value.domain) && value.domain.length === 2 ? value.domain : null
+  const stops = swatches.map((s, i) => `${s.hex} ${swatches.length === 1 ? 0 : (i / (swatches.length - 1)) * 100}%`).join(', ')
+  return (
+    <div className="pw-scale" role="note" aria-label={t('glass.scale.aria')}>
+      <p className="pw-scale-title">{t('map.legend.title')}</p>
+      <div className="pw-scale-bar" style={{ background: `linear-gradient(90deg, ${stops})` }} aria-hidden="true" />
+      <div className="pw-scale-ends">
+        <span><span className="pw-scale-word">{t('glass.scale.lower')}</span>{domain && <span className="pw-num">{`≤\u00a0${formatValue(domain[0], { kind: 'index' }).text}`}</span>}</span>
+        <span><span className="pw-scale-word">{t('glass.scale.higher')}</span>{domain && <span className="pw-num">{`≥\u00a0${formatValue(domain[1], { kind: 'index' }).text}`}</span>}</span>
+      </div>
+      <p className="pw-scale-note">
+        {t('map.legend.transparent')}{' '}
+        <strong>{t('map.legend.transparent_strong')}</strong>
+      </p>
     </div>
   )
 }
