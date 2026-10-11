@@ -57,6 +57,8 @@ export default defineConfig({
     __APP_VERSION__: JSON.stringify(readAppVersion()),
     __GIT_SHA__: JSON.stringify(readGitSha()),
   },
-  server: { proxy: apiProxy },
+  // '.trycloudflare.com' lets a Cloudflare quick tunnel to :5173 reach the dev
+  // server for demos (CLAUDE.md §7); Vite blocks unknown Host headers by default.
+  server: { proxy: apiProxy, allowedHosts: ['.trycloudflare.com'] },
   preview: { proxy: apiProxy },
 })
