@@ -134,6 +134,10 @@ class FakeImage:
         second = np.asarray(self.bands[names[1]], dtype=np.float64)
         with np.errstate(divide="ignore", invalid="ignore"):
             values = (first - second) / (first + second)
+        # Earth Engine masks normalizedDifference where either input is
+        # negative.  The double must reproduce that contract so mask-alignment
+        # regressions are visible offline.
+        values = np.where((first >= 0) & (second >= 0), values, np.nan)
         return self._derive({"nd": values}, {"nd": self.dtypes.get(names[0], np.float64)})
 
     def divide(self, other):
@@ -209,7 +213,12 @@ def install_fake_ee(monkeypatch, scenes, water_mask=ALL_WATER, date_dtype=None):
 
     def scene_image(scene):
         scene_id, iso, _cloud, values = scene
-        bands = {band: float(value) * np.ones(NATIVE_SHAPE) for band, value in values.items()}
+        bands = {
+            band: np.array(
+                np.broadcast_to(np.asarray(value, dtype=np.float64), NATIVE_SHAPE)
+            )
+            for band, value in values.items()
+        }
         return FakeImage(
             bands,
             {band: np.float64 for band in bands},
@@ -483,12 +492,42 @@ def test_float32_really_would_have_moved_the_timestamp():
 # --------------------------------------------------------------------------
 
 
-def test_the_composite_carries_four_indices_and_a_date(monkeypatch):
+def test_the_composite_carries_indices_true_color_and_a_shared_date(monkeypatch):
     _, composite = two_acquisition_composite(monkeypatch)
-    assert composite["band_order"] == ("ndci", "bda2", "bda3", "b2_b3", "date_ms")
-    assert set(composite["image"].bands) == set(raster.RASTER_BAND_ORDER)
+    assert composite["band_order"] == raster.RASTER_STORED_BANDS
+    assert set(composite["image"].bands) == set(raster.RASTER_STORED_BANDS)
+    assert raster.RASTER_TRUE_COLOR_BANDS == ("true_red", "true_green", "true_blue")
     assert composite["scene_timestamps_ms"] == (OLD_MS, NEW_MS)
     assert composite["scene_ids"] == ("older", "newer")
+
+
+def test_true_color_and_date_use_the_same_per_pixel_scene_as_ndci(monkeypatch):
+    older = dict(BANDS_CLEAR)
+    newer = {
+        band: np.full(NATIVE_SHAPE, value, dtype=np.float64)
+        for band, value in BANDS_BRIGHT.items()
+    }
+    # Earth Engine normalizedDifference masks this pixel because B4 is
+    # negative.  Every companion band must therefore fall back to the older
+    # scene too; otherwise the RGB picture would not describe its NDCI/date.
+    newer["B4"][0, 0] = -1.0
+    install_fake_ee(
+        monkeypatch,
+        [
+            ("older", OLD_ISO, NO_CLOUD, older),
+            ("newer", NEW_ISO, NO_CLOUD, newer),
+        ],
+    )
+
+    composite = raster.build_index_composite(POLYGON, "2026-09-06", max_scene_age_days=20)
+    image = composite["image"]
+
+    assert image.bands[raster.RASTER_DATE_BAND][0, 0] == OLD_MS
+    assert image.bands["true_red"][0, 0] == older["B4"]
+    assert image.bands["true_green"][0, 0] == older["B3"]
+    assert image.bands["true_blue"][0, 0] == older["B2"]
+    assert image.bands[raster.RASTER_DATE_BAND][0, 1] == NEW_MS
+    assert image.bands["true_red"][0, 1] == BANDS_BRIGHT["B4"]
 
 
 def test_masking_happens_before_any_index_arithmetic(monkeypatch):

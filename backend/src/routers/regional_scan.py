@@ -3,7 +3,7 @@
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
-from ..schemas import DISCLAIMER_TEXT
+from ..schemas import disclaimer_in_force
 
 router = APIRouter(tags=["retired"])
 
@@ -16,6 +16,8 @@ async def retired_regional_scan() -> JSONResponse:
         content={
             "detail": "The 501-point regional scan has been retired.",
             "replacement": "/raster-scan",
-            "disclaimer": DISCLAIMER_TEXT,
+            # Not a DisclaimerMixin model, so the same never-raising
+            # resolution is called by hand: the text for the baseline in force.
+            "disclaimer": disclaimer_in_force(),
         },
     )

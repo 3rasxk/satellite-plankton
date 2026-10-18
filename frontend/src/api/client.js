@@ -56,15 +56,48 @@ export function apiAssetUrl(path) {
   return `${baseURL.replace(/\/$/, '')}${path}`
 }
 
-export async function getRiskMap() {
-  const { data } = await client.get('/risk-map')
-  return data
+// Several components ask for the same read-only snapshot as the page mounts
+// (the shell's freshness chip, the page itself, the reading guide). Calls
+// that arrive while one is in flight, or within SHARE_MS of it settling,
+// share its promise; a later call (refresh, poll) goes to the network again.
+// A failure is never kept, so a retry always re-asks. The response is
+// returned as received.
+const SHARE_MS = 1500
+
+function shared(name, load) {
+  let entry = null
+  const call = () => {
+    const now = Date.now()
+    if (entry && (entry.pending || now - entry.settledAt < SHARE_MS)) return entry.promise
+    const next = { pending: true, settledAt: 0, promise: null }
+    next.promise = load().then(
+      (data) => {
+        next.pending = false
+        next.settledAt = Date.now()
+        return data
+      },
+      (error) => {
+        if (entry === next) entry = null
+        throw error
+      },
+    )
+    entry = next
+    return next.promise
+  }
+  // Callers key on the function's name (hooks, test fixtures).
+  Object.defineProperty(call, 'name', { value: name })
+  return call
 }
 
-export async function getRasterScan() {
+export const getRiskMap = shared('getRiskMap', async () => {
+  const { data } = await client.get('/risk-map')
+  return data
+})
+
+export const getRasterScan = shared('getRasterScan', async () => {
   const { data } = await client.get('/raster-scan')
   return data
-}
+})
 
 // One cell of the raster overlay, by coordinate. Reads the stored blob the
 // picture was drawn from -- not a live Earth Engine call -- so the numbers

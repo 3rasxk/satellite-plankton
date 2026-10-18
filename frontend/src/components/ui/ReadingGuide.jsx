@@ -4,7 +4,11 @@
  * a station or pin to see its readings and sources, and these are index
  * readings and a provisional TEST comparison (estimates, not certainties).
  *
- * Data source: i18n `guide.*` only; no API value is shown. The first-visit
+ * Data source: i18n `guide.*`; the step-1 colour bar is the raster's own NDCI
+ * ramp (the legend swatches of `GET /raster-scan`, the same ones the map's
+ * colour bar uses; read only while the guide is open, and shared with the
+ * page's own request). Without a legend it falls back to ink tints. No
+ * reading is shown. The first-visit
  * rule and the step list live in src/lib/guide.js (pure, tested); the shell
  * (src/App.jsx) decides when it opens and remembers that it was seen.
  *
@@ -16,18 +20,29 @@
  */
 import { useEffect, useId, useRef, useState } from 'react'
 import Icon from '../Icon.jsx'
+import { getRasterScan } from '../../api/client.js'
+import { useApi } from '../../hooks/useApi.js'
 import { GUIDE_STEPS, clampStep } from '../../lib/guide.js'
 import { useLang } from '../../i18n/useLang.js'
 
 const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])'
 
-/** The step illustrations: neutral glyphs, never a data or risk colour --
- * the first shows the API-independent idea of a ramp in ink tints only. */
-function StepArt({ id }) {
+/** The NDCI ramp as a CSS gradient, from the API's swatches; null without them. */
+function rampGradient(legend) {
+  const swatches = (Array.isArray(legend?.value?.swatches) ? legend.value.swatches : []).filter((s) => typeof s?.hex === 'string')
+  if (swatches.length < 2) return null
+  const stops = swatches.map((s, i) => `${s.hex} ${(i / (swatches.length - 1)) * 100}%`).join(', ')
+  return `linear-gradient(90deg, ${stops})`
+}
+
+/** The step illustrations: neutral glyphs; step 1 shows the real NDCI ramp
+ * (an index, never a risk colour), in ink tints until the legend is known. */
+function StepArt({ id, legend }) {
   if (id === 'colours') {
+    const gradient = rampGradient(legend)
     return (
       <div className="pw-guide-art" aria-hidden="true" data-art="ramp">
-        <span className="pw-guide-ramp" />
+        <span className="pw-guide-ramp" style={gradient ? { background: gradient } : undefined} data-ramp={gradient ? 'ndci' : 'ink'} />
         <span className="pw-guide-ramp-ends"><span>−</span><span>+</span></span>
       </div>
     )
@@ -51,6 +66,7 @@ function StepArt({ id }) {
 
 export default function ReadingGuide({ open, onClose }) {
   const { t } = useLang()
+  const scan = useApi(getRasterScan, [], { enabled: Boolean(open) })
   const [step, setStep] = useState(0)
   const titleId = useId()
   const bodyId = useId()
@@ -121,7 +137,7 @@ export default function ReadingGuide({ open, onClose }) {
           </button>
         </div>
         <p className="pw-guide-kicker">{t('guide.title')}</p>
-        <StepArt id={id} />
+        <StepArt id={id} legend={scan.data?.legend} />
         <h2 className="pw-guide-title" id={titleId}>{t(`guide.steps.${id}.title`)}</h2>
         <p className="pw-guide-body" id={bodyId}>{t(`guide.steps.${id}.body`)}</p>
         <ol className="pw-guide-dots" aria-hidden="true">

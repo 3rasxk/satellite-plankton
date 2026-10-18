@@ -1,4 +1,4 @@
-import { StrictMode, Suspense, lazy } from 'react'
+import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 // Single most common Leaflet setup mistake is forgetting this import —
@@ -13,21 +13,21 @@ import './styles/dashboard.css'
 // segmented controls and the map's floating panels. Last, so it can scope
 // over both sheets above.
 import './styles/glass.css'
-import App from './App.jsx'
+// Plankton Watch Glass: design-reference values (gl- classes). Last.
+import './styles/design.css'
+import Shell from './glass/Shell.jsx'
+import LegacyLayout from './glass/LegacyLayout.jsx'
+import MapPage from './glass/MapPage.jsx'
+import SummaryPage from './glass/SummaryPage.jsx'
+import StatesPage from './glass/StatesPage.jsx'
 import { LangProvider } from './i18n/LangContext.jsx'
 import OverviewPage from './pages/OverviewPage.jsx'
-import RasterPage from './pages/RasterPage.jsx'
 import SitesPage from './pages/SitesPage.jsx'
 import SiteDetailPage from './pages/SiteDetailPage.jsx'
 import MethodsPage from './pages/MethodsPage.jsx'
 import DataPage from './pages/DataPage.jsx'
 import NotFoundPage from './pages/NotFoundPage.jsx'
 import LegacyRasterRedirect from './pages/LegacyRasterRedirect.jsx'
-
-// Design-review page of every system state, with fixture data. Development
-// builds only: in a production build `import.meta.env.DEV` is false, the
-// route is not registered and the page is not bundled.
-const StatesPage = import.meta.env.DEV ? lazy(() => import('./pages/StatesPage.jsx')) : null
 
 // Routes (dashboard spec §3). PlaceholderPage marks the pages later plan
 // tasks build; each task replaces its route's element here. /raster (the
@@ -37,18 +37,20 @@ createRoot(document.getElementById('root')).render(
     <BrowserRouter>
       <LangProvider>
         <Routes>
-          <Route element={<App />}>
-            <Route index element={<OverviewPage />} />
-            <Route path="map" element={<RasterPage />} />
+          <Route element={<Shell />}>
+            <Route index element={<MapPage />} />
+            <Route path="map" element={<MapPage />} />
+            <Route path="summary" element={<SummaryPage />} />
+            <Route path="states" element={<StatesPage />} />
             <Route path="raster" element={<LegacyRasterRedirect />} />
-            <Route path="sites" element={<SitesPage />} />
-            <Route path="sites/:siteId" element={<SiteDetailPage />} />
-            <Route path="methods" element={<MethodsPage />} />
-            <Route path="data" element={<DataPage />} />
-            {StatesPage && (
-              <Route path="states" element={<Suspense fallback={null}><StatesPage /></Suspense>} />
-            )}
-            <Route path="*" element={<NotFoundPage />} />
+            <Route element={<LegacyLayout />}>
+              <Route path="overview" element={<OverviewPage />} />
+              <Route path="sites" element={<SitesPage />} />
+              <Route path="sites/:siteId" element={<SiteDetailPage />} />
+              <Route path="methods" element={<MethodsPage />} />
+              <Route path="data" element={<DataPage />} />
+              <Route path="*" element={<NotFoundPage />} />
+            </Route>
           </Route>
         </Routes>
       </LangProvider>

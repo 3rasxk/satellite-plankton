@@ -76,7 +76,7 @@ def get_satellite_image(
     lng: float = Query(..., ge=-180, le=180),
     date: str = Query(..., description="YYYY-MM-DD"),
     image_type: Literal["true_color", "ndci_heatmap"] = Query(
-        ..., description="'true_color' (RGB) or 'ndci_heatmap' (5-stop risk-ramp NDCI)."
+        ..., description="'true_color' (RGB) or 'ndci_heatmap' (5-stop NDCI visualization ramp)."
     ),
 ) -> Response:
     try:

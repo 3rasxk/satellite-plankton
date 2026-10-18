@@ -878,7 +878,7 @@ class RasterHighlightsResponse(DisclaimerMixin):
         default=HIGHLIGHT_RANKING_TEXT, description="What the order means. Cells whose NDCI "
         "is exactly ±1 are excluded from pins: a band is zero, which is not a physical "
         "water-colour value (see `excluded_degenerate`).")
-    n_requested: int = Field(description="Pins asked for (3-10).")
+    n_requested: int = Field(description="Pins asked for (3-200).")
     min_separation_m: int = Field(
         description="De-duplication radius: a cell closer than this (great-circle, between "
         "cell coordinates) to a higher-ranked pin is skipped.")

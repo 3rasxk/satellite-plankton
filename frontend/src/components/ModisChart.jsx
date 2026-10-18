@@ -8,7 +8,8 @@
  * (GET /timeseries points: epoch-ms time for the axis, the API's chlor_a
  * and anomaly_z). One dot per API point; a null value is not drawn (never
  * as 0); nothing is averaged, interpolated or filled. Dots, no line: the
- * observations are irregular. Marks are ink, never a risk or accent colour.
+ * observations are irregular. Marks use the interaction accent (#0071E3), never a risk
+ * colour; the thin dashed grey line is the zero axis, not a climatology.
  */
 import {
   CartesianGrid, ReferenceLine, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis, ZAxis,
@@ -31,7 +32,7 @@ function ChartTip({ active, payload, field, spec }) {
   )
 }
 
-function Panel({ data, field, label, spec, zeroLine = false }) {
+function Panel({ data, field, label, spec }) {
   const points = data.filter((p) => p[field] !== null)
   return (
     <div className="pw-modis-panel">
@@ -61,9 +62,9 @@ function Panel({ data, field, label, spec, zeroLine = false }) {
               tickFormatter={(v) => formatValue(v, { kind: 'z', decimals: Math.abs(v) >= 10 ? 0 : 1 }).text}
             />
             <ZAxis range={[14, 14]} />
-            {zeroLine && <ReferenceLine y={0} stroke="var(--line-strong)" strokeDasharray="3 3" />}
+            <ReferenceLine y={0} stroke="#9e9ea3" strokeWidth={1} strokeDasharray="3 3" ifOverflow="hidden" />
             <Tooltip cursor={false} content={<ChartTip field={field} spec={spec} />} isAnimationActive={false} />
-            <Scatter data={points} fill="var(--ink-2)" fillOpacity={0.7} isAnimationActive={false} />
+            <Scatter data={points} fill="#0071E3" fillOpacity={0.85} isAnimationActive={false} />
           </ScatterChart>
         </ResponsiveContainer>
       </div>
@@ -76,7 +77,7 @@ export default function ModisChart({ data, chlLabel, zLabel }) {
   return (
     <>
       <Panel data={points} field="chlor_a" label={chlLabel} spec={{ kind: 'mg-m3' }} />
-      <Panel data={points} field="anomaly_z" label={zLabel} spec={{ kind: 'z' }} zeroLine />
+      <Panel data={points} field="anomaly_z" label={zLabel} spec={{ kind: 'z' }} />
     </>
   )
 }

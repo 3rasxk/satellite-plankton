@@ -112,21 +112,18 @@ TRUE_COLOR_BANDS = ("B4", "B3", "B2")  # red, green, blue
 # NDCI heatmap color ramp.
 # --------------------------------------------------------------------------
 #
-# Exact hex colors already established for risk elsewhere in this project
-# (docs/FRONTEND_PLAN.md §4, frontend/src/constants.js RISK_COLOR_HEX /
-# NO_DATA_HEX) -- reused verbatim, in the same low-to-high order, so a
-# heatmap thumbnail reads as the same visual language as the map markers
-# and risk colors elsewhere in the app, not a new arbitrary palette.
+# Fixed visualization colours for ordering measured NDCI values. The palette
+# is cosmetic: its stops do not define biological or risk categories.
 NDCI_RAMP_HEX: tuple[str, str, str, str, str] = (
-    "#0A1929",  # deep water / lowest NDCI -- frontend --deep
-    "#2E86AB",  # clear water, low chlorophyll -- frontend --clear
-    "#48C9A9",  # elevated -- frontend --elevated
-    "#E8C547",  # bloom likely -- frontend --bloom
-    "#D64545",  # severe bloom / highest NDCI -- frontend --severe
+    "#0A1929",  # lowest displayed NDCI
+    "#2E86AB",
+    "#48C9A9",
+    "#E8C547",
+    "#D64545",  # highest displayed NDCI
 )
 
 # Domain the 5 ramp stops are spread evenly across. Real NDCI values seen
-# live in this project so far are small, roughly 0.02-0.09 for non-bloom
+# live in this project so far are small, roughly 0.02-0.09 over sampled
 # open water (see detection/src/indices.py's ndci()). The generic
 # published NDCI range for chlorophyll retrieval spans roughly -1 to 1
 # (practically -0.5 to 0.5 over water), but spreading the 5 ramp stops
@@ -139,13 +136,11 @@ NDCI_RAMP_HEX: tuple[str, str, str, str, str] = (
 #            observed floor, since NDCI can legitimately dip slightly
 #            negative over very clear water)
 #    0.15 -> highest/severe color (well above the observed non-bloom
-#            ceiling of ~0.09, leaving headroom so an actual elevated
-#            reading has room to visibly shift toward "bloom"/"severe"
+#            ceiling of ~0.09, leaving headroom for larger measured values
 #            rather than immediately pinning to the top of the ramp)
-# This is a cosmetic visualization domain, not a detection threshold --
-# it is entirely independent of the z-score anomaly cutoffs in
-# detection/src/config.yaml, which operate on anomaly vs. MODIS
-# climatology, not on this raw single-scene NDCI value.
+# This is a cosmetic visualization domain, not a detection threshold or
+# a low-to-high bloom-risk scale. The legacy z-score rule placeholders in
+# detection/src/config.yaml are inactive and are not derived from this ramp.
 NDCI_RAMP_DOMAIN: tuple[float, float] = (-0.05, 0.15)
 
 # --------------------------------------------------------------------------
@@ -363,7 +358,7 @@ def get_ndci_heatmap(
 ) -> dict[str, Any]:
     """NDCI heatmap PNG thumbnail of the same resolved Sentinel-2 scene
     `get_sentinel2_bands(lat, lng, date, ...)` would return numeric bands
-    for, colored with this project's standard 5-stop risk ramp.
+    for, colored with this project's standard 5-stop NDCI visualization ramp.
 
     NDCI is computed per-pixel as (B5-B4)/(B5+B4) -- the same formula
     `detection/src/indices.py`'s `ndci()` uses on the scalar band means,

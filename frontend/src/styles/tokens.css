@@ -9,7 +9,7 @@
 
 /* Source Serif 4 + Noto Serif Thai: long-form prose only (.prose, quoted
    server text) -- dashboard spec §7. */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+Thai:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=Noto+Serif+Thai:wght@400;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+Thai:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
 
 :root {
   /* ---- surfaces & text --------------------------------------------- */
@@ -44,11 +44,11 @@
      a green would already claim "good" and blue would collide with
      --accent. See docs/FRONTEND_PLAN.md §4 for the full reasoning. */
   --risk-normal: #8e8e93; /* Apple systemGray — near seasonal baseline */
-  --risk-elevated: #34c759; /* Apple systemGreen — one rule-based signal triggered */
+  --risk-elevated: #ffcc00; /* systemYellow — one rule-based signal triggered */
   --risk-watch: #ff9f0a; /* Apple systemOrange — multiple signals, rising trend */
   --risk-warning: #ff3b30; /* Apple systemRed — strong multi-signal anomaly */
   --risk-normal-rgb: 142, 142, 147;
-  --risk-elevated-rgb: 52, 199, 89;
+  --risk-elevated-rgb: 255, 204, 0;
   --risk-watch-rgb: 255, 159, 10;
   --risk-warning-rgb: 255, 59, 48;
 
@@ -149,7 +149,7 @@
    and --accent (interaction); everything else is ink on paper. The four
    --risk-* tokens stay unused. */
 :root {
-  --font-serif: 'Source Serif 4', 'Noto Serif Thai', 'Iowan Old Style', Georgia, serif;
+  --font-serif: var(--font-body); /* serif dropped (design reference): prose uses the UI face */
 
   /* The spec's type scale, 12/14/16/20/28/40 px. (--fs-* above is the
      map's larger scale and is left alone.) */

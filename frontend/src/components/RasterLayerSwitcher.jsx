@@ -1,21 +1,20 @@
 /**
- * The raster page's layer selector (True Color / NDCI Raster / Light Map)
+ * The raster page's layer selector (True Color / NDCI Raster)
  * and the overlay each layer mounts.
  *
  * 2026-10 glass restyle: drawn as an iOS segmented control (`pw-seg`) in the
- * map's bottom dock; the order puts the two scan images first (True Color,
- * then NDCI) and the plain reference map last.
+ * map's bottom dock; the order is True Color, then NDCI.
  *
  * Text comes from i18n `map.layer.*` through a `t` prop (default Thai): the
  * component deliberately uses no hooks, so it stays callable as a plain
  * function (tests/rasterLayerSwitcher.test.js reads its tree directly). The
- * three layer names are product names and read the same in both languages.
+ * two layer names are product names and read the same in both languages.
  */
 import L from 'leaflet'
 import RasterOverlay from './RasterOverlay.jsx'
 import { createT } from '../i18n/index.js'
 
-const MODES = ['true_color', 'ndci', 'light_map']
+const MODES = ['true_color', 'ndci']
 
 const defaultT = createT('th')
 

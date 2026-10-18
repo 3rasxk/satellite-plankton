@@ -141,7 +141,7 @@ test('default layer: True Color only when the served run stored its own RGB comp
   assert.equal(defaultLayer(RASTER), 'true_color')
   assert.equal(defaultLayer({ ...RASTER, true_color_url: null }), 'ndci')
   assert.equal(defaultLayer(null), 'ndci')
-  assert.deepEqual([...LAYER_ORDER], ['true_color', 'ndci', 'light_map'])
+  assert.deepEqual([...LAYER_ORDER], ['true_color', 'ndci'])
 })
 
 test('freshness chip: ok only for a healthy poll; old, failing, never and errors are attention, with the Overview wording', () => {

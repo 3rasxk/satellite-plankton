@@ -16,17 +16,7 @@ backend_dir = Path(__file__).resolve().parent.parent
 if str(backend_dir) not in sys.path:
     sys.path.insert(0, str(backend_dir))
 
-from fastapi.testclient import TestClient
-import pytest
-
-from src.main import app
 from src.services.cache_service import clear_cache, get_cached, set_cached
-
-
-@pytest.fixture(scope="module")
-def client():
-    with TestClient(app) as c:
-        yield c
 
 
 def test_cache_service_crud_and_ttl():

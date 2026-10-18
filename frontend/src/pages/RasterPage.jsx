@@ -27,7 +27,7 @@
  * expanding to the three points and the server disclaimer -- the footer is
  * below the fold on this page), the bottom-left dock (NDCI colour bar in
  * the NDCI layer, else the no-data caption, and the layer switch: True
- * Color | NDCI | Light Map), and the right detail panel (MapDetailPanel; a
+ * Color | NDCI), and the right detail panel (MapDetailPanel; a
  * bottom sheet under 720 px). Over the True Color layer the panels are
  * solid white. Every panel is a sibling of the Leaflet container, never
  * inside it, so no click on a control can reach the map's click handler
@@ -59,6 +59,7 @@ import RasterPixelPanel from '../components/RasterPixelPanel.jsx'
 import RasterRail from '../components/RasterRail.jsx'
 import HighlightPins from '../components/HighlightPins.jsx'
 import MapSiteMarkers from '../components/MapSiteMarkers.jsx'
+import MapViewport from '../components/MapViewport.jsx'
 import { CellDetailFrame, PinDetailPanel, SiteDetailPanel } from '../components/MapDetailPanel.jsx'
 import {
   applyPermalink, buildPinView, buildPinsModel, buildRailModel, clampPinCount, readPermalink, serializeView,
@@ -304,6 +305,7 @@ function RasterView({ data, loading, error, refetch, initialView, drawer, railOp
   const [pinCount, setPinCount] = useState(() => clampPinCount(Math.max(PIN_N_DEFAULT, applied.selection?.kind === 'pin' ? applied.selection.rank : 0)))
   const [showPins, setShowPins] = useState(true)
   const [interacted, setInteracted] = useState(false)
+  const [refit, setRefit] = useState(0)
   const markInteraction = useCallback(() => setInteracted(true), [])
   const onZoom = useCallback((z) => setZoom(z), [])
 
@@ -366,6 +368,20 @@ function RasterView({ data, loading, error, refetch, initialView, drawer, railOp
   const railHidden = !drawer && (effective?.kind === 'pin' || effective?.kind === 'site')
   const railShown = railOpen && !railHidden
   const railTitleId = `${railId}-title`
+  // Where the open station or pin sits, so the map can keep it (and a
+  // station's label) visible beside the detail panel.
+  const selectedPoint = useMemo(() => {
+    if (selectedSiteId !== null && sites.state === 'ready') {
+      const s = sites.items.find((i) => i.id === selectedSiteId)
+      return s?.onMap ? { key: `site:${s.id}`, lat: s.lat, lng: s.lng, hasLabel: true } : null
+    }
+    if (selectedRank !== null && pins.state === 'ready') {
+      const p = pins.items.find((i) => i.rank === selectedRank)
+      return p?.onMap ? { key: `pin:${p.rank}`, lat: p.lat, lng: p.lng, hasLabel: false } : null
+    }
+    return null
+  }, [selectedSiteId, selectedRank, sites, pins])
+  const fitEnabled = applied.zoom == null && !applied.fly && !applied.selection
   const pinView = useMemo(
     () => (selectedRank !== null && pins.state === 'ready' ? buildPinView(highlightsData, selectedRank) : null),
     [selectedRank, pins.state, highlightsData],
@@ -465,6 +481,7 @@ function RasterView({ data, loading, error, refetch, initialView, drawer, railOp
     setSelection(null)
     markInteraction()
     // The card comes back: return focus to its headline, not to <body>.
+    if (hadPanel) setRefit((n) => n + 1)
     if (hadPanel && !drawer) setTimeout(() => document.getElementById(railTitleId)?.focus(), 0)
   }, [markInteraction, selection, drawer, railTitleId])
 
@@ -516,6 +533,7 @@ function RasterView({ data, loading, error, refetch, initialView, drawer, railOp
           <RasterMapLayers mode={layerMode} data={data} t={t} />
           <MapSiteMarkers sites={sites} selectedId={selectedSiteId} onSelect={(id) => selectSite(id)} />
           <HighlightPins pins={pins} selectedRank={selectedRank} onSelect={(rank) => selectPin(rank)} />
+          <MapViewport bounds={data?.bounds} fitEnabled={fitEnabled} refit={refit} selected={selectedPoint} />
           <MapController target={flyTarget ?? linkPinTarget} initialZoom={applied.zoom} onZoom={onZoom} onUserInteraction={markInteraction} />
           {hasRaster && <RasterPixelProbe onPick={onPick} />}
         </RiskMap>

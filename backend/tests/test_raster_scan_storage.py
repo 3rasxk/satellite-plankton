@@ -288,7 +288,7 @@ def test_retention_only_ever_removes_its_own_runs_blobs(client, tmp_path):
 
 
 def test_stored_arrays_cover_every_composite_band_plus_coordinates():
-    assert storage.STORED_ARRAYS == ("lat", "lng", *bridge.RASTER_BAND_ORDER)
+    assert storage.STORED_ARRAYS == ("lat", "lng", *bridge.RASTER_STORED_BANDS)
     assert DATE_BAND in storage.STORED_ARRAYS
 
 

@@ -48,6 +48,7 @@ before(async () => {
       'react-leaflet': fileURLToPath(new URL('./fixtures/leaflet.js', import.meta.url)),
       leaflet: fileURLToPath(new URL('./fixtures/leaflet_core.js', import.meta.url)),
       '../hooks/useApi.js': fileURLToPath(new URL('./fixtures/useApi.js', import.meta.url)),
+      '../../hooks/useApi.js': fileURLToPath(new URL('./fixtures/useApi.js', import.meta.url)),
     } },
   })
   ;({ StaticLangProvider } = await server.ssrLoadModule('/src/i18n/LangContext.jsx'))
@@ -185,9 +186,14 @@ test('station panel: tabs, "—" with a reason, footer note and server disclaime
     assert.ok(text.includes(dict.glass.detail.tab_trend) && text.includes(dict.glass.detail.tab_imagery))
     assert.ok(text.includes(dict.glass.detail.footer_note))
     assert.ok(text.includes(DISCLAIMER), `${lang}: the server disclaimer verbatim`)
-    assert.ok(text.includes(dict.glass.detail.group_anomaly))
-    assert.ok(text.includes(dict.glass.detail.bands_none), 'no band values: "—" with the reason, never 0')
-    assert.match(html, /data-null="true"/)
+    // The panel opens on Trend; the readings sit on the Measurements tab.
+    const measuredHtml = render(createElement(SiteDetailPanel, {
+      riskMap: RISK_MAP, riskMapRequest: { loading: false, error: null }, siteId: 'a', methods: null, onClose() {}, initialTab: 'measurements',
+    }), lang)
+    const measured = visible(measuredHtml)
+    assert.match(measuredHtml, /data-null="true"/)
+    assert.ok(measured.includes(dict.glass.detail.group_anomaly))
+    assert.ok(measured.includes(dict.glass.detail.bands_none), 'no band values: "—" with the reason, never 0')
     assert.doesNotMatch(text, /Recommended action|แนะนำให้/)
   }
   const none = visible(render(createElement(SiteDetailPanel, {
@@ -195,4 +201,13 @@ test('station panel: tabs, "—" with a reason, footer note and server disclaime
   })))
   assert.ok(none.includes(en.glass.detail.headline_none))
   assert.ok(!/\b0\.0000\b/.test(none), 'a station without a reading shows no zero index')
+})
+
+test('reading guide: the step-1 bar is the API legend ramp, ink tints without one', () => {
+  setResponses({ getRasterScan: { data: { legend: { value: { swatches: [{ value: -0.05, hex: '#112233' }, { value: 0.15, hex: '#aabbcc' }] } } } } })
+  const withLegend = render(createElement(ReadingGuide, { open: true, onClose() {} }))
+  assert.match(withLegend, /data-ramp="ndci"/)
+  assert.match(withLegend, /#112233 0%, #aabbcc 100%/)
+  setResponses({})
+  assert.match(render(createElement(ReadingGuide, { open: true, onClose() {} })), /data-ramp="ink"/)
 })

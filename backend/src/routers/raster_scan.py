@@ -336,6 +336,38 @@ async def get_raster_overlay(
     return FileResponse(path, media_type="image/png", filename=path.name)
 
 
+@router.get("/raster-scan/ndci-hires.png")
+def get_raster_ndci_hires(
+    run_id: int | None = Query(None, ge=1, le=2**63 - 1,
+                               description="Exact rendered run; omit for the latest available."),
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    """NDCI of a Sentinel-2 composite over the whole map extent, about 80 m per pixel.
+
+    Rendered by Earth Engine as of the run's date, newest clear pixel within
+    a 180-day window (cloud-masked pixels may carry older scenes), with
+    the same ramp, transparent where nothing was measured; cached on disk
+    after the first request (which can take a minute or more). Sync, so the
+    render runs in the threadpool. Never a placeholder: failures are typed
+    HTTP errors (503 Earth Engine unusable, 404 no scene or no water, 502 the
+    thumbnail download failed).
+    """
+    from ..raster_scan import hires
+
+    rendered = _rendered_run(db, run_id)
+    if rendered is None:
+        raise HTTPException(status_code=404, detail=NO_RASTER_TO_QUERY)
+    try:
+        path = hires.render(rendered.id, rendered.date_used)
+    except bridge.GEEAuthError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except (bridge.NoCloudFreeImageryError, bridge.NoWaterPixelsError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=502, detail=f"The Earth Engine thumbnail could not be fetched: {exc}") from exc
+    return FileResponse(path, media_type="image/png", filename=path.name)
+
+
 @router.get("/raster-scan/true-color.png")
 async def get_raster_true_color(
     run_id: int | None = Query(None, ge=1, le=2**63 - 1,
@@ -423,7 +455,7 @@ def get_raster_pixel(
 def get_raster_highlights(
     run_id: int | None = Query(None, ge=1, le=2**63 - 1,
                                description="Exact rendered run; omit for the latest available."),
-    n: int = Query(5, ge=3, le=10, description="Number of pins wanted (3-10)."),
+    n: int = Query(5, ge=3, le=200, description="Number of pins wanted (3-200)."),
     min_separation_m: int = Query(
         3000, ge=1000, le=10000,
         description="De-duplication radius in metres: a cell closer than this to a "

@@ -40,19 +40,17 @@ const DATA = {
   true_color_url: '/raster-scan/true-color.png?run_id=12',
 }
 
-test('the selector exposes the exact three labels with one selected mode', () => {
-  for (const selected of ['true_color', 'light_map', 'ndci']) {
+test('the selector exposes the exact two labels with one selected mode', () => {
+  for (const selected of ['true_color', 'ndci']) {
     const html = renderToStaticMarkup(createElement(RasterLayerControl, {
       mode: selected,
       onModeChange() {},
       trueColorAvailable: true,
     }))
     assert.match(html, />True Color</)
-    assert.match(html, />Light Map</)
+    assert.doesNotMatch(html, /Light Map/)
     assert.match(html, />NDCI Raster</)
-    // 2026-10 glass restyle: the two scan images first, the reference map last.
     assert.ok(html.indexOf('True Color') < html.indexOf('NDCI Raster'))
-    assert.ok(html.indexOf('NDCI Raster') < html.indexOf('Light Map'))
     assert.equal((html.match(/aria-pressed="true"/g) || []).length, 1)
     assert.match(html, new RegExp(`data-layer-mode="${selected}"[^>]*aria-pressed="true"`))
   }
@@ -61,18 +59,15 @@ test('the selector exposes the exact three labels with one selected mode', () =>
 test('selecting a layer reports the requested mutually exclusive mode', () => {
   const selected = []
   const tree = RasterLayerControl({
-    mode: 'light_map',
+    mode: 'ndci',
     onModeChange: (mode) => selected.push(mode),
     trueColorAvailable: true,
   })
   for (const button of tree.props.children) button.props.onClick()
-  assert.deepEqual(selected, ['true_color', 'ndci', 'light_map'])
+  assert.deepEqual(selected, ['true_color', 'ndci'])
 })
 
 test('only the selected run-aligned overlay is mounted', () => {
-  const lightMap = renderToStaticMarkup(createElement(RasterMapLayers, {
-    mode: 'light_map', data: DATA,
-  }))
   const trueColor = renderToStaticMarkup(createElement(RasterMapLayers, {
     mode: 'true_color', data: DATA,
   }))
@@ -80,7 +75,6 @@ test('only the selected run-aligned overlay is mounted', () => {
     mode: 'ndci', data: DATA,
   }))
 
-  assert.doesNotMatch(lightMap, /data-overlay-url=/)
   assert.match(trueColor, /true-color\.png\?run_id=12/)
   assert.doesNotMatch(trueColor, /\/overlay\.png/)
   assert.match(ndci, /\/overlay\.png\?run_id=12/)
@@ -127,7 +121,7 @@ test('the selector and scan information cannot overlap at desktop or narrow widt
 test('the switcher root is shielded from Leaflet native click, dblclick and scroll', () => {
   globalThis.__leafletShielded = []
   const tree = RasterLayerControl({
-    mode: 'light_map', onModeChange() {}, trueColorAvailable: true,
+    mode: 'ndci', onModeChange() {}, trueColorAvailable: true,
   })
   const root = { tag: 'switcher-root' }
   assert.equal(typeof tree.ref, 'function', 'the root exposes no ref to attach the shield to')
@@ -142,7 +136,7 @@ test('the switcher root is shielded from Leaflet native click, dblclick and scro
 
 test('the no-data caption shows in every layer mode where the pixel probe is active', () => {
   const legend = { value: { swatches: [], domain: [-0.05, 0.1] } }
-  for (const mode of ['true_color', 'light_map', 'ndci']) {
+  for (const mode of ['true_color', 'ndci']) {
     const html = renderToStaticMarkup(createElement(RasterLegendDock, {
       layerMode: mode, legend, hasRaster: true,
     }))
@@ -153,7 +147,7 @@ test('the no-data caption shows in every layer mode where the pixel probe is act
   assert.match(renderToStaticMarkup(createElement(RasterLegendDock, {
     layerMode: 'ndci', legend, hasRaster: true,
   })), /raster-legend-ramp/)
-  for (const mode of ['true_color', 'light_map']) {
+  for (const mode of ['true_color']) {
     assert.doesNotMatch(renderToStaticMarkup(createElement(RasterLegendDock, {
       layerMode: mode, legend, hasRaster: true,
     })), /raster-legend-ramp/)
@@ -162,6 +156,6 @@ test('the no-data caption shows in every layer mode where the pixel probe is act
 
 test('no raster, no probe, no caption', () => {
   assert.equal(renderToStaticMarkup(createElement(RasterLegendDock, {
-    layerMode: 'light_map', legend: null, hasRaster: false,
+    layerMode: 'true_color', legend: null, hasRaster: false,
   })), '')
 })

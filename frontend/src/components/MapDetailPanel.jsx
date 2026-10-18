@@ -279,10 +279,10 @@ function SiteImagery({ model }) {
  * The station view.
  * @param {{riskMap, riskMapRequest, siteId, methods, onClose}} props
  */
-export function SiteDetailPanel({ riskMap, riskMapRequest, siteId, methods, onClose }) {
+export function SiteDetailPanel({ riskMap, riskMapRequest, siteId, methods, onClose, initialTab = 'trend' }) {
   const { t } = useLang()
   const idBase = useId().replace(/:/g, '')
-  const { tab, choose, trendWanted } = useTabs('measurements')
+  const { tab, choose, trendWanted } = useTabs(initialTab)
   const base = useMemo(() => buildSiteDetailModel({ riskMap, siteId, request: riskMapRequest, methods }), [riskMap, siteId, riskMapRequest, methods])
   const lat = base.state === 'ready' ? base.lat : null
   const lng = base.state === 'ready' ? base.lng : null
@@ -346,10 +346,10 @@ export function SiteDetailPanel({ riskMap, riskMapRequest, siteId, methods, onCl
  * The pin view: the existing pin inspector (PinDetails) on Measurements,
  * and the MODIS series at the pin's observed pixel on Trend.
  */
-export function PinDetailPanel({ view, methods, onClose, onZoom, onInspect, citation, permalink }) {
+export function PinDetailPanel({ view, methods, onClose, onZoom, onInspect, citation, permalink, initialTab = 'trend' }) {
   const { t } = useLang()
   const idBase = useId().replace(/:/g, '')
-  const { tab, choose, trendWanted } = useTabs('measurements')
+  const { tab, choose, trendWanted } = useTabs(initialTab)
   const lat = view?.cellQuery?.lat ?? null
   const lng = view?.cellQuery?.lng ?? null
   const series = useModisSeries(lat, lng, trendWanted && view !== null)

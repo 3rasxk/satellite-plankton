@@ -12,7 +12,7 @@
  * freshness chip (`status`, from the shell), TH|EN and the reading-guide
  * button (`onHelp`). On /map the shell floats this same bar over the map as
  * a glass panel; on every other page it is the sticky page header -- one
- * component, never duplicated. Below 1180 px the routes collapse behind a
+ * component, never duplicated. Below 960 px the routes collapse behind a
  * Menu button (`aria-expanded`/`aria-controls`); choosing a page or
  * pressing Esc closes it (Esc returns focus to the button).
  *

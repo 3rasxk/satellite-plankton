@@ -13,7 +13,7 @@ import { encodeView, decodeView, LAYERS, VIEW_PARAMS } from '../src/lib/permalin
 
 test('encodeView writes the view keys in a fixed order', () => {
   assert.deepEqual([...VIEW_PARAMS], ['lat', 'lng', 'run', 'layer', 'zoom', 'pin', 'lang'])
-  assert.deepEqual([...LAYERS], ['ndci', 'light_map', 'true_color'])
+  assert.deepEqual([...LAYERS], ['ndci', 'true_color'])
   assert.equal(
     encodeView({ lang: 'en', pin: 2, zoom: 10, layer: 'ndci', runId: 6, lng: 100.6, lat: 13 }),
     'lat=13&lng=100.6&run=6&layer=ndci&zoom=10&pin=2&lang=en',
@@ -33,7 +33,7 @@ test('round trip: decode(encode(view)) returns the same view', () => {
     { lat: 13, lng: 100.6, runId: 6, layer: 'ndci', zoom: 10, pin: 2, lang: 'en' },
     { lat: 12.692297, lng: 100.355292, layer: 'true_color' },
     { runId: 12, pin: 10, lang: 'th' },
-    { layer: 'light_map', zoom: 8.5 },
+    { layer: 'ndci', zoom: 8.5 },
     {},
   ]
   for (const view of views) {

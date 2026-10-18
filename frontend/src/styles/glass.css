@@ -165,8 +165,15 @@
 /* ------------------------------------------------------------------ */
 
 .pw-header {
+  margin: 12px 12px 0;
   border-bottom: 0;
+  border-radius: var(--radius-glass);
   background: transparent;
+  box-shadow: var(--glass-ring), var(--glass-shadow);
+}
+
+.pw-shell[data-layout='page'] .pw-header {
+  top: 12px;
 }
 
 .pw-header::before {
@@ -174,10 +181,10 @@
   position: absolute;
   inset: 0;
   z-index: -1;
-  background: rgba(255, 255, 255, 0.8);
+  border-radius: inherit;
+  background: var(--glass-bg);
   -webkit-backdrop-filter: var(--glass-blur);
   backdrop-filter: var(--glass-blur);
-  box-shadow: inset 0 -0.5px 0 rgba(0, 0, 0, 0.16);
   pointer-events: none;
 }
 
@@ -256,16 +263,18 @@
 }
 
 .pw-help-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
   min-height: 32px;
-  padding: 0 12px 0 6px;
+  padding: 0;
   border: 0;
-  border-radius: var(--radius-pill);
+  border-radius: 50%;
   background: var(--seg-track);
   color: var(--ink);
-  font: 500 var(--type-12) / 1 var(--font-body);
+  font: 600 var(--type-14) / 1 var(--font-body);
   cursor: pointer;
 }
 
@@ -279,14 +288,13 @@
 }
 
 .pw-help-glyph {
-  display: inline-grid;
-  place-items: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: var(--paper);
-  font-weight: 700;
-  box-shadow: var(--seg-thumb-shadow);
+  display: block;
+  font-weight: 600;
+}
+
+/* The label lives in aria-label; the button shows "?" only. */
+.pw-help-text {
+  display: none;
 }
 
 .pw-menu-btn {
@@ -689,25 +697,24 @@
 
 /* One bar holds brand, routes and tools: the subtitle shows only where
    there is room for all three. */
-@media (max-width: 1439px) {
+@media (max-width: 1499px) {
   .pw-brand-tagline {
     display: none;
   }
 }
 
-@media (max-width: 1099px) {
-  .pw-help-text {
+/* Between 960 and 1023 px the segmented routes still fit when the
+   freshness chip shows its dot and caret only. */
+@media (max-width: 1023px) {
+  .pw-updated-text {
     display: none;
-  }
-
-  .pw-help-btn {
-    padding: 0 6px;
   }
 }
 
-/* Below 1180 px the routes collapse behind the Menu button (the Thai
-   labels need the width). */
-@media (max-width: 1179px) {
+/* Below 960 px the routes collapse behind the Menu button (brand, the
+   514 px segmented nav and the tools need about 905 px, and the Thai labels
+   need the width). */
+@media (max-width: 959px) {
   .pw-header .pw-nav {
     display: none;
   }
@@ -755,16 +762,22 @@
 }
 
 @media (max-width: 639px) {
-  .pw-updated-text {
+  /* Dot only: the freshness text and caret live in the popover. */
+  .pw-updated > summary {
+    padding: 0 9px;
+  }
+
+  .pw-updated-caret {
     display: none;
   }
 
-  .pw-updated > summary {
-    padding: 0 8px;
-  }
-
+  .pw-header,
   .pw-shell[data-layout='map'] .pw-header {
     margin: 8px 8px 0;
+  }
+
+  .pw-shell[data-layout='page'] .pw-header {
+    top: 8px;
   }
 
   .pw-menu-btn span {
@@ -1795,8 +1808,8 @@
   }
 
   .pw-map-page .pw-map-inspector .pw-detail {
-    max-height: 62vh;
-    max-height: 62svh;
+    max-height: 56vh;
+    max-height: 56svh;
     border-radius: var(--radius-glass) var(--radius-glass) 0 0;
     animation-name: pw-sheet-in;
   }
@@ -1898,4 +1911,134 @@
 
 .pw-states-panel .pw-detail {
   max-height: 640px;
+}
+
+/* --- station label side (set by MapViewport) ------------------------- */
+
+/* The label moves to the left of its dot when the right side would run under
+   the detail panel or past the edge. The dot stays on the anchor: the span is
+   shifted by its own width less the dot. */
+.pw-site-marker[data-side='left'] {
+  flex-direction: row-reverse;
+  transform: translateX(calc(18px - 100%));
+}
+
+/* --- NDCI basemap: the pin legend is for the other layers ------------ */
+
+.pw-map-page[data-basemap='ndci'] .pw-map-pin-legend {
+  display: none;
+}
+
+/* --- zoom buttons: glass over the NDCI raster, solid over the photo -- */
+
+.pw-map-page[data-basemap='ndci'] .leaflet-control-zoom {
+  background: rgba(255, 255, 255, 0.76);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  backdrop-filter: blur(28px) saturate(180%);
+  border-radius: 12px;
+}
+
+.pw-map-page[data-basemap='ndci'] .leaflet-control-zoom a {
+  background: transparent;
+  color: var(--ink);
+}
+
+.pw-map-page[data-basemap='ndci'] .leaflet-control-zoom a:hover {
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.pw-map-page[data-basemap='true_color'] .leaflet-control-zoom {
+  background: var(--glass-solid);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.pw-map-page[data-basemap='true_color'] .leaflet-control-zoom a {
+  background: var(--glass-solid);
+}
+
+@supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  .pw-map-page[data-basemap='ndci'] .leaflet-control-zoom {
+    background: var(--glass-solid);
+  }
+}
+
+/* --- phone: bottom sheet grab handle, stacked dock ------------------- */
+
+@media (max-width: 719px) {
+  .pw-map-page .pw-map-inspector .pw-detail::after {
+    content: '';
+    position: absolute;
+    top: 6px;
+    left: 50%;
+    z-index: 2;
+    width: 36px;
+    height: 5px;
+    border-radius: 3px;
+    background: rgba(60, 60, 67, 0.3);
+    transform: translateX(-50%);
+    pointer-events: none;
+  }
+
+  .pw-map-page .pw-map-inspector .pw-detail-head {
+    padding-top: 22px;
+  }
+}
+
+@media (max-width: 480px) {
+  .pw-map-page {
+    --map-bottom: 40px; /* two attribution lines */
+  }
+
+  .pw-map-page .leaflet-control-attribution {
+    max-width: calc(100% - 16px);
+    font-size: 9px;
+    line-height: 1.3;
+  }
+
+  /* Legend above the layer switch; both inside the viewport. */
+  .pw-map-dock,
+  .pw-map-page[data-rail='closed'] .pw-map-dock {
+    flex-direction: column;
+    align-items: flex-start;
+    max-width: calc(100% - var(--map-gap) * 2);
+  }
+
+  .pw-map-dock .pw-map-dock-layers,
+  .pw-map-dock .raster-layer-switcher {
+    max-width: 100%;
+  }
+
+  .pw-map-dock .raster-layer-switcher button {
+    min-height: 28px;
+    padding: 0 10px;
+    font-size: 11px;
+  }
+
+  /* "Show panel" rides above the layer switch, right-aligned, so the two
+     never overlap. */
+  .pw-map-page .pw-map-rail-toggle {
+    bottom: calc(var(--map-bottom) + 40px);
+  }
+}
+
+/* Phone: the bar's brand, freshness dot and tools must not touch. */
+@media (max-width: 479px) {
+  .pw-header-bar,
+  .pw-shell[data-layout='map'] .pw-header-bar {
+    gap: 6px;
+    padding-left: 10px;
+  }
+
+  .pw-header .pw-brand-link {
+    gap: 6px;
+  }
+
+  .pw-header .pw-brand-name {
+    font-size: 14px;
+  }
+
+  .pw-header-tools {
+    gap: 6px;
+  }
 }

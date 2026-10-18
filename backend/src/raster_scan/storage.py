@@ -60,7 +60,7 @@ BLOB_FILENAME = "cells.npz"
 # Arrays actually written to disk, in this order. `lat`/`lng` come from
 # GEE's own pixelLonLat bands (data-pipeline/src/raster.py), so a stored
 # cell's position is the position the server computed it at.
-STORED_ARRAYS: tuple[str, ...] = ("lat", "lng", *bridge.RASTER_BAND_ORDER)
+STORED_ARRAYS: tuple[str, ...] = ("lat", "lng", *bridge.RASTER_STORED_BANDS)
 
 
 def run_blob_dir(run_id: int, root: Path | None = None) -> Path:
@@ -119,7 +119,15 @@ def write_cells(run_id: int, arrays: dict, root: Path | None = None) -> dict:
     directory = run_blob_dir(run_id, root)
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / BLOB_FILENAME
-    np.savez_compressed(path, **{name: np.asarray(arrays[name]) for name in STORED_ARRAYS})
+    true_color = bridge.RASTER_TRUE_COLOR_BANDS
+    present_true_color = [name for name in true_color if name in arrays]
+    if present_true_color and len(present_true_color) != len(true_color):
+        raise ValueError("raster true-color channels must be stored together")
+    names = tuple(
+        name for name in STORED_ARRAYS
+        if name not in true_color or name in arrays
+    )
+    np.savez_compressed(path, **{name: np.asarray(arrays[name]) for name in names})
 
     size = path.stat().st_size
     logger.info(

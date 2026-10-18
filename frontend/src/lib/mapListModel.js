@@ -44,7 +44,7 @@ const msg = (key, params = {}) => ({ key, params })
 const countText = (v) => formatValue(v, { kind: 'count' }).text
 
 /** Layer modes of the map page, in segmented-control order. */
-export const LAYER_ORDER = Object.freeze(['true_color', 'ndci', 'light_map'])
+export const LAYER_ORDER = Object.freeze(['true_color', 'ndci'])
 
 /**
  * The layer a fresh visit opens on: True Color when the served run stored

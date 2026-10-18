@@ -41,22 +41,20 @@ and B5. So "is this cell real?" can never be asked of an index value: the
 test would silently convert "we could not see here" into "we looked and
 measured zero", which is this project's cardinal overclaim, and would
 also throw away the genuine 0.0 readings. It is the DATE band that
-decides, and the test is `date_ms > 0` -- a real Sentinel-2 acquisition
+decides whether the stored zero is a masked export, and the test is
+`date_ms > 0` -- a real Sentinel-2 acquisition
 is ~1.79e12 ms and can never be 0. That rule is not restated here: it is
 imported as `bridge.valid_cell_mask` from the module that filters the
 raster on the way in (`data-pipeline/src/raster.py`), so a cell dropped
 at read time and a click reported as unmeasured are decided by one line
 of code, not two that happen to agree today.
 
-That rule is applied here to whatever is on disk, which is one place this
-module is deliberately stricter than the renderer: `render_overlay` paints
-every stored cell whose value is finite and does not consult the date
-band, so a hand-written blob carrying a masked cell would be painted as a
-reading and reported here as unmeasured. Unreachable through the real
-pipeline -- `download_composite_arrays` filters on this same rule and
-cannot emit such a cell -- and the safer way round if it ever were
-reached: a picture that overstates by one pixel is a smaller failure than
-a number quoted for water nobody measured.
+That date rule is applied here to whatever is on disk. The visible NDCI
+must also be finite, matching `render_overlay`: a date-valid NaN or
+infinity is transparent and therefore remains `not_measured` on click.
+Secondary index arithmetic may still be unreadable for an otherwise valid
+NDCI cell; those values are returned as null and named in
+`unreadable_bands`.
 
 Limitations -- read before quoting a number from this
 -----------------------------------------------------
@@ -179,9 +177,9 @@ def inspect_cell(
     reported is the one that painted the square rather than the one it
     covered over.
 
-    Order of decision, also the renderer's: a stored cell wins first (a
-    reading that fell marginally outside the polygon was still drawn, and
-    is still reported), then the polygon, then nothing.
+    Order of decision matches the renderer: the pixel centre must first be
+    inside the study polygon, then a date-valid stored cell may report a
+    reading. Transparent gaps inside remain queryable as not measured.
 
     Args:
         cells: `storage.read_cells`' return value.
@@ -239,28 +237,34 @@ def inspect_cell(
         pixel_centre_lng=centre_lng,
     )
 
+    inside = bool(
+        render.points_in_polygon_mask(np.float64(centre_lat), np.float64(centre_lng), polygon)
+    )
+    if not inside:
+        return result
+
     date_band = bridge.RASTER_DATE_BAND
     cell_lat = np.asarray(cells["lat"], dtype=np.float64)
     cell_lng = np.asarray(cells["lng"], dtype=np.float64)
     dates = np.asarray(cells[date_band])
 
-    # The validity rule, imported rather than restated: the date band
-    # decides, never an index value (see the module docstring's 0.0 trap).
+    # The export validity rule is imported rather than restated: the date
+    # band distinguishes a genuine 0.0 from GEE's masked-band fill value
+    # (see the module docstring's 0.0 trap). The active NDCI must also be a
+    # finite reading, exactly as render_overlay requires before painting.
     # Applied here and not only at download time because this module is
     # handed whatever is on disk, and a blob that ever carried a masked
     # cell must not have its 0.0 read out as a measurement.
-    measured = bridge.valid_cell_mask(dates)
+    measured = bridge.valid_cell_mask(dates) & np.isfinite(
+        np.asarray(cells["ndci"], dtype=np.float64)
+    )
 
     rows_idx, cols_idx = grid.cell_indices(cell_lat, cell_lng)
     hits = np.flatnonzero((rows_idx == row) & (cols_idx == col) & measured)
 
     if hits.size == 0:
-        inside = bool(
-            render.points_in_polygon_mask(np.float64(centre_lat), np.float64(centre_lng), polygon)
-        )
-        state = STATE_NOT_MEASURED if inside else STATE_OUTSIDE
-        result["state"] = state
-        result["meaning"] = STATE_MEANING[state]
+        result["state"] = STATE_NOT_MEASURED
+        result["meaning"] = STATE_MEANING[STATE_NOT_MEASURED]
         return result
 
     # Last one wins -- numpy's own rule for `rgba[rows, cols] = values`,

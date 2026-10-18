@@ -402,7 +402,6 @@ export default {
     layer: {
       group: 'Choose the map layer',
       true_color: 'True Color',
-      light_map: 'Light Map',
       ndci: 'NDCI Raster',
       true_color_unavailable: 'No true-colour image matches this scan run',
       true_color_unavailable_title: 'This run stored no true-colour image, so True Color cannot be shown.',

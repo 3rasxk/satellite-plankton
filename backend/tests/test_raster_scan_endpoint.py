@@ -1050,11 +1050,14 @@ def test_default_mode_falls_back_to_ndci_without_a_level_b_baseline(client, tmp_
     assert body["disclaimer"] == DISCLAIMER_TEXT and body["baseline"] is None
 
 
-def test_explicit_ndci_in_test_mode_keeps_the_standard_disclaimer(client, tmp_path, cell_root):
+def test_explicit_ndci_in_test_mode_carries_the_test_disclaimer(client, tmp_path, cell_root):
+    # The ranking never uses the baseline, but the standard text ("anomaly
+    # detection is not computed") is false while a TEST baseline is valid,
+    # so every response carries the TEST variant then (2026-10-10).
     _anomaly_run(tmp_path, cell_root)
     body = client.get("/raster-scan/highlights", params={"mode": "ndci"}).json()
     assert body["mode"] == "ndci" and set(body) == _NDCI_RESPONSE_KEYS
-    assert body["disclaimer"] == DISCLAIMER_TEXT
+    assert body["disclaimer"] == DISCLAIMER_TEXT_TEST_BASELINE
     assert body["baseline"] is None
     assert all(set(pin) == _NDCI_PIN_KEYS for pin in body["pins"])
 
@@ -1176,7 +1179,8 @@ def test_anomaly_mode_409_when_the_blob_has_no_visible_bands(client, tmp_path, c
     assert fallback["mode"] == "ndci" and set(fallback) == _NDCI_RESPONSE_KEYS
     assert fallback["excluded_low_signal"] is None
     assert "low-signal screen could not run" in fallback["quality_note"]
-    assert fallback["disclaimer"] == DISCLAIMER_TEXT
+    # No anomaly here, but the TEST baseline is valid: the TEST text.
+    assert fallback["disclaimer"] == DISCLAIMER_TEXT_TEST_BASELINE
 
 
 def test_ndci_mode_counts_low_signal_exclusions_on_a_served_run(client, tmp_path, cell_root):
@@ -1234,7 +1238,9 @@ def test_one_baseline_resolution_per_request(client, tmp_path, cell_root, monkey
     client.get("/raster-scan/pixel", params={"lat": lat, "lng": lng, "run_id": run_id})
     assert calls == {"status": 2, "cells": 2}
     client.get("/raster-scan/highlights", params={"mode": "ndci"})
-    assert calls == {"status": 2, "cells": 2}, "mode=ndci never consults the baseline"
+    # mode=ndci resolves the status once, for its disclaimer only; it never
+    # loads a cell baseline.
+    assert calls == {"status": 3, "cells": 2}, "mode=ndci never loads a cell baseline"
 
 
 def test_anomaly_schema_refuses_a_tier_and_a_negative_level():

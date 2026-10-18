@@ -343,14 +343,12 @@ def test_each_cell_reports_its_own_date_not_the_rasters():
     )
 
 
-def test_a_non_finite_reading_is_returned_as_null_not_clamped_to_the_scale():
+def test_a_non_finite_secondary_reading_is_returned_as_null_not_clamped_to_the_scale():
     """An index is a ratio and a zero-reflectance pixel can produce inf or
     NaN. There is no honest number for "the arithmetic did not produce a
     number", and putting it at either end of the scale would invent a
     reading, so the band comes back null and is named."""
     cells = lattice()
-    cells["ndci"] = cells["ndci"].copy()
-    cells["ndci"][3] = np.nan
     cells["bda2"] = cells["bda2"].copy()
     cells["bda2"][3] = np.inf
     grid = overlay_grid(cells)
@@ -359,11 +357,39 @@ def test_a_non_finite_reading_is_returned_as_null_not_clamped_to_the_scale():
         cells, float(cells["lat"][3]), float(cells["lng"][3]), grid, TEST_POLYGON
     )
     assert found["state"] == pixel.STATE_READING
-    assert found["index_values"]["ndci"] is None
+    assert found["index_values"]["ndci"] == float(cells["ndci"][3])
     assert found["index_values"]["bda2"] is None
-    assert sorted(found["unreadable_bands"]) == ["bda2", "ndci"]
+    assert found["unreadable_bands"] == ["bda2"]
     # The bands that DID produce a number are still reported.
     assert found["index_values"]["bda3"] == float(cells["bda3"][3])
+
+
+def test_date_valid_non_finite_ndci_is_transparent_and_clicks_as_not_measured():
+    """The visible NDCI band decides whether the pixel was measured.
+
+    A stored date can survive malformed arithmetic.  The renderer leaves a
+    non-finite NDCI transparent, so lookup must not contradict that picture by
+    returning a reading merely because the date is valid.
+    """
+    cells = lattice()
+    cells["ndci"] = cells["ndci"].copy()
+    cells["ndci"][3] = np.nan
+    overlay = render.render_overlay(cells, band="ndci", scale_m=200, polygon=TEST_POLYGON)
+
+    row, col = overlay.grid.cell_indices(
+        np.asarray([cells["lat"][3]]), np.asarray([cells["lng"][3]])
+    )
+    assert int(overlay.rgba[row[0], col[0], 3]) == 0
+
+    found = pixel.inspect_cell(
+        cells,
+        float(cells["lat"][3]),
+        float(cells["lng"][3]),
+        overlay.grid,
+        TEST_POLYGON,
+    )
+    assert found["state"] == pixel.STATE_NOT_MEASURED
+    assert found["index_values"] is None
 
 
 # --------------------------------------------------------------------------
@@ -459,10 +485,6 @@ def test_every_pixel_of_the_overlay_reports_the_state_its_alpha_shows():
     grid = overlay.grid
     lats, lngs = grid.pixel_centres()
 
-    expected_for_alpha = {
-        render.VALUE_ALPHA: pixel.STATE_READING,
-        0: pixel.STATE_OUTSIDE,
-    }
     counts = {pixel.STATE_READING: 0, pixel.STATE_NOT_MEASURED: 0, pixel.STATE_OUTSIDE: 0}
     for row in range(grid.rows):
         for col in range(grid.cols):
@@ -470,7 +492,14 @@ def test_every_pixel_of_the_overlay_reports_the_state_its_alpha_shows():
             found = pixel.inspect_cell(
                 cells, float(lats[row]), float(lngs[col]), grid, TEST_POLYGON
             )
-            expected = expected_for_alpha.get(alpha, pixel.STATE_NOT_MEASURED)
+            inside = bool(render.points_in_polygon_mask(
+                np.float64(lats[row]), np.float64(lngs[col]), TEST_POLYGON
+            ))
+            expected = (
+                pixel.STATE_READING if alpha == render.VALUE_ALPHA
+                else pixel.STATE_NOT_MEASURED if inside
+                else pixel.STATE_OUTSIDE
+            )
             assert found["state"] == expected, (
                 f"pixel ({row}, {col}) is painted with alpha {alpha} "
                 f"({expected}) but the lookup called it {found['state']}"
@@ -480,6 +509,21 @@ def test_every_pixel_of_the_overlay_reports_the_state_its_alpha_shows():
     # All three states must actually occur, or the loop above proved
     # nothing about the two it never saw.
     assert all(counts[state] > 0 for state in counts), f"states not all exercised: {counts}"
+
+
+def test_a_transparent_gap_inside_the_polygon_still_reports_not_measured():
+    cells = lattice()
+    overlay = render.render_overlay(cells, band="ndci", scale_m=200, polygon=TEST_POLYGON)
+    grid = overlay.grid
+
+    located = grid.locate(UNMEASURED_LAT, UNMEASURED_LNG)
+    assert located is not None
+    row, col = located
+    assert tuple(overlay.rgba[row, col]) == render.OUTSIDE_RGBA
+
+    found = pixel.inspect_cell(cells, UNMEASURED_LAT, UNMEASURED_LNG, grid, TEST_POLYGON)
+    assert found["state"] == pixel.STATE_NOT_MEASURED
+    assert found["index_values"] is None
 
 
 def test_unmeasured_water_and_outside_the_study_area_are_different_answers():
@@ -525,10 +569,7 @@ def test_cloud_land_and_no_pass_are_one_state_and_are_not_guessed_apart():
         assert cause in lowered, f"the one no-data state must name {cause} as a possible cause"
 
 
-def test_a_reading_that_fell_outside_the_polygon_is_still_reported():
-    """A measurement is never erased for being marginally out of bounds --
-    the renderer draws it, so the lookup reports it. Order of decision: a
-    stored cell wins over the polygon test, exactly as the paint does."""
+def test_a_stored_reading_outside_the_polygon_is_not_reported():
     cells = lattice(lat_range=(12.9410, 12.9490), lng_range=(100.0050, 100.0150))
     grid = overlay_grid(cells)  # TEST_POLYGON's south edge is 12.95
 
@@ -540,8 +581,8 @@ def test_a_reading_that_fell_outside_the_polygon_is_still_reported():
     found = pixel.inspect_cell(
         cells, float(cells["lat"][0]), float(cells["lng"][0]), grid, TEST_POLYGON
     )
-    assert found["state"] == pixel.STATE_READING
-    assert found["index_values"]["ndci"] == float(cells["ndci"][0])
+    assert found["state"] == pixel.STATE_OUTSIDE
+    assert found["index_values"] is None
 
 
 # --------------------------------------------------------------------------

@@ -20,7 +20,7 @@ import { SUPPORTED } from '../i18n/index.js'
 export const VIEW_PARAMS = Object.freeze(['lat', 'lng', 'run', 'layer', 'zoom', 'pin', 'lang'])
 
 /** Raster layers the map can show (RasterLayerSwitcher modes). */
-export const LAYERS = Object.freeze(['ndci', 'light_map', 'true_color'])
+export const LAYERS = Object.freeze(['ndci', 'true_color'])
 
 export const ZOOM_MIN = 0
 export const ZOOM_MAX = 22

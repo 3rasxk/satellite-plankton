@@ -148,6 +148,15 @@ from .sentinel2 import (
 # different quantity.
 RASTER_INDEX_BANDS: tuple[str, str, str, str] = ("ndci", "bda2", "bda3", "b2_b3")
 
+# Display-only true-colour channels carried through the exact same masked
+# scene mosaic as the indices. Keeping distinct names avoids confusing raw
+# Sentinel-2 reflectance with an already-stretched RGB image.
+RASTER_TRUE_COLOR_BANDS: tuple[str, str, str] = (
+    "true_red",
+    "true_green",
+    "true_blue",
+)
+
 # Per-cell acquisition time of the scene that supplied that cell -- epoch
 # milliseconds UTC, exactly as Sentinel-2's `system:time_start` reports
 # it. Never derived, never rounded to a day, never backfilled from the
@@ -155,6 +164,16 @@ RASTER_INDEX_BANDS: tuple[str, str, str, str] = ("ndci", "bda2", "bda3", "b2_b3"
 RASTER_DATE_BAND = "date_ms"
 
 RASTER_BAND_ORDER: tuple[str, ...] = (*RASTER_INDEX_BANDS, RASTER_DATE_BAND)
+RASTER_STORED_BANDS: tuple[str, ...] = (
+    *RASTER_INDEX_BANDS,
+    *RASTER_TRUE_COLOR_BANDS,
+    RASTER_DATE_BAND,
+)
+
+# COPERNICUS/S2_SR_HARMONIZED starts here in the Earth Engine catalog.
+# Bootstrap paging never searches before the collection exists.
+SENTINEL2_SR_ARCHIVE_START_DATE = "2017-03-28"
+BOOTSTRAP_MAX_SCENE_AGE_DAYS = 14
 
 # GEE's own per-pixel coordinate bands, added at download time only (they
 # are not part of the composite). Taking the coordinates from the server's
@@ -247,6 +266,38 @@ def valid_cell_mask(date_ms: Any) -> np.ndarray:
     """
     dates = np.asarray(date_ms, dtype=np.float64)
     return np.isfinite(dates) & (dates > _MASKED_FILL)
+
+
+def iter_bootstrap_windows(
+    target_date: str,
+    archive_start_date: str = SENTINEL2_SR_ARCHIVE_START_DATE,
+    max_scene_age_days: int = BOOTSTRAP_MAX_SCENE_AGE_DAYS,
+):
+    """Yield finite, newest-first, non-overlapping archive search windows.
+
+    Each window uses the same inclusive age convention as
+    ``build_index_composite``: age 14 covers the target day and the 14
+    preceding days, while ``window_end`` is the next day's exclusive bound.
+    The following page ends immediately before the preceding page begins.
+    """
+    target = datetime.strptime(target_date, "%Y-%m-%d").date()
+    archive_start = datetime.strptime(archive_start_date, "%Y-%m-%d").date()
+    if target < archive_start:
+        return
+    cursor = target
+    while cursor >= archive_start:
+        window_start = max(
+            archive_start,
+            cursor - timedelta(days=max_scene_age_days),
+        )
+        effective_age = (cursor - window_start).days
+        yield {
+            "target_date": cursor.isoformat(),
+            "max_scene_age_days": effective_age,
+            "window_start": window_start.isoformat(),
+            "window_end": (cursor + timedelta(days=1)).isoformat(),
+        }
+        cursor = window_start - timedelta(days=1)
 
 
 class FabricatedDateError(RuntimeError):
@@ -360,10 +411,10 @@ def _index_bands(image: ee.Image, water_mask: ee.Image, cloud_classes: tuple) ->
     contribution once the read is coarsened. Masking first means those
     pixels never enter any arithmetic at all.
 
-    `date_ms` is `ee.Image.constant(system:time_start)` carrying this
-    scene's acquisition time across the whole scene, masked to exactly
-    the pixels the indices survived at (`ndci.mask()`), so a cell's date
-    and its readings can never come from different scenes.
+    The complete per-scene stack is masked to `ndci.mask()` before mosaic.
+    Earth Engine's normalizedDifference applies an extra mask when either
+    input is negative; sharing that final mask prevents a newer RGB value
+    from being mosaicked beside an older NDCI/date at the same pixel.
     """
     bands = (
         image.select(list(BANDS))
@@ -385,6 +436,9 @@ def _index_bands(image: ee.Image, water_mask: ee.Image, cloud_classes: tuple) ->
     bda2 = b5.divide(b4).rename("bda2")
     bda3 = one.divide(b4).subtract(one.divide(b5)).multiply(b6).rename("bda3")
     b2_b3 = b2.divide(b3).rename("b2_b3")
+    true_red = b4.rename(RASTER_TRUE_COLOR_BANDS[0])
+    true_green = b3.rename(RASTER_TRUE_COLOR_BANDS[1])
+    true_blue = b2.rename(RASTER_TRUE_COLOR_BANDS[2])
 
     date_ms = (
         ee.Image.constant(ee.Number(image.get("system:time_start")))
@@ -392,7 +446,16 @@ def _index_bands(image: ee.Image, water_mask: ee.Image, cloud_classes: tuple) ->
         .rename(RASTER_DATE_BAND)
         .updateMask(ndci.mask())
     )
-    return ndci.addBands(bda2).addBands(bda3).addBands(b2_b3).addBands(date_ms)
+    stack = (
+        ndci.addBands(bda2)
+        .addBands(bda3)
+        .addBands(b2_b3)
+        .addBands(true_red)
+        .addBands(true_green)
+        .addBands(true_blue)
+        .addBands(date_ms)
+    )
+    return stack.updateMask(ndci.mask())
 
 
 def build_index_composite(
@@ -498,7 +561,7 @@ def build_index_composite(
         "window_start": window_start,
         "window_end": window_end,
         "max_scene_age_days": max_scene_age_days,
-        "band_order": RASTER_BAND_ORDER,
+        "band_order": RASTER_STORED_BANDS,
     }
 
 
@@ -619,7 +682,7 @@ def download_composite_arrays(
         "lng": np.asarray(grid[LONGITUDE_BAND], dtype=np.float64)[valid],
         RASTER_DATE_BAND: dates,
     }
-    for band in RASTER_INDEX_BANDS:
+    for band in (*RASTER_INDEX_BANDS, *RASTER_TRUE_COLOR_BANDS):
         arrays[band] = np.asarray(grid[band], dtype=np.float32)[valid]
 
     arrays["scale_m"] = int(scale_m)

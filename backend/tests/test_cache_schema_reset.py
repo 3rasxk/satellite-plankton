@@ -87,14 +87,15 @@ def test_a_column_added_after_a_table_shipped_reaches_an_existing_database(tmp_p
 
     inspector = inspect(engine)
     columns = {column["name"] for column in inspector.get_columns("raster_scan_runs")}
-    assert {"overlay", "scene_dates", "trigger_scene_timestamp"} <= columns
+    assert {"overlay", "scene_dates", "trigger_scene_timestamp", "source_metadata"} <= columns
     with engine.connect() as connection:
         # The addition is not a reset: the row that was already there
         # survives, with the new column simply null.
         rows = connection.execute(text(
-            "SELECT id, overlay, scene_dates, trigger_scene_timestamp FROM raster_scan_runs"
+            "SELECT id, overlay, scene_dates, trigger_scene_timestamp, source_metadata "
+            "FROM raster_scan_runs"
         )).all()
-        assert rows == [(1, None, None, None)]
+        assert rows == [(1, None, None, None, None)]
 
     # Idempotent -- a second startup adds nothing and changes nothing.
     db.init_db()

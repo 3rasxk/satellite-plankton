@@ -399,7 +399,6 @@ export default {
     layer: {
       group: 'เลือกชั้นข้อมูลแผนที่',
       true_color: 'True Color',
-      light_map: 'Light Map',
       ndci: 'NDCI Raster',
       true_color_unavailable: 'ไม่มีภาพสีธรรมชาติที่ตรงกับรอบสแกน',
       true_color_unavailable_title: 'ข้อมูลชุดนี้ไม่มีภาพสีธรรมชาติที่ตรงกับรอบสแกน จึงไม่สามารถเปิด True Color ได้',
